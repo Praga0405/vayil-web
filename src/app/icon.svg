@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- House roof (lighter tan) -->
+  <path d="M50 8 L92 48 L8 48 Z" fill="#F5C17A"/>
+  <!-- House body (orange) -->
+  <path d="M14 48 L14 94 L86 94 L86 48 Z" fill="#E8943A"/>
+  <!-- Roof overlap on body top -->
+  <path d="M8 48 L92 48 L86 52 L14 52 Z" fill="#E8943A"/>
+  <!-- Large sparkle star -->
+  <path d="M67 62 L69.5 55 L72 62 L79 64.5 L72 67 L69.5 74 L67 67 L60 64.5 Z" fill="white" opacity="0.95"/>
+  <!-- Small sparkle star -->
+  <path d="M76 76 L77.2 72.5 L78.4 76 L82 77.2 L78.4 78.4 L77.2 82 L76 78.4 L72.4 77.2 Z" fill="white" opacity="0.95"/>
+</svg>
