@@ -142,22 +142,24 @@ const VENDOR_BENEFITS = [
 
 /* ─── Brand-correct SVG glyphs for the store badges ─── */
 function AppleLogo({ className = 'w-5 h-5' }: { className?: string }) {
+  // Compact, properly bounded apple logo (24x24 viewBox, art fits inside)
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className={className}>
-      <path d="M16.365 1.43c0 1.14-.452 2.234-1.214 3.022-.787.811-2.064 1.434-3.21 1.348-.135-1.099.42-2.232 1.158-2.985.81-.82 2.18-1.434 3.266-1.385zM20.5 17.345c-.585 1.349-.864 1.95-1.62 3.142-1.054 1.66-2.541 3.728-4.383 3.744-1.638.014-2.06-1.066-4.288-1.053-2.228.013-2.691 1.072-4.33 1.058C4.038 24.22 2.62 22.359 1.567 20.7.07 18.327-.27 15.532.74 13.59c.706-1.36 1.823-2.222 2.871-2.69 1.082-.482 1.815-.652 3.073-.652 1.247 0 2.052.34 3.075.78 1.025.44 1.745.78 3.077.78 1.314 0 2.116-.343 3.16-.79 1.05-.45 1.764-.78 3.005-.78 1.252 0 2.342.358 3.318 1.118-2.892 1.595-2.43 5.768.18 6.99z"/>
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+      className={className} preserveAspectRatio="xMidYMid meet">
+      <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
     </svg>
   )
 }
 
 function GooglePlayLogo({ className = 'w-5 h-5' }: { className?: string }) {
-  // 4-colour Google Play triangle
+  // 4-colour Google Play triangle, square viewBox
   return (
-    <svg viewBox="0 0 512 512" aria-hidden="true" className={className}>
-      <path d="M325.3 234.3 104.6 13l280.8 161.2-60.1 60.1z" fill="#32BBFF"/>
-      <path d="M104.6 13c-7.2 7.2-11.4 18.4-11.4 32.7v420.5c0 14.3 4.2 25.5 11.4 32.7L325.3 277.7l-220.7-264.7z" fill="#32BBFF"/>
-      <path d="M325.3 277.7 104.6 498.9c4.2 4.2 9.8 6.5 16.2 6.5 6 0 12.4-1.8 19.3-5.7l264.3-150.7-79.1-71.3z" fill="#FFB300"/>
-      <path d="M104.6 13c-4.2 4.2-7 9.5-8.7 15.7L325.3 234.3 404.4 163l-264.3-150.7c-6.9-3.9-13.3-5.7-19.3-5.7-6.4 0-12 2.3-16.2 6.4z" fill="#FF3333"/>
-      <path d="M463.5 218.4 404.4 163l-79.1 71.3 79.1 71.3 59.1-30.4c14.7-8.4 22.6-19.5 22.6-31.4s-7.9-23-22.6-31.4z" fill="#00E676"/>
+    <svg viewBox="0 0 24 24" aria-hidden="true"
+      className={className} preserveAspectRatio="xMidYMid meet">
+      <path d="M3.6 1.7C3.3 2 3.1 2.5 3.1 3.1V20.9C3.1 21.5 3.3 22 3.6 22.3L13.3 12.6 3.6 1.7z" fill="#32BBFF"/>
+      <path d="M16.6 9.3 4.5 1.6 4.4 1.5C4.2 1.4 4 1.4 3.9 1.4L13.3 12.6 16.6 9.3z" fill="#FF3333"/>
+      <path d="M16.6 15.3 13.3 12 3.9 22.6C4 22.6 4.2 22.6 4.4 22.5L4.5 22.4 16.6 15.3z" fill="#FFB300"/>
+      <path d="M20.4 11 16.6 9.3 13 12.6 16.6 15.3 20.4 13.1C21.1 12.7 21.4 12.4 21.4 12 21.4 11.7 21.1 11.3 20.4 11z" fill="#00E676"/>
     </svg>
   )
 }
@@ -170,16 +172,16 @@ function AppBadges({ dark = false }: { dark?: boolean }) {
   return (
     <div className="flex items-center gap-3">
       <a href="#" aria-label="Download on the App Store"
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${base} text-xs font-medium transition`}>
-        <AppleLogo className="w-5 h-5" />
+        className={`inline-flex items-center gap-2.5 px-3.5 py-2 rounded-lg ${base} text-xs font-medium transition`}>
+        <AppleLogo className="w-6 h-6 shrink-0" />
         <div className="leading-tight">
           <div className={`text-[9px] ${dark ? 'text-white/60' : 'text-gray-400'}`}>Download on the</div>
           <div className="font-semibold">App Store</div>
         </div>
       </a>
       <a href="#" aria-label="Get it on Google Play"
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${base} text-xs font-medium transition`}>
-        <GooglePlayLogo className="w-5 h-5" />
+        className={`inline-flex items-center gap-2.5 px-3.5 py-2 rounded-lg ${base} text-xs font-medium transition`}>
+        <GooglePlayLogo className="w-6 h-6 shrink-0" />
         <div className="leading-tight">
           <div className={`text-[9px] ${dark ? 'text-white/60' : 'text-gray-400'}`}>GET IT ON</div>
           <div className="font-semibold">Google Play</div>
