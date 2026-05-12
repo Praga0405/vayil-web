@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
@@ -22,10 +22,17 @@ export default function VendorStudioLayout({ children }: { children: React.React
   const pathname = usePathname()
   const router = useRouter()
   const { user, token } = useUserAuth()
-
+  const [hydrated, setHydrated] = useState(false)
   useEffect(() => {
+    setHydrated(true)
+    const unsub = useUserAuth.persist.onFinishHydration(() => setHydrated(true))
+    if (useUserAuth.persist.hasHydrated()) setHydrated(true)
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    if (!hydrated) return
     if (!token || !user) router.replace('/')
-  }, [token, user])
+  }, [hydrated, token, user])
 
   return (
     <div className="min-h-screen bg-gray-50">
