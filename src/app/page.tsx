@@ -1,14 +1,17 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import VayilLogo from '@/components/shared/VayilLogo'
 import LoginModal from '@/components/shared/LoginModal'
-import { Avatar } from '@/components/ui'
+import { Avatar, StatusBadge } from '@/components/ui'
+import { customerApi } from '@/lib/api/client'
+import { formatRelative } from '@/lib/utils'
 import {
   Search, ChevronDown, ArrowUpRight, Plus, LogOut,
   Youtube, Linkedin, Facebook, Instagram,
+  ClipboardList, Briefcase, ChevronRight, Star,
 } from 'lucide-react'
 
 /* ─── Data ─────────────────────────────────────────────────── */
@@ -206,6 +209,15 @@ export default function HomePage() {
   const { user, clearAuth } = useUserAuth()
   const [loginOpen, setLoginOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [recentEnquiries, setRecentEnquiries] = useState<any[]>([])
+
+  useEffect(() => {
+    if (!user) return
+    customerApi.getEnquiries().then(r => {
+      const d = r.data?.data || r.data?.result || []
+      setRecentEnquiries(Array.isArray(d) ? d.slice(0, 3) : [])
+    }).catch(() => {})
+  }, [user])
 
   // Search is public: anyone can browse results without logging in.
   const handleSearch = (e: React.FormEvent) => {
@@ -298,7 +310,8 @@ export default function HomePage() {
               </button>
               <div className="absolute right-0 top-full mt-2 w-44 bg-white rounded-2xl shadow-lg border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                 <div className="p-2">
-                  <Link href="/customer/dashboard" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Dashboard</Link>
+                  <Link href="/account/enquiries" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Enquiries</Link>
+                  <Link href="/account/projects" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Projects</Link>
                   <button onClick={() => { clearAuth(); router.push('/') }}
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-500 hover:bg-red-50">
                     <LogOut className="w-4 h-4" /> Logout
@@ -394,6 +407,73 @@ export default function HomePage() {
           <VayilLogo size={28} textSize="text-lg" />
         </div>
       </div>
+
+      {/* ── 5b. Personalized logged-in rail ── */}
+      {user && (
+        <section className="bg-orange/5 border-b border-orange/10 py-8 px-[46px]">
+          <div className="max-w-[1440px] mx-auto">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-bold text-navy">
+                  Welcome back, {user.name.split(' ')[0]}! 👋
+                </h2>
+                <p className="text-sm text-gray-500 mt-0.5">Pick up where you left off</p>
+              </div>
+              <Link href="/account/enquiries"
+                className="text-sm font-semibold text-orange hover:text-orange/80 flex items-center gap-1 transition">
+                View all <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
+
+            {recentEnquiries.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {recentEnquiries.map((e: any) => {
+                  const eid = e.id || e.enquiry_id
+                  const isProject = ['ONGOING','COMPLETED'].includes(e.status)
+                  return (
+                    <Link key={eid}
+                      href={isProject ? `/account/projects/${e.order_id || eid}` : `/account/enquiries/${eid}`}
+                      className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 hover:shadow-sm hover:border-orange/30 transition">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isProject ? 'bg-navy/10' : 'bg-orange/10'}`}>
+                        {isProject
+                          ? <Briefcase className="w-5 h-5 text-navy" />
+                          : <ClipboardList className="w-5 h-5 text-orange" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-navy text-sm truncate">
+                          {e.company_name || e.vendor_name || e.service_title || `Enquiry #${eid}`}
+                        </p>
+                        <p className="text-xs text-gray-400">{formatRelative(e.created_at)}</p>
+                      </div>
+                      <StatusBadge status={e.status} />
+                    </Link>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center">
+                <p className="text-sm text-gray-500">No recent activity.</p>
+                <Link href="/search" className="text-sm font-semibold text-orange hover:underline mt-1 inline-block">
+                  Browse services to get started →
+                </Link>
+              </div>
+            )}
+
+            {user.type === 'vendor' && (
+              <div className="mt-4 bg-navy rounded-2xl p-5 flex items-center justify-between text-white">
+                <div>
+                  <p className="font-bold">Vendor Studio</p>
+                  <p className="text-white/60 text-sm mt-0.5">Manage your listing, enquiries & earnings</p>
+                </div>
+                <Link href="/vendor-studio/listing"
+                  className="bg-white text-navy text-sm font-semibold px-4 py-2 rounded-xl hover:bg-orange hover:text-white transition">
+                  Open Studio →
+                </Link>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── 6. Quick Service Categories ── */}
       <section className="bg-[#F4F7FA] py-20 px-[46px]">
