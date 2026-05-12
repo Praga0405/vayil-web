@@ -15,8 +15,10 @@ export default function VendorLoginPage() {
   const [mobile,  setMobile]  = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Marketplace flow: already-authenticated vendors land on the public
+  // marketplace home — Vendor mode is a header toggle, not a portal.
   useEffect(() => {
-    if (token && user) router.replace('/vendor/dashboard')
+    if (token && user) router.replace('/')
   }, [token, user])
 
   const login = () => {
@@ -35,8 +37,8 @@ export default function VendorLoginPage() {
       if (typeof document !== 'undefined') {
         document.cookie = `vayil_token=dev_vendor_token_${mobile}; path=/; max-age=86400`
       }
-      toast.success('Logged in (dev mode)')
-      router.push('/vendor/dashboard')
+      toast.success(`Welcome back, ${authUser.name.split(' ')[0]}!`)
+      router.push('/')
       setLoading(false)
     }, 600)
   }

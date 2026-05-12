@@ -40,10 +40,15 @@ export default function VendorProfilePage() {
     )
   }
 
+  // Marketplace-first: logged-in users stay on this public vendor page.
+  // The page already re-renders with unlocked contact details and an
+  // active Send-Enquiry button once `user` is set, so there is nothing
+  // to redirect to. We just track which action they kicked off so the
+  // post-login state can resume it (placeholder for now).
   const requireLogin = (action: string) => {
     if (user) {
-      // Already logged in — go to the existing logged-in flow
-      router.push(`/customer/vendor/${vendor.id}`)
+      setPendingAction(action)
+      // TODO (M2/M3): open Send-Enquiry drawer / Book-Visit drawer here.
       return
     }
     setPendingAction(action)
@@ -384,13 +389,13 @@ export default function VendorProfilePage() {
         </div>
       )}
 
+      {/* Marketplace flow: stay on the public vendor profile after login.
+          The contact details + primary CTA naturally unlock because
+          `user` is now set. */}
       <LoginModal
         isOpen={loginOpen}
         onClose={() => { setLoginOpen(false); setPendingAction(null) }}
-        onSuccess={() => {
-          setLoginOpen(false)
-          router.push(`/customer/vendor/${vendor.id}`)
-        }}
+        onSuccess={() => setLoginOpen(false)}
       />
     </div>
   )

@@ -738,10 +738,12 @@ export default function HomePage() {
       </footer>
 
       {/* ── Login Modal ── */}
+      {/* Marketplace flow: on success we just close — the page re-renders
+          with the new auth state, no portal redirect. */}
       <LoginModal
         isOpen={loginOpen}
         onClose={() => setLoginOpen(false)}
-        onSuccess={() => router.push('/customer/dashboard')}
+        onSuccess={() => setLoginOpen(false)}
       />
     </div>
   )

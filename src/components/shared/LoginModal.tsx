@@ -22,6 +22,10 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
 
   if (!isOpen) return null
 
+  // Marketplace-first auth: a successful login NEVER redirects the user
+  // into a sidebar portal. The modal closes, a toast fires, and the page
+  // they were on simply re-renders with their new auth state.
+  // Optional `redirectTo` is still honoured for explicit deep links.
   const login = () => {
     if (mobile.length !== 10) { toast.error('Enter a valid 10-digit number'); return }
     setLoading(true)
@@ -30,17 +34,21 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
         const u = { id: 1, name: 'Demo Vendor', mobile, email: 'vendor@vayil.in', profile_image: '', type: 'vendor' as const }
         setAuth(u, 'dev_vendor_token_' + mobile)
         if (typeof document !== 'undefined') document.cookie = `vayil_token=dev_vendor_token_${mobile}; path=/; max-age=86400`
-        toast.success('Logged in as Vendor')
-        onClose()
-        router.push('/vendor/dashboard')
+        toast.success(`Welcome back, ${u.name.split(' ')[0]}!`)
       } else {
         const u = { id: 1, name: 'Demo Customer', mobile, email: 'demo@vayil.in', profile_image: '', city: 'Coimbatore', type: 'customer' as const }
         setAuth(u, 'dev_customer_token_' + mobile)
         if (typeof document !== 'undefined') document.cookie = `vayil_token=dev_customer_token_${mobile}; path=/; max-age=86400`
-        toast.success('Welcome to Vayil!')
-        onClose()
-        if (redirectTo) router.push(redirectTo)
-        else if (onSuccess) onSuccess()
+        toast.success(`Welcome to Vayil, ${u.name.split(' ')[0]}!`)
+      }
+
+      onClose()
+
+      // Only navigate if the caller explicitly asked us to.
+      if (redirectTo) {
+        router.push(redirectTo)
+      } else if (onSuccess) {
+        onSuccess()
       }
       setLoading(false)
     }, 600)
