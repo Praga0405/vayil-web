@@ -140,22 +140,46 @@ const VENDOR_BENEFITS = [
 ]
 
 
-/* ─── App Store Badges (text-based, no images) ──────────────── */
+/* ─── Brand-correct SVG glyphs for the store badges ─── */
+function AppleLogo({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M16.365 1.43c0 1.14-.452 2.234-1.214 3.022-.787.811-2.064 1.434-3.21 1.348-.135-1.099.42-2.232 1.158-2.985.81-.82 2.18-1.434 3.266-1.385zM20.5 17.345c-.585 1.349-.864 1.95-1.62 3.142-1.054 1.66-2.541 3.728-4.383 3.744-1.638.014-2.06-1.066-4.288-1.053-2.228.013-2.691 1.072-4.33 1.058C4.038 24.22 2.62 22.359 1.567 20.7.07 18.327-.27 15.532.74 13.59c.706-1.36 1.823-2.222 2.871-2.69 1.082-.482 1.815-.652 3.073-.652 1.247 0 2.052.34 3.075.78 1.025.44 1.745.78 3.077.78 1.314 0 2.116-.343 3.16-.79 1.05-.45 1.764-.78 3.005-.78 1.252 0 2.342.358 3.318 1.118-2.892 1.595-2.43 5.768.18 6.99z"/>
+    </svg>
+  )
+}
+
+function GooglePlayLogo({ className = 'w-5 h-5' }: { className?: string }) {
+  // 4-colour Google Play triangle
+  return (
+    <svg viewBox="0 0 512 512" aria-hidden="true" className={className}>
+      <path d="M325.3 234.3 104.6 13l280.8 161.2-60.1 60.1z" fill="#32BBFF"/>
+      <path d="M104.6 13c-7.2 7.2-11.4 18.4-11.4 32.7v420.5c0 14.3 4.2 25.5 11.4 32.7L325.3 277.7l-220.7-264.7z" fill="#32BBFF"/>
+      <path d="M325.3 277.7 104.6 498.9c4.2 4.2 9.8 6.5 16.2 6.5 6 0 12.4-1.8 19.3-5.7l264.3-150.7-79.1-71.3z" fill="#FFB300"/>
+      <path d="M104.6 13c-4.2 4.2-7 9.5-8.7 15.7L325.3 234.3 404.4 163l-264.3-150.7c-6.9-3.9-13.3-5.7-19.3-5.7-6.4 0-12 2.3-16.2 6.4z" fill="#FF3333"/>
+      <path d="M463.5 218.4 404.4 163l-79.1 71.3 79.1 71.3 59.1-30.4c14.7-8.4 22.6-19.5 22.6-31.4s-7.9-23-22.6-31.4z" fill="#00E676"/>
+    </svg>
+  )
+}
+
+/* ─── App Store Badges (dark-friendly outline pill style) ─── */
 function AppBadges({ dark = false }: { dark?: boolean }) {
   const base = dark
-    ? 'border border-white/30 text-white'
-    : 'border border-gray-300 text-navy'
+    ? 'border border-white/30 text-white hover:bg-white/10'
+    : 'border border-gray-300 text-navy hover:bg-gray-50'
   return (
     <div className="flex items-center gap-3">
-      <a href="#" className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${base} text-xs font-medium`}>
-        <span className="text-base">🍎</span>
+      <a href="#" aria-label="Download on the App Store"
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${base} text-xs font-medium transition`}>
+        <AppleLogo className="w-5 h-5" />
         <div className="leading-tight">
           <div className={`text-[9px] ${dark ? 'text-white/60' : 'text-gray-400'}`}>Download on the</div>
           <div className="font-semibold">App Store</div>
         </div>
       </a>
-      <a href="#" className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${base} text-xs font-medium`}>
-        <span className="text-base">▶</span>
+      <a href="#" aria-label="Get it on Google Play"
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${base} text-xs font-medium transition`}>
+        <GooglePlayLogo className="w-5 h-5" />
         <div className="leading-tight">
           <div className={`text-[9px] ${dark ? 'text-white/60' : 'text-gray-400'}`}>GET IT ON</div>
           <div className="font-semibold">Google Play</div>
