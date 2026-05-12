@@ -5,9 +5,9 @@ const BASE_CUSTOMER = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/customer`
   : 'https://app.vayil.in/customer'
 
-const BASE_VENDOR = process.env.NEXT_PUBLIC_API_URL
-  ? `${process.env.NEXT_PUBLIC_API_URL}/vendor`
-  : 'https://app.vayil.in/vendor'
+// PRD §9 (P0-03): vendor endpoints are root-level on the backend
+// (/vendorInfo, /createPlan, /vendorEnuqiryList…). Mount at root, not /vendor.
+const BASE_VENDOR = process.env.NEXT_PUBLIC_API_URL || 'https://app.vayil.in'
 
 const BASE_COMMON = process.env.NEXT_PUBLIC_API_URL
   || 'https://app.vayil.in'
@@ -60,6 +60,8 @@ export const customerApi = {
   verifyOTP:  (mobile: string, otp: string) => commonClient.post('/customer/verifyCustomerOTP', { mobile_number: mobile, otp }),
   loginOTP:   (mobile: string)             => commonClient.post('/customer/logincustomerWithOTP', { mobile_number: mobile }),
   verifyLogin:(mobile: string, otp: string) => commonClient.post('/customer/verifyLogincustomerOTP', { mobile_number: mobile, otp }),
+  // PRD §9: backend exposes resendcustomerOTP for resending.
+  resendOTP:  (mobile: string)             => commonClient.post('/customer/resendcustomerOTP', { mobile_number: mobile }),
 
   // Profile
   saveProfile: (data: Record<string, unknown>) => customerClient.post('/saveCustomerInfo', data),
@@ -73,7 +75,8 @@ export const customerApi = {
   getSubcategories: (catId?: number) => commonClient.get('/service-subcategories', { params: { category_id: catId } }),
   getServices:      (params?: Record<string, unknown>) => customerClient.post('/ServiceList', params ?? {}),
   getServiceInfo:   (service_id: number) => customerClient.post('/ServiceInfo', { service_id }),
-  getVendorInfo:    (vendor_id: number)  => customerClient.post('/vendorInfomation', { vendor_id }),
+  // PRD §9 (P0-04): backend exposes /vendorInfo, not /vendorInfomation (typo).
+  getVendorInfo:    (vendor_id: number)  => customerClient.post('/vendorInfo', { vendor_id }),
 
   // Cart
   addToCart:     (data: Record<string, unknown>) => customerClient.post('/addToCart', data),
@@ -88,8 +91,9 @@ export const customerApi = {
   getQuote:       (enquiry_id: number)            => customerClient.post('/QuotationList', { enquiry_id }),
   updateQuote:    (data: Record<string, unknown>) => customerClient.post('/updateQuotation', data),
 
-  // Plan
-  getPlan:        (enquiry_id: number) => customerClient.post('/getPlan', { enquiry_id }),
+  // Plan — PRD §9: mobile/backend use order_id in some flows. Accept either.
+  getPlan:        (id: number, by: 'enquiry_id' | 'order_id' = 'enquiry_id') =>
+                    customerClient.post('/getPlan', { [by]: id }),
   updatePlan:     (data: Record<string, unknown>) => customerClient.post('/CustomerupdatePlan', data),
 
   // Order
@@ -122,13 +126,22 @@ export const vendorApi = {
   verifyOTP:  (mobile: string, otp: string) => commonClient.post('/verifyVendorOTP', { mobile_number: mobile, otp }),
   loginOTP:   (mobile: string)             => commonClient.post('/vendor-login-otp', { mobile_number: mobile }),
   verifyLogin:(mobile: string, otp: string) => commonClient.post('/vendor-login-verify-otp', { mobile_number: mobile, otp }),
+  resendOTP:  (mobile: string)             => commonClient.post('/resendVendorOTP', { mobile_number: mobile }),
 
   // Onboarding steps
   saveStep1:        (data: Record<string, unknown>) => vendorClient.post('/step1', data),
   saveServiceTags:  (data: Record<string, unknown>) => vendorClient.post('/serviceTagStep', data),
   saveStep2:        (data: Record<string, unknown>) => vendorClient.post('/step2', data),
   saveStep3:        (data: Record<string, unknown>) => vendorClient.post('/step3', data),
-  submitKYC:        (data: Record<string, unknown>) => vendorClient.post('/step4', data),
+  // PRD §9 (P0-09): KYC v2 expects id_type/id_number/id_image_url/selfie_url/consent.
+  // Old payload (proof_type_id/document_url) still accepted by current backend; we
+  // normalise here so new screens can pass the mobile-parity shape.
+  submitKYC:        (data: Record<string, unknown>) => {
+    const payload: Record<string, unknown> = { ...data }
+    if (data.id_type        && !payload.proof_type_id) payload.proof_type_id = data.id_type
+    if (data.id_image_url   && !payload.document_url)  payload.document_url  = data.id_image_url
+    return vendorClient.post('/step4', payload)
+  },
 
   // Profile
   getProfile: () => vendorClient.get('/vendorInfo'),
@@ -138,7 +151,16 @@ export const vendorApi = {
   saveServiceListing:   (data: Record<string, unknown>) => vendorClient.post('/saveServiceListing', data),
   updateServiceListing: (data: Record<string, unknown>) => vendorClient.post('/updateServiceListing', data),
   getMyServices:        ()                              => vendorClient.get('/getVendorServiceList'),
-  updateServiceStatus:  (data: Record<string, unknown>) => vendorClient.post('/ServiceStatusUpdate', data),
+  // PRD §9 (P0-11): backend prefers { id, is_active }. Accept legacy
+  // { service_id, status } and translate.
+  updateServiceStatus:  (data: Record<string, unknown>) => {
+    const payload: Record<string, unknown> = { ...data }
+    if (data.service_id && !payload.id) payload.id = data.service_id
+    if (typeof data.status === 'string' && payload.is_active === undefined) {
+      payload.is_active = data.status === 'active' ? 1 : 0
+    }
+    return vendorClient.post('/ServiceStatusUpdate', payload)
+  },
   getServiceDetail:     (data: Record<string, unknown>) => vendorClient.post('/ServiceDetails', data),
   addServiceTag:        (data: Record<string, unknown>) => vendorClient.post('/VendorAddServiceTag', data),
 
@@ -206,3 +228,28 @@ export const commonApi = {
   listProofTypes:   () => commonClient.post('/listProofTypes', {}),
   listStatuses:     () => commonClient.get('/listStatus'),
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * PRD §9 (P0-10): the upload endpoint returns `{ uploadedUrls: { files: [...] } }`,
+ * but older code expected `data: [...]` or `files: [...]`. Pass any upload
+ * response through this helper to get a flat string[] of URLs.
+ */
+export function normalizeUploadedUrls(res: any): string[] {
+  const d = res?.data ?? res ?? {}
+  const candidates =
+    d.uploadedUrls?.files ??
+    d.data?.uploadedUrls?.files ??
+    d.files ??
+    d.data ??
+    d.result ??
+    []
+  if (!Array.isArray(candidates)) return []
+  return candidates
+    .map((f: any) => (typeof f === 'string' ? f : f?.url || f?.location || f?.file_url))
+    .filter(Boolean)
+}
+

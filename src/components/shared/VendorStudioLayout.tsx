@@ -5,15 +5,17 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import PublicHeader from './PublicHeader'
 import {
-  Wrench, CreditCard, ShieldCheck, ClipboardList, LayoutGrid,
+  Wrench, CreditCard, ShieldCheck, ClipboardList, LayoutGrid, LayoutDashboard, Briefcase,
 } from 'lucide-react'
 
 const NAV = [
-  { href: '/vendor-studio/listing',  icon: Wrench,       label: 'My Listing'  },
-  { href: '/account/enquiries',       icon: ClipboardList, label: 'Enquiries'   },
-  { href: '/vendor-studio/earnings', icon: CreditCard,   label: 'Earnings'    },
-  { href: '/vendor-studio/setup',    icon: ShieldCheck,  label: 'KYC & Bank'  },
-  { href: '/search',                  icon: LayoutGrid,   label: 'Marketplace' },
+  { href: '/vendor-studio/dashboard',  icon: LayoutDashboard, label: 'Dashboard'   },
+  { href: '/vendor-studio/enquiries',  icon: ClipboardList,   label: 'Enquiries'   },
+  { href: '/vendor-studio/jobs',       icon: Briefcase,       label: 'Jobs'        },
+  { href: '/vendor-studio/listing',    icon: Wrench,          label: 'My Listing'  },
+  { href: '/vendor-studio/earnings',   icon: CreditCard,      label: 'Earnings'    },
+  { href: '/vendor-studio/setup',      icon: ShieldCheck,     label: 'KYC & Bank'  },
+  { href: '/search',                   icon: LayoutGrid,      label: 'Marketplace' },
 ]
 
 export default function VendorStudioLayout({ children }: { children: React.ReactNode }) {

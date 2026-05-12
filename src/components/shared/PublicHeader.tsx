@@ -9,7 +9,7 @@ import { Avatar } from '@/components/ui'
 import {
   Search, ChevronDown, LogOut, Plus, MapPin,
   ClipboardList, Briefcase, Bell, CreditCard, User,
-  Wrench, LayoutGrid, ChevronRight,
+  Wrench, LayoutGrid, ChevronRight, ShoppingBag,
 } from 'lucide-react'
 
 interface Props { defaultQuery?: string }
@@ -128,6 +128,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
                     </>
                   ) : (
                     <>
+                      <DropItem href="/bucket"                     icon={ShoppingBag}   label="My Bucket" />
                       <DropItem href="/account/enquiries"          icon={ClipboardList} label="My Enquiries" />
                       <DropItem href="/account/projects"           icon={Briefcase}     label="My Projects" />
                       <DropItem href="/account/notifications"      icon={Bell}          label="Notifications" />
