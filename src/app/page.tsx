@@ -52,16 +52,20 @@ const QUICK_LINKS = [
     tag: 'MAINTENANCE',
     title: 'Pest Control',
     desc: 'Termites, mosquitos & rodent protection for a safer home.',
+    img: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=358&h=376&fit=crop',
   },
   {
     tag: 'APPLIANCES',
     title: 'AC & Appliance Repair',
     desc: 'Get ACs, fridges, washing machines & more repaired quickly.',
+    img: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=358&h=376&fit=crop',
+    dark: true,
   },
   {
-    tag: 'PROTECTIVE',
+    tag: 'RENOVATION',
     title: 'Painting & Waterproofing',
     desc: 'Refresh your home with expert painting & monsoon-proofing.',
+    img: 'https://images.unsplash.com/photo-1562259949-e8e7689d7828?w=358&h=376&fit=crop',
   },
 ]
 
@@ -70,21 +74,32 @@ const PROVIDERS = [
     role: 'Plumber',
     name: 'Sophia Clark',
     projects: '200+ Projects',
-    desc: 'Are you facing plumbing issues? Whether it\'s a leaky faucet or a clogged drain, our expert plumbers are here to help. We provide fast and reliable service to ensure your plumbing is in top shape.',
+    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&h=80&fit=crop&crop=face',
+    desc: "Are you facing plumbing issues? Whether it's a leaky faucet or a clogged drain, our expert plumbers are here to help. We provide fast and reliable service to ensure your plumbing is in top shape.",
   },
   {
     role: 'Construction engineer',
     name: 'Sophia Clark',
     projects: '200+ Projects',
-    desc: 'Are you facing plumbing issues? Whether it\'s a leaky faucet or a clogged drain, our expert plumbers are here to help. We provide fast and reliable service to ensure your plumbing is in top shape.',
+    avatar: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=80&h=80&fit=crop&crop=face',
+    desc: "Are you facing plumbing issues? Whether it's a leaky faucet or a clogged drain, our expert plumbers are here to help. We provide fast and reliable service to ensure your plumbing is in top shape.",
   },
   {
     role: 'Interior Design',
     name: 'Sophia Clark',
     projects: '200+ Projects',
-    desc: 'Are you facing plumbing issues? Whether it\'s a leaky faucet or a clogged drain, our expert plumbers are here to help. We provide fast and reliable service to ensure your plumbing is in top shape.',
+    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=80&h=80&fit=crop&crop=face',
+    desc: "Are you facing plumbing issues? Whether it's a leaky faucet or a clogged drain, our expert plumbers are here to help. We provide fast and reliable service to ensure your plumbing is in top shape.",
   },
 ]
+
+const BLOGS = [
+  { tag: 'COMMUNITY', title: 'Blogs From Community', date: 'APRIL 12, 2025', img: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=604&h=376&fit=crop' },
+  { tag: 'HOME TIPS', title: 'How to Maximize Space in a Small Apartment', date: 'APRIL 12, 2025', img: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=604&h=376&fit=crop' },
+  { tag: 'SEASONAL', title: 'The Ultimate Seasonal Maintenance Checklist.', date: 'APRIL 12, 2025', img: 'https://images.unsplash.com/photo-1558002038-1055907df827?w=604&h=376&fit=crop' },
+  { tag: 'LIFESTYLE', title: 'Feeling at Home, Away from Home', date: 'APRIL 12, 2025', img: 'https://images.unsplash.com/photo-1484101403633-562f891dc89a?w=604&h=376&fit=crop' },
+]
+
 
 const CUSTOMER_BENEFITS = [
   {
@@ -124,12 +139,6 @@ const VENDOR_BENEFITS = [
   },
 ]
 
-const BLOGS = [
-  { tag: 'Blogs From community', title: 'Blogs From community', date: 'APRIL 12, 2025' },
-  { tag: 'HOME TIPS', title: 'How to Maximize Space in a Small Apartment', date: 'APRIL 12, 2025' },
-  { tag: 'SEASONAL', title: 'The Ultimate Seasonal Maintenance Checklist.', date: 'APRIL 12, 2025' },
-  { tag: 'LIFESTYLE', title: 'Feeling at Home, Away from Home', date: 'APRIL 12, 2025' },
-]
 
 /* ─── App Store Badges (text-based, no images) ──────────────── */
 function AppBadges({ dark = false }: { dark?: boolean }) {
@@ -275,38 +284,56 @@ export default function HomePage() {
       </div>
 
       {/* ── 4. Hero banner ── */}
-      <section className="bg-[#F4F7FA] py-20 px-[46px]">
-        <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-8">
+      <section className="bg-[#183954] py-20 px-[46px] rounded-b-[30px] relative overflow-hidden">
+        {/* Background image — right side */}
+        <div className="absolute inset-0 left-[480px]">
+          <img
+            src="https://images.unsplash.com/photo-1484154218962-a197022b5858?w=1200&h=800&fit=crop"
+            alt="Home interior"
+            className="w-full h-full object-cover opacity-40"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#183954] via-[#183954]/60 to-transparent" />
+        </div>
+
+        <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-8 relative z-10">
           {/* Left text */}
           <div className="max-w-[394px]">
-            <h1 className="text-[48px] font-bold text-navy leading-tight mb-6">
+            <h1 className="text-[50px] font-bold text-white leading-tight mb-4">
               Get Your Home To-Do List Done. Today.
             </h1>
-            <p className="text-navy/70 text-sm mb-8 leading-relaxed">
+            <p className="text-white/70 text-sm mb-8 leading-relaxed">
               Connect with top-rated, background-checked professionals for everything from leaky faucets to full home renovations
             </p>
-            <AppBadges />
+            <AppBadges dark />
           </div>
 
-          {/* Right — review card (no image) */}
-          <div className="hidden lg:block bg-white rounded-2xl shadow-lg p-6 max-w-[438px] w-full">
-            <p className="text-navy text-sm leading-relaxed mb-4 italic">
+          {/* Right — review card */}
+          <div className="hidden lg:block bg-[#f7f4ee] border-2 border-white rounded-[20px] p-6 w-[438px] shrink-0">
+            <p className="text-[#0d141c] text-base leading-relaxed mb-4">
               "Absolutely thrilled with the service! The vendor was incredibly helpful and went above and beyond to ensure my needs were met. Highly recommend!"
             </p>
+            <div className="flex items-center gap-1 mb-4">
+              {[...Array(5)].map((_, i) => (
+                <svg key={i} className="w-4 h-4 fill-orange text-orange" viewBox="0 0 20 20">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+              ))}
+            </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-orange/20 flex items-center justify-center text-orange font-bold text-sm">SC</div>
+                <img
+                  src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&h=80&fit=crop&crop=face"
+                  alt="Sophia Clark"
+                  className="w-10 h-10 rounded-full object-cover"
+                />
                 <div>
-                  <p className="font-semibold text-navy text-sm">Sophia Clark</p>
-                  <p className="text-xs text-gray-400">1 week ago</p>
+                  <p className="font-semibold text-[#0d141c] text-base">Sophia Clark</p>
+                  <p className="text-sm text-[#4d7399]">1 week ago</p>
                 </div>
               </div>
-              <div className="flex items-center gap-1">
-                {[...Array(5)].map((_, i) => (
-                  <svg key={i} className="w-4 h-4 fill-orange text-orange" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                ))}
+              <div className="flex items-center gap-3">
+                <button className="w-9 h-9 rounded-full bg-[#183954] flex items-center justify-center text-white text-lg">‹</button>
+                <button className="w-9 h-9 rounded-full bg-[#183954] flex items-center justify-center text-white text-lg">›</button>
               </div>
             </div>
           </div>
@@ -370,23 +397,29 @@ export default function HomePage() {
         <div className="max-w-[1440px] mx-auto px-[46px]">
           {/* 3 quick link cards */}
           <div className="grid grid-cols-3 gap-5 py-10">
-            {QUICK_LINKS.map(({ tag, title, desc }) => (
+            {QUICK_LINKS.map(({ tag, title, desc, img, dark }) => (
               <div key={title}
-                className="bg-[#FAF7F2] rounded-2xl p-6 flex gap-4 hover:shadow-md transition-shadow cursor-pointer"
+                className={`rounded-2xl overflow-hidden flex hover:shadow-md transition-shadow cursor-pointer ${dark ? 'bg-[#183954]' : 'bg-[#FAF7F2]'}`}
                 onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}>
-                <div className="w-[62px] h-[51px] rounded-xl bg-orange/10 flex items-center justify-center text-2xl shrink-0">🔧</div>
-                <div className="flex-1">
-                  <p className="text-[10px] font-bold text-orange tracking-widest uppercase mb-1">{tag}</p>
-                  <h3 className="font-bold text-navy text-base mb-1">{title}</h3>
-                  <p className="text-xs text-navy/60 leading-relaxed">{desc}</p>
+                <img src={img} alt={title} className="w-[140px] h-[160px] object-cover shrink-0" />
+                <div className="flex-1 p-5 flex flex-col justify-center">
+                  <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${dark ? 'text-orange' : 'text-orange'}`}>{tag}</p>
+                  <h3 className={`font-bold text-base mb-1 ${dark ? 'text-white' : 'text-navy'}`}>{title}</h3>
+                  <p className={`text-xs leading-relaxed ${dark ? 'text-white/60' : 'text-navy/60'}`}>{desc}</p>
                 </div>
               </div>
             ))}
           </div>
 
           {/* Promo banner */}
-          <div className="bg-[#183954] rounded-2xl p-10 mb-10 relative overflow-hidden">
-            <div className="relative z-10 max-w-[500px]">
+          <div className="rounded-2xl mb-10 relative overflow-hidden min-h-[200px]">
+            <img
+              src="https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=1200&h=400&fit=crop"
+              alt="Deep cleaning"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-[#183954]/80" />
+            <div className="relative z-10 p-10 max-w-[500px]">
               <h2 className="text-3xl font-bold text-white mb-3">Deep Cleaning – Starting ₹999</h2>
               <p className="text-white/70 text-sm mb-6">
                 Connect with us to learn how we can improve your home presence with our expertise and experience with thousands of verified home expert.
@@ -396,8 +429,6 @@ export default function HomePage() {
                 Book MAX Well Agency
               </button>
             </div>
-            {/* Decorative house shape */}
-            <div className="absolute right-12 top-1/2 -translate-y-1/2 opacity-10 text-white text-[200px] leading-none select-none">⌂</div>
           </div>
         </div>
       </section>
@@ -407,7 +438,7 @@ export default function HomePage() {
         <div className="max-w-[1440px] mx-auto">
           <h2 className="text-[48px] font-bold text-navy mb-12">Verified Service Provider Profiles</h2>
           <div className="grid grid-cols-3 gap-6 mb-10">
-            {PROVIDERS.map(({ role, name, projects, desc }) => (
+            {PROVIDERS.map(({ role, name, projects, desc, avatar }) => (
               <div key={role} className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -417,7 +448,7 @@ export default function HomePage() {
                 {/* Body */}
                 <div className="p-6">
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-orange/20 flex items-center justify-center text-orange font-bold text-sm shrink-0">SC</div>
+                    <img src={avatar} alt={name} className="w-10 h-10 rounded-full object-cover shrink-0" />
                     <div>
                       <p className="font-semibold text-navy text-sm">{name}</p>
                       <p className="text-xs text-orange font-medium">{projects}</p>
@@ -496,9 +527,13 @@ export default function HomePage() {
             </div>
             <div className="mt-8"><AppBadges /></div>
           </div>
-          {/* Right — placeholder for image */}
-          <div className="hidden lg:flex w-[626px] h-[504px] rounded-2xl bg-orange/10 items-center justify-center shrink-0">
-            <span className="text-6xl">😊</span>
+          {/* Right — real image */}
+          <div className="hidden lg:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
+            <img
+              src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=626&h=504&fit=crop"
+              alt="Happy homeowner"
+              className="w-full h-full object-cover"
+            />
           </div>
         </div>
       </section>
@@ -506,9 +541,13 @@ export default function HomePage() {
       {/* ── 11. Vendor Value ── */}
       <section className="bg-[#F4F7FA] py-20 px-[46px]">
         <div className="max-w-[1440px] mx-auto flex gap-16 items-center">
-          {/* Left — placeholder for image */}
-          <div className="hidden lg:flex w-[626px] h-[504px] rounded-2xl bg-navy/10 items-center justify-center shrink-0">
-            <span className="text-6xl">👷</span>
+          {/* Left — real image */}
+          <div className="hidden lg:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
+            <img
+              src="https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=626&h=504&fit=crop"
+              alt="Professional vendor at work"
+              className="w-full h-full object-cover"
+            />
           </div>
           {/* Right content */}
           <div className="flex-1">
@@ -544,9 +583,13 @@ export default function HomePage() {
               Sign Up
             </button>
           </div>
-          {/* Placeholder for image */}
-          <div className="hidden lg:flex w-[604px] h-[256px] rounded-2xl bg-white/5 items-center justify-center shrink-0">
-            <span className="text-5xl opacity-30">🏗️</span>
+          {/* CTA image */}
+          <div className="hidden lg:block w-[604px] h-[256px] rounded-2xl overflow-hidden shrink-0">
+            <img
+              src="https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=604&h=256&fit=crop"
+              alt="Professionals growing their business"
+              className="w-full h-full object-cover opacity-80"
+            />
           </div>
         </div>
       </section>
@@ -556,11 +599,11 @@ export default function HomePage() {
         <div className="max-w-[1440px] mx-auto">
           <h2 className="text-[38px] font-bold text-navy mb-10">Blogs From community</h2>
           <div className="grid grid-cols-4 gap-6 mb-10">
-            {BLOGS.map(({ tag, title, date }) => (
+            {BLOGS.map(({ tag, title, date, img }) => (
               <div key={title} className="rounded-2xl overflow-hidden border border-gray-100 hover:shadow-md transition-shadow cursor-pointer">
-                {/* Image placeholder */}
-                <div className="h-[188px] bg-gradient-to-br from-navy/10 to-orange/10 flex items-center justify-center">
-                  <span className="text-4xl opacity-40">📰</span>
+                {/* Blog image */}
+                <div className="h-[188px] overflow-hidden">
+                  <img src={img} alt={title} className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" />
                 </div>
                 <div className="p-5">
                   <p className="text-[10px] font-bold text-orange tracking-widest uppercase mb-2">{tag}</p>
