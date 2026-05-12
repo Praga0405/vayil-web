@@ -30,6 +30,22 @@ Update statuses inline as each lands.
 - [ ] Verify `/health` returns `{status:"ok"}`.
 - [ ] Add Render daily MySQL backup.
 
+## Backend gaps to fill (web is already wired)
+
+These vendor flows have UI but the new backend doesn't yet expose the
+corresponding endpoint. Web calls fall back to offline-mode toasts. Once
+backend lands them, remove the offline branch in each spot.
+
+- [ ] `POST /vendor/enquiries/:id/accept` and `/reject` (currently local-only)
+- [ ] `POST /vendor/orders/:id/plan` + `PUT … /plan/:planId/status` (plan builder
+  submit is offline-mode; UI is ready)
+- [ ] Materials CRUD (`/vendor/orders/:id/materials`, GET/POST/PUT/DELETE)
+- [ ] `POST /vendor/orders/:id/payment-requests` (ask-payment screen)
+- [ ] `POST /vendor/payouts` (payout request screen)
+- [ ] `POST /vendor/onboarding/step1..3` + `/service-tags` (currently fallback)
+- [ ] `GET  /customer/quotes/:enquiryId` (payment sheet still uses a hard-coded total)
+- [ ] Escrow ledger + signature-verified `paymentUpdate`
+
 ## Frontend (vayil-web repo)
 
 - [ ] Set `NEXT_PUBLIC_API_URL` on Vercel to the Render URL (per environment:

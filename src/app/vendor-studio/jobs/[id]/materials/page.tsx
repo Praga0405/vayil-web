@@ -1,8 +1,9 @@
 'use client'
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getMockJob, type MockMaterial } from '@/lib/mockData'
-import { Button, Input, StatusBadge } from '@/components/ui'
+import { useLiveJob } from '@/hooks/useVendorStudio'
+import { type MockMaterial } from '@/lib/mockData'
+import { Button, Input, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -12,13 +13,18 @@ type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'
 export default function MaterialsManagerPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const job = getMockJob(Number(id))
+  const { data: job, loading } = useLiveJob(id)
 
-  const [items, setItems] = useState<Draft[]>(
-    (job?.materials || []).map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status }))
-  )
+  const [items, setItems] = useState<Draft[]>([])
+  React.useEffect(() => {
+    if (job?.materials && items.length === 0) {
+      setItems(job.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status })))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id])
 
-  if (!job) return <div className="text-center py-20 text-gray-500">Job not found</div>
+  if (loading) return <PageLoader />
+  if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
 
   const update = (i: number, k: keyof Draft, v: any) => setItems(items.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
   const add = () => setItems([...items, { name: '', quantity: 1, unit: 'pc', rate: 0, status: 'UNPAID' }])

@@ -1,20 +1,23 @@
 'use client'
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button, Input } from '@/components/ui'
+import { Button, Input, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Wallet, ArrowUpRight } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useLiveEarnings } from '@/hooks/useVendorStudio'
 
 export default function PayoutRequestPage() {
   const router = useRouter()
-  // mocked balance
-  const available = 84500
+  const { data: earnings, loading } = useLiveEarnings()
+  const available = earnings.wallet_balance
   const minPayout = 500
   const feePct = 0.5  // 0.5% platform fee on payout
 
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  if (loading) return <PageLoader />
 
   const n = Number(amount) || 0
   const fee = (n * feePct) / 100

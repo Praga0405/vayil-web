@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import Link from 'next/link'
 import { useUserAuth } from '@/stores/auth'
 import { StatusBadge } from '@/components/ui'
-import { mockEnquiries, mockJobs } from '@/lib/mockData'
+import { useLiveEnquiries, useLiveJobs } from '@/hooks/useVendorStudio'
 import { formatCurrency, formatRelative } from '@/lib/utils'
 import { ClipboardList, Briefcase, Wallet, TrendingUp, ChevronRight, AlertCircle, Power } from 'lucide-react'
 
@@ -11,11 +11,13 @@ export default function VendorDashboardPage() {
   const { user } = useUserAuth()
   const [accepting, setAccepting] = useState(true)
 
-  const newEnquiries = mockEnquiries.filter(e => e.status === 'NEW').slice(0, 3)
-  const ongoing      = mockJobs
+  const enquiriesState = useLiveEnquiries()
+  const jobsState      = useLiveJobs()
+  const newEnquiries   = enquiriesState.data.filter(e => e.status === 'NEW').slice(0, 3)
+  const ongoing        = jobsState.data
 
-  const totalEarnings = mockJobs.reduce((s, j) => s + j.paid, 0)
-  const pending       = mockJobs.reduce((s, j) => s + j.pending, 0)
+  const totalEarnings = ongoing.reduce((s, j) => s + j.paid, 0)
+  const pending       = ongoing.reduce((s, j) => s + j.pending, 0)
 
   return (
     <div className="space-y-5 pb-10">

@@ -218,6 +218,21 @@ export const vendorApi = {
 
   // Reviews
   getReviews: (data: Record<string, unknown>) => commonClient.post('/vendorlistReviews', data),
+
+  // ── RESTful endpoints (new backend: vayil-web-backend) ────────
+  // Use these in new screens. Legacy methods above kept for back-compat
+  // until every consumer is migrated.
+  getDashboard:     ()                     => vendorClient.get('/vendor/dashboard'),
+  listEnquiries:    ()                     => vendorClient.get('/vendor/enquiries'),
+  getEnquiryDetail: (id: string | number)  => vendorClient.get(`/vendor/enquiries/${id}`),
+  postQuote:        (id: string | number, data: Record<string, unknown>) =>
+                                              vendorClient.post(`/vendor/enquiries/${id}/quotes`, data),
+  listProjects:     ()                     => vendorClient.get('/vendor/projects'),
+  getProjectDetail: (id: string | number)  => vendorClient.get(`/vendor/projects/${id}`),
+  postKYC:          (data: Record<string, unknown>) => vendorClient.post('/vendor/kyc', data),
+  getEarnings:      ()                     => vendorClient.get('/vendor/earnings'),
+  listListings:     ()                     => vendorClient.get('/vendor/listings'),
+  postListing:      (data: Record<string, unknown>) => vendorClient.post('/vendor/listings', data),
 }
 
 // ═══════════════════════════════════════════════════════════════

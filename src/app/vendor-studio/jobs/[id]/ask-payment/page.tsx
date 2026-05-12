@@ -1,8 +1,8 @@
 'use client'
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getMockJob } from '@/lib/mockData'
-import { Button, StatusBadge } from '@/components/ui'
+import { useLiveJob } from '@/hooks/useVendorStudio'
+import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -12,10 +12,11 @@ type Selection = { type: 'milestone' | 'material'; id: number; title: string; am
 export default function AskPaymentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const job = getMockJob(Number(id))
+  const { data: job, loading } = useLiveJob(id)
   const [selected, setSelected] = useState<Selection[]>([])
 
-  if (!job) return <div className="text-center py-20 text-gray-500">Job not found</div>
+  if (loading) return <PageLoader />
+  if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
 
   const eligibleMilestones = job.milestones.filter(m => m.status === 'IN_PROGRESS' || m.status === 'PENDING')
   const eligibleMaterials  = job.materials.filter(m => m.status === 'UNPAID')

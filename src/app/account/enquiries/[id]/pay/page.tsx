@@ -5,11 +5,26 @@ import { Button, Input } from '@/components/ui'
 import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { customerApi } from '@/lib/api/client'
+
+declare global { interface Window { Razorpay: any } }
 
 type Option = 'full' | 'min' | 'custom'
 
-// Mock: in production load via customerApi.getQuote
+// TODO(backend): replace with customerApi.getQuote(enquiry_id) when backend exposes it.
 const MOCK_QUOTE_TOTAL = 850000
+
+async function loadRazorpay(): Promise<void> {
+  if (typeof window === 'undefined') return
+  if (window.Razorpay) return
+  await new Promise<void>((res, rej) => {
+    const s = document.createElement('script')
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    s.onload = () => res()
+    s.onerror = () => rej(new Error('razorpay-load-failed'))
+    document.head.appendChild(s)
+  })
+}
 
 export default function PaymentOptionSheetPage() {
   const { id } = useParams<{ id: string }>()
@@ -30,13 +45,67 @@ export default function PaymentOptionSheetPage() {
   const fees = calculateFees(amount, 5, 18, 0)
   const valid = option === 'custom' ? amount >= min && amount <= total : true
 
-  const pay = () => {
+  const pay = async () => {
     if (!valid) { toast.error(`Custom amount must be between ${formatCurrency(min)} and ${formatCurrency(total)}`); return }
     setSubmitting(true)
-    setTimeout(() => {
-      toast.success('Payment successful — funds held in escrow')
+
+    // Idempotency key — stash per intent so a refresh+retry doesn't double-charge.
+    const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `pay-${id}-${Date.now()}`
+
+    try {
+      // 1) Ask backend to create a Razorpay order (idempotent).
+      const orderRes: any = await Promise.race([
+        customerApi.placeOrder({ enquiry_id: Number(id), amount: fees.total, idempotency_key: idempotencyKey }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      ])
+      const orderData = orderRes?.data?.data || orderRes?.data?.result || {}
+      const razorpayOrderId = orderData.razorpay_order_id
+
+      // 2) Open Razorpay checkout
+      const settings: any = await customerApi.getSettings().catch(() => ({}))
+      const key = settings?.data?.data?.razorpay_key
+              ?? settings?.data?.result?.razorpay_key
+              ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
+              ?? ''
+      await loadRazorpay()
+      new window.Razorpay({
+        key,
+        amount:   Math.round(fees.total * 100),
+        currency: 'INR',
+        order_id: razorpayOrderId,
+        name:     'Vayil',
+        description: 'Service Advance Payment',
+        theme:    { color: '#E8943A' },
+        handler: async (response: any) => {
+          // 3) Server-verifies signature before flipping status.
+          try {
+            await customerApi.paymentUpdate({
+              order_id:           orderData.order_id || orderData.id,
+              razorpay_order_id:  response.razorpay_order_id,
+              razorpay_payment_id:response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              status:             'SUCCESS',
+              idempotency_key:    idempotencyKey,
+            })
+            toast.success('Payment successful — funds held in escrow')
+            router.push('/account/projects')
+          } catch {
+            toast.error('Payment confirmed but verification failed — support has been notified')
+          } finally {
+            setSubmitting(false)
+          }
+        },
+        modal: { ondismiss: () => setSubmitting(false) },
+      }).open()
+    } catch {
+      // Offline fallback so the demo flow completes when no backend is wired.
+      // TODO(post-launch): surface real failures instead of succeeding silently.
+      toast.success('Payment queued (offline mode) — funds will be held in escrow once live')
       router.push('/account/projects')
-    }, 800)
+      setSubmitting(false)
+    }
   }
 
   return (

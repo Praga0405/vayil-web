@@ -1,6 +1,14 @@
-// Mock data used by the new PRD-parity screens while the backend is being wired.
-// Each helper mirrors the eventual backend payload so swapping to real APIs is
-// a one-line change inside the screen, not a structural rewrite.
+// ⚠ Mock data — DO NOT import directly from production screens.
+// Production screens read through hooks in src/hooks/useVendorStudio.ts and
+// src/hooks/useLiveVendor.ts which switch between live data and these mocks
+// based on:
+//   - NEXT_PUBLIC_USE_MOCK_DATA=true (explicit override)
+//   - !NEXT_PUBLIC_API_URL          (no backend configured)
+//   - any API failure / timeout     (graceful degradation)
+//
+// This file is the canonical demo / story data; treat it as the API
+// contract until the backend exposes equivalent endpoints. When backend
+// support lands, update the matching adapter, not this file.
 
 export interface MockMilestone {
   id: number

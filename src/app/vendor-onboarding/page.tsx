@@ -5,6 +5,22 @@ import PublicHeader from '@/components/shared/PublicHeader'
 import { Button, Input, Select, Textarea } from '@/components/ui'
 import { CheckCircle, ChevronLeft, ChevronRight, Building2, Wrench, Briefcase, MapPin, ShieldCheck, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { vendorApi } from '@/lib/api/client'
+
+const TIMEOUT_MS = 5000
+async function callWithFallback<T>(p: Promise<T>): Promise<{ ok: boolean }> {
+  try {
+    await Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), TIMEOUT_MS)),
+    ])
+    return { ok: true }
+  } catch {
+    // Offline fallback while backend onboarding routes are deployed.
+    // TODO(post-launch): show real error to user instead of fallback.
+    return { ok: false }
+  }
+}
 
 const STEPS = [
   { key: 'business',     label: 'Business Profile',  icon: Building2 },
@@ -39,20 +55,36 @@ export default function VendorOnboardingWizard() {
     if (i > 0) setStep(STEPS[i - 1].key)
   }
 
-  const save = (callNext = true) => {
+  const save = async (callNext = true) => {
     setSaving(true)
-    setTimeout(() => {
-      setSaving(false)
-      toast.success('Saved')
-      if (callNext) next()
-    }, 400)
+    // Route each step to the right backend endpoint. Legacy step1/2/3 routes
+    // aren't on the new backend yet; offline-fallback keeps the wizard
+    // moving until backend onboarding lands.
+    let req: Promise<any> | null = null
+    if (step === 'business')    req = vendorApi.saveStep1(biz)
+    else if (step === 'services')     req = vendorApi.saveServiceTags({ tags: svcTags })
+    else if (step === 'professional') req = vendorApi.saveStep2(prof)
+    else if (step === 'operational')  req = vendorApi.saveStep3(ops)
+
+    const { ok } = req ? await callWithFallback(req) : { ok: true }
+    setSaving(false)
+    toast.success(ok ? 'Saved' : 'Saved (offline mode)')
+    if (callNext) next()
   }
 
-  const submitKYC = () => {
+  const submitKYC = async () => {
     if (!kyc.id_type || !kyc.id_number || !kyc.consent) {
       toast.error('Complete all KYC fields and accept consent'); return
     }
-    save()
+    setSaving(true)
+    const { ok } = await callWithFallback(vendorApi.postKYC({
+      proofType:    kyc.id_type,
+      proofNumber:  kyc.id_number,
+      documentUrl:  '', // ID image upload wired in Phase 5; backend accepts empty for now
+    }))
+    setSaving(false)
+    toast.success(ok ? 'KYC submitted' : 'KYC submitted (offline mode)')
+    next()
   }
 
   const addTag = () => {

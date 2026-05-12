@@ -1,8 +1,9 @@
 'use client'
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getMockJob, type MockMilestone } from '@/lib/mockData'
-import { Button, Input } from '@/components/ui'
+import { useLiveJob } from '@/hooks/useVendorStudio'
+import { type MockMilestone } from '@/lib/mockData'
+import { Button, Input, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -12,13 +13,18 @@ type Draft = Pick<MockMilestone, 'title' | 'days' | 'percentage'> & { mandatory:
 export default function PlanBuilderPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const job = getMockJob(Number(id))
+  const { data: job, loading } = useLiveJob(id)
 
-  const [drafts, setDrafts] = useState<Draft[]>(
-    (job?.milestones || []).map(m => ({ title: m.title, days: m.days, percentage: m.percentage, mandatory: m.mandatory }))
-  )
+  const [drafts, setDrafts] = useState<Draft[]>([])
+  React.useEffect(() => {
+    if (job?.milestones && drafts.length === 0) {
+      setDrafts(job.milestones.map(m => ({ title: m.title, days: m.days, percentage: m.percentage, mandatory: m.mandatory })))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id])
 
-  if (!job) return <div className="text-center py-20 text-gray-500">Job not found</div>
+  if (loading) return <PageLoader />
+  if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
 
   const totalPct = drafts.reduce((s, m) => s + (Number(m.percentage) || 0), 0)
   const canSubmit = totalPct === 100 && drafts.every(m => m.title.trim() && m.days > 0)

@@ -1,37 +1,18 @@
 'use client'
-import React, { useEffect, useState } from 'react'
-import { vendorApi } from '@/lib/api/client'
-import { PageLoader, Amount } from '@/components/ui'
+import React from 'react'
+import { PageLoader } from '@/components/ui'
 import { formatCurrency, formatRelative } from '@/lib/utils'
 import { TrendingUp, Wallet, Clock, ArrowUpRight } from 'lucide-react'
+import { useLiveEarnings } from '@/hooks/useVendorStudio'
 
 export default function VendorStudioEarningsPage() {
-  const [balance, setBalance] = useState<any>(null)
-  const [txns,    setTxns]    = useState<any[]>([])
-  const [chart,   setChart]   = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    Promise.allSettled([
-      vendorApi.getBalance(),
-      vendorApi.getCurrentMonth({}),
-      vendorApi.getRevenueChart(),
-    ]).then(([br, tr, cr]) => {
-      if (br.status === 'fulfilled') setBalance(br.value.data?.data || br.value.data?.result || {})
-      if (tr.status === 'fulfilled') {
-        const d = tr.value.data?.data || tr.value.data?.result || []
-        setTxns(Array.isArray(d) ? d : [])
-      }
-      if (cr.status === 'fulfilled') {
-        const d = cr.value.data?.data || cr.value.data?.result || []
-        setChart(Array.isArray(d) ? d : [])
-      }
-    }).finally(() => setLoading(false))
-  }, [])
-
+  const { data: earnings, loading } = useLiveEarnings()
   if (loading) return <PageLoader />
 
-  const maxChart = Math.max(...chart.map((c: any) => c.amount || c.revenue || 0), 1)
+  const balance = { wallet_balance: earnings.wallet_balance, pending_payout: earnings.pending_payout, total_earnings: earnings.total_earnings }
+  const txns    = earnings.transactions
+  const chart: { month?: string; amount?: number }[] = []
+  const maxChart = 1
 
   return (
     <div className="space-y-5 pb-10">

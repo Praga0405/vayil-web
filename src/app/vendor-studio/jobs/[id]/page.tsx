@@ -2,17 +2,18 @@
 import React from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { getMockJob } from '@/lib/mockData'
-import { Button, StatusBadge } from '@/components/ui'
+import { useLiveJob } from '@/hooks/useVendorStudio'
+import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, FileText, Package, Wallet, ChevronRight } from 'lucide-react'
 
 export default function VendorJobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const job = getMockJob(Number(id))
+  const { data: job, loading } = useLiveJob(id)
 
-  if (!job) return <div className="text-center py-20 text-gray-500">Job not found</div>
+  if (loading) return <PageLoader />
+  if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
 
   const progress = Math.round((job.paid / job.total) * 100)
   const unpaidMilestones = job.milestones.filter(m => m.status === 'PENDING' || m.status === 'IN_PROGRESS')

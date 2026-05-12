@@ -1,8 +1,8 @@
 'use client'
 import React, { useState } from 'react'
 import Link from 'next/link'
-import { mockEnquiries } from '@/lib/mockData'
-import { StatusBadge, EmptyState } from '@/components/ui'
+import { useLiveEnquiries } from '@/hooks/useVendorStudio'
+import { StatusBadge, EmptyState, PageLoader } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight } from 'lucide-react'
 
@@ -10,7 +10,8 @@ type Tab = 'NEW' | 'ACCEPTED' | 'QUOTED' | 'COMPLETED'
 
 export default function VendorEnquiriesListPage() {
   const [tab, setTab] = useState<Tab>('NEW')
-  const filtered = mockEnquiries.filter(e => e.status === tab)
+  const { data: enquiries, loading } = useLiveEnquiries()
+  const filtered = enquiries.filter(e => e.status === tab)
 
   return (
     <div className="space-y-5 pb-10">
@@ -30,7 +31,7 @@ export default function VendorEnquiriesListPage() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? <PageLoader /> : filtered.length === 0 ? (
         <EmptyState icon={ClipboardList} title={`No ${tab.toLowerCase()} enquiries`}
           description={tab === 'NEW' ? 'New customer requests will land here.' : 'Nothing in this state yet.'} />
       ) : (

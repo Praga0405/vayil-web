@@ -1,8 +1,8 @@
 'use client'
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getMockEnquiry } from '@/lib/mockData'
-import { Button, StatusBadge } from '@/components/ui'
+import { useLiveEnquiry } from '@/hooks/useVendorStudio'
+import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, XCircle, FileText, Phone, MapPin, Calendar, Home, Ruler } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -10,12 +10,14 @@ import toast from 'react-hot-toast'
 export default function VendorEnquiryDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const enquiry = getMockEnquiry(Number(id))
+  const { data: enquiry, loading } = useLiveEnquiry(id)
   const [localStatus, setLocalStatus] = useState<string>(enquiry?.status || 'NEW')
 
-  if (!enquiry) {
-    return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
-  }
+  // Sync localStatus when the enquiry first loads (live or fallback).
+  React.useEffect(() => { if (enquiry?.status) setLocalStatus(enquiry.status) }, [enquiry?.status])
+
+  if (loading)   return <PageLoader />
+  if (!enquiry)  return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
 
   const accept = () => { setLocalStatus('ACCEPTED'); toast.success('Enquiry accepted — customer notified') }
   const reject = () => { setLocalStatus('REJECTED'); toast.success('Enquiry rejected') }
