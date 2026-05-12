@@ -10,34 +10,44 @@ interface Props {
 export function VayilIcon({ size = 32 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none">
-      {/* Soft rounded house body */}
+      <defs>
+        <linearGradient id="vayilBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#F0A852" />
+          <stop offset="100%" stopColor="#E8943A" />
+        </linearGradient>
+        <linearGradient id="vayilRoofSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#FDEBC0" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#F5C87A" stopOpacity="0.4" />
+        </linearGradient>
+      </defs>
+
+      {/* Rounded house body */}
+      <rect x="8" y="54" width="104" height="58" rx="16" ry="16" fill="url(#vayilBodyGrad)" />
+
+      {/* Roof — triangle with soft curved peak */}
       <path
-        d="M60 10 L106 52 Q112 58 112 66 L112 100 Q112 112 100 112 L20 112 Q8 112 8 100 L8 66 Q8 58 14 52 Z"
-        fill="#E8943A"
+        d="M60 9 C62 9 64 10 65.5 11.5 L109 53 Q111 55 109 57 L11 57 Q9 55 11 53 L54.5 11.5 C56 10 58 9 60 9 Z"
+        fill="url(#vayilBodyGrad)"
       />
-      {/* Roof highlight — lighter tan overlay on top triangle */}
+
+      {/* Roof sheen overlay */}
       <path
-        d="M60 10 L106 52 Q83 42 60 38 Q37 42 14 52 Z"
-        fill="#F5C87A"
-        opacity="0.75"
+        d="M60 9 C62 9 64 10 65.5 11.5 L100 47 Q80 39 60 37 Q40 39 20 47 L54.5 11.5 C56 10 58 9 60 9 Z"
+        fill="url(#vayilRoofSheen)"
       />
-      {/* Subtle inner highlight on roof peak */}
+
+      {/* Large 4-point sparkle */}
       <path
-        d="M60 10 L84 38 Q72 35 60 34 Q48 35 36 38 Z"
-        fill="#FDEBC0"
-        opacity="0.5"
-      />
-      {/* Large sparkle (4-point star) */}
-      <path
-        d="M76 67 L78.5 60 L81 67 L88 69.5 L81 72 L78.5 79 L76 72 L69 69.5 Z"
+        d="M76 66 L78.5 59 L81 66 L88 68.5 L81 71 L78.5 78 L76 71 L69 68.5 Z"
         fill="white"
         opacity="0.95"
       />
+
       {/* Small sparkle */}
       <path
-        d="M83 81 L84.5 76.5 L86 81 L90.5 82.5 L86 84 L84.5 88.5 L83 84 L78.5 82.5 Z"
+        d="M83 80 L84.2 76.5 L85.5 80 L89.5 81.2 L85.5 82.5 L84.2 86 L83 82.5 L79 81.2 Z"
         fill="white"
-        opacity="0.9"
+        opacity="0.85"
       />
     </svg>
   )
