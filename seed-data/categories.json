@@ -1,0 +1,74 @@
+[
+  {
+    "slug": "carpentry",
+    "label": "Carpentry",
+    "icon": "🪚",
+    "hero_image": "https://images.unsplash.com/photo-1601058268499-e52658b8bb88?w=1200&h=400&fit=crop",
+    "description": "From bespoke furniture to custom built-ins, our verified carpenters bring decades of woodworking craftsmanship to your home.",
+    "short_desc": "Custom furniture, modular wardrobes, repairs & restorations",
+    "starting_price": 499
+  },
+  {
+    "slug": "electrical",
+    "label": "Electrical",
+    "icon": "⚡",
+    "hero_image": "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=1200&h=400&fit=crop",
+    "description": "Licensed electricians for safe installations, repairs, smart-home wiring and emergency call-outs.",
+    "short_desc": "Wiring, switches, fans, lights, MCB, smart home",
+    "starting_price": 299
+  },
+  {
+    "slug": "plumbing",
+    "label": "Plumbing",
+    "icon": "🚿",
+    "hero_image": "https://images.unsplash.com/photo-1607472586893-edb57bdc0e39?w=1200&h=400&fit=crop",
+    "description": "Leaks, blocked drains, bathroom fittings & full plumbing overhauls — handled by certified pros.",
+    "short_desc": "Leak repair, tap & drain fixes, bathroom fittings",
+    "starting_price": 349
+  },
+  {
+    "slug": "painting",
+    "label": "Painting",
+    "icon": "🎨",
+    "hero_image": "https://images.unsplash.com/photo-1562259949-e8e7689d7828?w=1200&h=400&fit=crop",
+    "description": "Interior & exterior painting using premium emulsions — including texture, waterproofing and wallpaper.",
+    "short_desc": "Interior, exterior, texture, waterproofing",
+    "starting_price": 18
+  },
+  {
+    "slug": "home-renovation",
+    "label": "Home Renovation",
+    "icon": "🏗️",
+    "hero_image": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=1200&h=400&fit=crop",
+    "description": "End-to-end home makeovers — design, demolition, civil, electrical, plumbing and finishing.",
+    "short_desc": "Full home, kitchen & bathroom renovation",
+    "starting_price": 49999
+  },
+  {
+    "slug": "cleaning",
+    "label": "Cleaning",
+    "icon": "🧹",
+    "hero_image": "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=1200&h=400&fit=crop",
+    "description": "Deep cleaning, sofa shampoo, kitchen degreasing and move-in/move-out specialists.",
+    "short_desc": "Deep cleaning, sofa, kitchen, move-in/out",
+    "starting_price": 999
+  },
+  {
+    "slug": "interior-design",
+    "label": "Interior Design",
+    "icon": "🛋️",
+    "hero_image": "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200&h=400&fit=crop",
+    "description": "Award-winning interior designers crafting modern, minimalist and luxury spaces tailored to your taste.",
+    "short_desc": "Modular kitchens, wardrobes, full home styling",
+    "starting_price": 5999
+  },
+  {
+    "slug": "home-repair",
+    "label": "Home Repair",
+    "icon": "🔧",
+    "hero_image": "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=1200&h=400&fit=crop",
+    "description": "Drilling, mounting, drywall, hinge fixes, door alignment and the everything-else handyman fixes.",
+    "short_desc": "TV mounting, drilling, hinges, doors, handyman",
+    "starting_price": 199
+  }
+]
