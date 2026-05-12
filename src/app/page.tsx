@@ -181,12 +181,31 @@ export default function HomePage() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [search, setSearch] = useState('')
 
+  // Search is public: anyone can browse results without logging in.
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!search.trim()) return
-    if (!user) { setLoginOpen(true); return }
-    router.push(`/customer/marketplace?q=${encodeURIComponent(search)}`)
+    router.push(`/search?q=${encodeURIComponent(search.trim())}`)
   }
+
+  // Maps the human-readable POPULAR / CATEGORIES labels to the canonical
+  // service slug used by the search page + dummy data.
+  const slugFor = (label: string): string => {
+    const map: Record<string, string> = {
+      'Home Repair': 'home-repair',
+      'Cleaning': 'cleaning',
+      'Electrical': 'electrical',
+      'Electricals': 'electrical',
+      'Plumbing': 'plumbing',
+      'Painting': 'painting',
+      'AC Repair': 'electrical',
+      'Home Renovation': 'home-renovation',
+      'Interior Design': 'interior-design',
+      'Carpentry': 'carpentry',
+    }
+    return map[label] || label.toLowerCase().replace(/\s+/g, '-')
+  }
+  const goToCategory = (label: string) =>
+    router.push(`/search?category=${slugFor(label)}`)
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -275,7 +294,7 @@ export default function HomePage() {
         <div className="max-w-[1440px] mx-auto px-[46px] h-[44px] flex items-center gap-6 text-sm">
           <span className="font-bold text-navy tracking-wide uppercase text-xs">Popular Services:</span>
           {POPULAR.map((s, i) => (
-            <button key={s} onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}
+            <button key={s} onClick={() => goToCategory(s)}
               className="text-navy hover:text-orange font-medium transition">
               {s}
             </button>
@@ -358,7 +377,7 @@ export default function HomePage() {
             {CATEGORIES.map(({ label, desc, featured }) => (
               <button
                 key={label}
-                onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}
+                onClick={() => goToCategory(label)}
                 className={`text-left p-8 rounded-2xl transition-all hover:scale-[1.01] ${
                   featured
                     ? 'bg-[#183954] text-white'
@@ -384,7 +403,7 @@ export default function HomePage() {
             ))}
           </div>
           <div className="flex justify-center">
-            <button onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}
+            <button onClick={() => router.push('/search')}
               className="bg-orange text-white px-8 py-3 rounded-lg font-semibold text-sm hover:bg-orange-600 transition">
               View Directory of Services
             </button>
@@ -400,7 +419,7 @@ export default function HomePage() {
             {QUICK_LINKS.map(({ tag, title, desc, img, dark }) => (
               <div key={title}
                 className={`rounded-2xl overflow-hidden flex hover:shadow-md transition-shadow cursor-pointer ${dark ? 'bg-[#183954]' : 'bg-[#FAF7F2]'}`}
-                onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}>
+                onClick={() => goToCategory(title)}>
                 <img src={img} alt={title} className="w-[140px] h-[160px] object-cover shrink-0" />
                 <div className="flex-1 p-5 flex flex-col justify-center">
                   <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${dark ? 'text-orange' : 'text-orange'}`}>{tag}</p>
@@ -424,7 +443,7 @@ export default function HomePage() {
               <p className="text-white/70 text-sm mb-6">
                 Connect with us to learn how we can improve your home presence with our expertise and experience with thousands of verified home expert.
               </p>
-              <button onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}
+              <button onClick={() => router.push('/search?category=cleaning')}
                 className="bg-orange text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition">
                 Book MAX Well Agency
               </button>
@@ -466,7 +485,7 @@ export default function HomePage() {
               <span className="text-sm text-navy font-medium">01 <span className="text-gray-300">/</span> 05</span>
               <button className="w-11 h-11 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition text-navy">›</button>
             </div>
-            <button onClick={() => !user ? setLoginOpen(true) : router.push('/customer/marketplace')}
+            <button onClick={() => router.push('/search')}
               className="bg-orange text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition">
               Browse All Services
             </button>
