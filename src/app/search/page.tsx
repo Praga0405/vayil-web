@@ -110,43 +110,36 @@ function SearchInner() {
     <div className="min-h-screen bg-[#F4F7FA]">
       <PublicHeader defaultQuery={queryParam} />
 
-      {/* ── Hero / context banner ── */}
-      {activeCategory ? (
-        <div className="relative overflow-hidden">
-          <div className="h-[200px] w-full relative">
-            <img src={activeCategory.hero_image} alt={activeCategory.label}
-              className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#183954]/95 via-[#183954]/75 to-[#183954]/40" />
+      {/* ── Compact title bar (results appear right below) ── */}
+      <div className="bg-white border-b border-gray-100">
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-4">
+          <div className="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+            <Link href="/" className="hover:text-orange">Home</Link>
+            <ChevronRight className="w-3 h-3" />
+            <Link href="/search" className="hover:text-orange">All Services</Link>
+            {activeCategory && (
+              <>
+                <ChevronRight className="w-3 h-3" />
+                <span className="text-navy">{activeCategory.label}</span>
+              </>
+            )}
           </div>
-          <div className="absolute inset-0 flex items-center">
-            <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] w-full">
-              <div className="text-xs text-white/70 flex items-center gap-1.5 mb-2">
-                <Link href="/" className="hover:text-white">Home</Link>
-                <ChevronRight className="w-3 h-3" />
-                <Link href="/search" className="hover:text-white">All Services</Link>
-                <ChevronRight className="w-3 h-3" />
-                <span className="text-white">{activeCategory.label}</span>
-              </div>
-              <h1 className="text-3xl lg:text-[40px] font-bold text-white mb-2">{activeCategory.label} Services</h1>
-              <p className="text-white/80 text-sm max-w-xl">{activeCategory.description}</p>
+          <div className="flex items-end justify-between gap-4 flex-wrap">
+            <div>
+              <h1 className="text-xl lg:text-2xl font-bold text-navy leading-tight">
+                {activeCategory
+                  ? `${activeCategory.label} Services`
+                  : queryParam
+                    ? <>Results for "<span className="text-orange">{queryParam}</span>"</>
+                    : 'All Services'}
+              </h1>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {results.length} verified professionals in Coimbatore
+              </p>
             </div>
           </div>
         </div>
-      ) : (
-        <div className="bg-white border-b border-gray-100">
-          <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-6">
-            <div className="text-xs text-gray-500 flex items-center gap-1.5 mb-1.5">
-              <Link href="/" className="hover:text-orange">Home</Link>
-              <ChevronRight className="w-3 h-3" />
-              <span className="text-navy">Search</span>
-            </div>
-            <h1 className="text-2xl lg:text-3xl font-bold text-navy">
-              {queryParam ? <>Results for "<span className="text-orange">{queryParam}</span>"</> : 'All Services'}
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">{results.length} verified professionals in Coimbatore</p>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* ── Main body ── */}
       <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-6 flex gap-6">
