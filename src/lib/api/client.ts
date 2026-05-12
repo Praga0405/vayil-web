@@ -78,6 +78,12 @@ export const customerApi = {
   // PRD §9 (P0-04): backend exposes /vendorInfo, not /vendorInfomation (typo).
   getVendorInfo:    (vendor_id: number)  => customerClient.post('/vendorInfo', { vendor_id }),
 
+  // RESTful marketplace endpoints — what the new backend (vayil-web-backend)
+  // actually exposes. Use these for new screens.
+  listVendors:      ()                  => customerClient.get('/vendors'),
+  getVendorDetail:  (vendor_id: string | number) => customerClient.get(`/vendors/${vendor_id}`),
+  createEnquiry:    (data: Record<string, unknown>) => customerClient.post('/enquiries', data),
+
   // Cart
   addToCart:     (data: Record<string, unknown>) => customerClient.post('/addToCart', data),
   getCart:       ()                              => customerClient.post('/getCart', {}),

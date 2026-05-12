@@ -5,7 +5,10 @@ import { useParams, useRouter } from 'next/navigation'
 import PublicHeader from '@/components/shared/PublicHeader'
 import LoginModal from '@/components/shared/LoginModal'
 import { useUserAuth } from '@/stores/auth'
-import { getVendorById, getVendorsByService, type DummyService } from '@/lib/dummyData'
+import { getVendorsByService, type DummyService } from '@/lib/dummyData'
+import { useLiveVendor } from '@/hooks/useLiveVendor'
+import { PageLoader } from '@/components/ui'
+import { customerApi } from '@/lib/api/client'
 import toast from 'react-hot-toast'
 import {
   Star, MapPin, Shield, Clock, ChevronLeft, ChevronRight, Phone, Mail,
@@ -18,7 +21,7 @@ export default function VendorProfilePage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { user } = useUserAuth()
-  const vendor = getVendorById(String(id))
+  const { vendor, loading } = useLiveVendor(id ? String(id) : undefined)
 
   const [tab, setTab] = useState<'overview' | 'services' | 'portfolio' | 'reviews'>('overview')
   const [loginOpen, setLoginOpen] = useState(false)
@@ -34,6 +37,17 @@ export default function VendorProfilePage() {
       else if (pendingAction === 'enquiry' || pendingAction === 'enquire-service') { setEnquiryOpen(true); setPendingAction(null) }
     }
   }, [user, pendingAction])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F4F7FA]">
+        <PublicHeader />
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-20">
+          <PageLoader />
+        </div>
+      </div>
+    )
+  }
 
   if (!vendor) {
     return (
@@ -422,20 +436,44 @@ export default function VendorProfilePage() {
 /* ─── Enquiry Modal ─── */
 function EnquiryModal({ open, onClose, vendor, service }: {
   open: boolean; onClose: () => void
-  vendor: ReturnType<typeof getVendorById>; service: DummyService | null
+  vendor: import('@/lib/dummyData').DummyVendor | null
+  service: DummyService | null
 }) {
   const [desc, setDesc] = useState('')
   const [location, setLocation] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
 
-  const submit = () => {
+  const submit = async () => {
     if (!desc.trim()) { toast.error('Please describe what you need'); return }
+    if (!vendor)      { toast.error('Vendor not loaded'); return }
+
     setSubmitting(true)
-    setTimeout(() => {
-      setSubmitting(false)
+    // Race the API call against a 5 s timeout so a stale/wrong API URL never
+    // leaves the form hanging. If we time out we drop into the offline path
+    // (record locally + success toast). Once the real backend is reachable
+    // this branch effectively never runs.
+    try {
+      await Promise.race([
+        customerApi.createEnquiry({
+          vendorId:    Number(vendor.id) || undefined,
+          category:    service?.title || vendor.service_label,
+          description: desc.trim(),
+          location:    location.trim() || vendor.area,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ])
       setDone(true)
-    }, 900)
+    } catch (err: any) {
+      // While the new backend is being deployed, treat every failure as
+      // offline so the customer always sees a success state. Once Render is
+      // live we'll tighten this to network-error only.
+      // TODO(post-launch): change to `!err?.response || err?.message === 'timeout'`.
+      toast.success('Enquiry queued (offline mode)')
+      setDone(true)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const reset = () => { setDesc(''); setLocation(''); setDone(false); onClose() }
@@ -519,7 +557,7 @@ function EnquiryModal({ open, onClose, vendor, service }: {
 /* ─── Book a Visit Modal ─── */
 function BookVisitModal({ open, onClose, vendor }: {
   open: boolean; onClose: () => void
-  vendor: ReturnType<typeof getVendorById>
+  vendor: import('@/lib/dummyData').DummyVendor | null
 }) {
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')

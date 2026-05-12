@@ -8,9 +8,25 @@ import {
   Sparkles, CheckCircle2, ChevronDown,
 } from 'lucide-react'
 import {
-  DUMMY_VENDORS, SERVICE_CATEGORIES, searchVendors, getVendorsByService,
+  SERVICE_CATEGORIES, getVendorsByService,
   type DummyVendor, type ServiceCategory,
 } from '@/lib/dummyData'
+import { useLiveVendors } from '@/hooks/useLiveVendor'
+
+// Local search — same fields as dummyData.searchVendors but operates on
+// whatever vendor list we have (live or fallback).
+function searchInList(list: DummyVendor[], query: string): DummyVendor[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return list
+  return list.filter(v =>
+    v.company_name.toLowerCase().includes(q) ||
+    v.service_label.toLowerCase().includes(q) ||
+    v.service_slug.toLowerCase().includes(q) ||
+    v.specialties.some(s => s.toLowerCase().includes(q)) ||
+    v.services.some(s => s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)) ||
+    v.tagline.toLowerCase().includes(q)
+  )
+}
 
 /* ─── Wrapper for Suspense (required for useSearchParams in Next 14) ─── */
 export default function SearchPage() {
@@ -42,6 +58,10 @@ function SearchInner() {
   const [sort, setSort] = useState<SortKey>('relevance')
   const [filtersOpen, setFiltersOpen] = useState(false) // mobile drawer
 
+  /* Live data with graceful fallback to dummy vendors (no UI change either way) */
+  const live = useLiveVendors()
+  const allVendors = live.vendors
+
   useEffect(() => {
     if (categoryParam && !selectedCategories.includes(categoryParam)) {
       setSelectedCategories([categoryParam])
@@ -51,7 +71,7 @@ function SearchInner() {
 
   /* Compute results */
   const results = useMemo(() => {
-    let v: DummyVendor[] = queryParam ? searchVendors(queryParam) : [...DUMMY_VENDORS]
+    let v: DummyVendor[] = queryParam ? searchInList(allVendors, queryParam) : [...allVendors]
 
     if (selectedCategories.length > 0) {
       v = v.filter(x => selectedCategories.includes(x.service_slug))
@@ -71,15 +91,15 @@ function SearchInner() {
       default: break
     }
     return v
-  }, [queryParam, selectedCategories, minRating, verifiedOnly, topRatedOnly, maxPrice, minExperience, availabilityToday, sort])
+  }, [allVendors, queryParam, selectedCategories, minRating, verifiedOnly, topRatedOnly, maxPrice, minExperience, availabilityToday, sort])
 
   /* Category counts */
   const counts = useMemo(() => {
-    const base = queryParam ? searchVendors(queryParam) : DUMMY_VENDORS
+    const base = queryParam ? searchInList(allVendors, queryParam) : allVendors
     const map: Record<string, number> = {}
     base.forEach(v => { map[v.service_slug] = (map[v.service_slug] || 0) + 1 })
     return map
-  }, [queryParam])
+  }, [allVendors, queryParam])
 
   const activeCategory: ServiceCategory | undefined = selectedCategories.length === 1
     ? SERVICE_CATEGORIES.find(c => c.slug === selectedCategories[0])
