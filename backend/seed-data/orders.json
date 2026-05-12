@@ -1,0 +1,18 @@
+[
+  {
+    "id": 9001,
+    "customer_id": 3,
+    "vendor_id": 36,
+    "enquiry_id": 103,
+    "quotation_id": 201,
+    "amount": 850000,
+    "status": "active",
+    "plan": [
+      { "id": 1, "title": "Demolition & site prep",   "description": "Site cleared, debris removed, protective sheeting installed.", "amount": 127500, "vendor_status": "completed",   "customer_status": "approved" },
+      { "id": 2, "title": "Plumbing & electrical",    "description": "Concealed plumbing for 3 baths, electrical rewiring for entire flat.", "amount": 212500, "vendor_status": "in_progress", "customer_status": "approved" },
+      { "id": 3, "title": "Tiling & flooring",        "description": "Vitrified tile flooring across living, dining, bedrooms.", "amount": 212500, "vendor_status": "pending",     "customer_status": "approved" },
+      { "id": 4, "title": "Painting & finishing",     "description": "Two coats Asian Paints Royale across all walls and ceilings.", "amount": 170000, "vendor_status": "pending",     "customer_status": "approved" },
+      { "id": 5, "title": "Final handover & cleanup", "description": "Deep clean and walkthrough handover with customer.", "amount": 127500, "vendor_status": "pending",     "customer_status": "approved" }
+    ]
+  }
+]

@@ -1,0 +1,6 @@
+[
+  { "id": 101, "customer_id": 1, "vendor_id": 21, "category": "Painting",         "description": "Need premium emulsion paint for two bedrooms, light pastel colours preferred.", "location": "RS Puram, Coimbatore",        "status": "new" },
+  { "id": 102, "customer_id": 2, "vendor_id": 11, "category": "AC Repair",        "description": "Annual deep cleaning and gas top-up for three split ACs.",                     "location": "Saibaba Colony, Coimbatore",  "status": "new" },
+  { "id": 103, "customer_id": 3, "vendor_id": 36, "category": "Home Renovation",  "description": "Complete renovation including flooring, painting, kitchen, and bathrooms.",     "location": "Race Course, Coimbatore",     "status": "quoted" },
+  { "id": 104, "customer_id": 4, "vendor_id": 16, "category": "Plumbing",         "description": "Leaky pipes under sink, water seeping into bedroom wall.",                       "location": "Ganapathy, Coimbatore",       "status": "accepted" }
+]

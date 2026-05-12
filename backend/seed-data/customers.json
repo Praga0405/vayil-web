@@ -1,0 +1,10 @@
+[
+  { "id": 1, "name": "Anita Raman",   "mobile": "9999000001", "email": "anita.raman@example.com",   "city": "Coimbatore", "address": "RS Puram, Coimbatore" },
+  { "id": 2, "name": "Rahul Menon",   "mobile": "9999000002", "email": "rahul.menon@example.com",    "city": "Coimbatore", "address": "Saibaba Colony, Coimbatore" },
+  { "id": 3, "name": "Lakshmi Iyer",  "mobile": "9999000003", "email": "lakshmi.iyer@example.com",   "city": "Coimbatore", "address": "Race Course, Coimbatore" },
+  { "id": 4, "name": "Karthik S",     "mobile": "9999000004", "email": "karthik.s@example.com",      "city": "Coimbatore", "address": "Ganapathy, Coimbatore" },
+  { "id": 5, "name": "Priya Nair",    "mobile": "9999000005", "email": "priya.nair@example.com",     "city": "Coimbatore", "address": "Peelamedu, Coimbatore" },
+  { "id": 6, "name": "Vijay Kumar",   "mobile": "9999000006", "email": "vijay.kumar@example.com",    "city": "Coimbatore", "address": "Vadavalli, Coimbatore" },
+  { "id": 7, "name": "Meera Suresh",  "mobile": "9999000007", "email": "meera.suresh@example.com",   "city": "Coimbatore", "address": "Singanallur, Coimbatore" },
+  { "id": 8, "name": "Arun Pillai",   "mobile": "9999000008", "email": "arun.pillai@example.com",    "city": "Coimbatore", "address": "Saravanampatti, Coimbatore" }
+]

@@ -1,0 +1,4 @@
+[
+  { "id": 201, "enquiry_id": 103, "vendor_id": 36, "amount": 850000, "message": "Full home renovation including labour, premium finishes and 6-month warranty. Materials billed separately as per approved plan.", "estimated_days": 38, "status": "accepted" },
+  { "id": 202, "enquiry_id": 102, "vendor_id": 11, "amount": 4500,   "message": "Deep clean + gas top-up for 3 split ACs. 30-day service warranty.",                                                                "estimated_days": 1,  "status": "sent" }
+]
