@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import PublicHeader from '@/components/shared/PublicHeader'
 import {
   Star, MapPin, Shield, Clock, ChevronRight, Filter, X, ArrowUpDown,
-  Sparkles, CheckCircle2, ChevronDown,
+  Sparkles, CheckCircle2, ChevronDown, Search as SearchIcon,
 } from 'lucide-react'
 import {
   DUMMY_VENDORS, SERVICE_CATEGORIES, searchVendors, getVendorsByService,
@@ -41,6 +41,14 @@ function SearchInner() {
   const [availabilityToday, setAvailabilityToday] = useState(false)
   const [sort, setSort] = useState<SortKey>('relevance')
   const [filtersOpen, setFiltersOpen] = useState(false) // mobile drawer
+  const [searchInput, setSearchInput] = useState(queryParam)
+
+  useEffect(() => { setSearchInput(queryParam) }, [queryParam])
+
+  const submitSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    router.push(`/search?q=${encodeURIComponent(searchInput.trim())}`)
+  }
 
   useEffect(() => {
     if (categoryParam && !selectedCategories.includes(categoryParam)) {
@@ -110,10 +118,11 @@ function SearchInner() {
     <div className="min-h-screen bg-[#F4F7FA]">
       <PublicHeader defaultQuery={queryParam} />
 
-      {/* ── Compact title bar (results appear right below) ── */}
+      {/* ── Title bar + prominent search ── */}
       <div className="bg-white border-b border-gray-100">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-4">
-          <div className="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-5">
+          {/* Breadcrumb */}
+          <div className="text-xs text-gray-500 flex items-center gap-1.5 mb-3">
             <Link href="/" className="hover:text-orange">Home</Link>
             <ChevronRight className="w-3 h-3" />
             <Link href="/search" className="hover:text-orange">All Services</Link>
@@ -124,19 +133,46 @@ function SearchInner() {
               </>
             )}
           </div>
-          <div className="flex items-end justify-between gap-4 flex-wrap">
-            <div>
-              <h1 className="text-xl lg:text-2xl font-bold text-navy leading-tight">
-                {activeCategory
-                  ? `${activeCategory.label} Services`
-                  : queryParam
-                    ? <>Results for "<span className="text-orange">{queryParam}</span>"</>
-                    : 'All Services'}
-              </h1>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {results.length} verified professionals in Coimbatore
-              </p>
+
+          {/* Prominent search bar */}
+          <form onSubmit={submitSearch} className="flex gap-2 mb-4">
+            <div className="relative flex-1">
+              <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                placeholder='Search services, vendors — try "ac repair" or "carpenter"'
+                className="w-full pl-12 pr-4 py-3.5 rounded-xl border-2 border-gray-200 text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition"
+                autoFocus={!queryParam}
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={() => setSearchInput('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
+            <button type="submit"
+              className="bg-orange hover:bg-orange-600 text-white px-6 py-3.5 rounded-xl text-sm font-semibold transition flex items-center gap-2 shrink-0">
+              <SearchIcon className="w-4 h-4" /> <span className="hidden sm:inline">Search</span>
+            </button>
+          </form>
+
+          {/* Title + result count */}
+          <div>
+            <h1 className="text-xl lg:text-2xl font-bold text-navy leading-tight">
+              {activeCategory
+                ? `${activeCategory.label} Services`
+                : queryParam
+                  ? <>Results for "<span className="text-orange">{queryParam}</span>"</>
+                  : 'All Services'}
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {results.length} verified professionals in Coimbatore
+            </p>
           </div>
         </div>
       </div>
