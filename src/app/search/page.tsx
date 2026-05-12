@@ -256,6 +256,25 @@ function SearchInner() {
             </div>
           )}
 
+          {/* Browse other services (sits ABOVE the results) */}
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 lg:p-6 mb-5">
+            <h3 className="text-base lg:text-lg font-bold text-navy mb-4">Browse other services</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {SERVICE_CATEGORIES.filter(c => !selectedCategories.includes(c.slug)).slice(0, 8).map(c => (
+                <Link
+                  key={c.slug}
+                  href={`/search?category=${c.slug}`}
+                  className="border border-gray-100 rounded-xl p-3 hover:border-orange hover:shadow-sm transition flex flex-col items-center text-center gap-2">
+                  <div className="w-12 h-12 rounded-xl bg-orange/10 flex items-center justify-center text-2xl">{c.icon}</div>
+                  <div>
+                    <p className="text-sm font-semibold text-navy">{c.label}</p>
+                    <p className="text-[11px] text-gray-500">from ₹{c.starting_price.toLocaleString('en-IN')}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+
           {/* Result grid */}
           {results.length === 0 ? (
             <div className="bg-white border border-gray-100 rounded-2xl p-12 text-center">
@@ -272,26 +291,6 @@ function SearchInner() {
             </div>
           )}
 
-          {/* Related categories */}
-          {!activeCategory && results.length > 0 && (
-            <div className="mt-12 bg-white border border-gray-100 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-navy mb-4">Browse other services</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {SERVICE_CATEGORIES.filter(c => !selectedCategories.includes(c.slug)).slice(0, 8).map(c => (
-                  <Link
-                    key={c.slug}
-                    href={`/search?category=${c.slug}`}
-                    className="border border-gray-100 rounded-xl p-3 hover:border-orange hover:shadow-sm transition flex flex-col items-center text-center gap-2">
-                    <div className="w-12 h-12 rounded-xl bg-orange/10 flex items-center justify-center text-2xl">{c.icon}</div>
-                    <div>
-                      <p className="text-sm font-semibold text-navy">{c.label}</p>
-                      <p className="text-[11px] text-gray-500">from ₹{c.starting_price}</p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
