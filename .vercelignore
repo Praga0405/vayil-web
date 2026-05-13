@@ -1,0 +1,4 @@
+# Vercel deploys the Next.js app at the repo root; the backend lives in
+# its own deploy target (Render) so we keep it out of the Vercel build
+# context.
+backend/

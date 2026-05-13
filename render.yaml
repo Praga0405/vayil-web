@@ -1,8 +1,12 @@
+# Render Blueprint — deploys the Express backend from `backend/`.
+# The Next.js frontend at the repo root deploys to Vercel separately.
 services:
   - type: web
     name: vayil-backend
     runtime: docker
     plan: starter
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

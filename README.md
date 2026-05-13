@@ -1,8 +1,25 @@
-# Vayil Web
+# Vayil — Web + Backend Monorepo
 
 Marketplace web app for home services. Customers browse vendors, send enquiries, accept quotes, and pay; vendors manage their listing, KYC, and earnings — all from a single unified marketplace experience (no separate portals).
 
-Built with **Next.js 14 (App Router)**, **TypeScript**, **Tailwind CSS**, **Zustand**, and **Razorpay**.
+This repo contains both surfaces:
+
+```
+.                  ← Next.js 14 frontend (deploys to Vercel)
+├── src/           Frontend source
+├── public/
+├── backend/       ← Node + Express + MySQL backend (deploys to Render via render.yaml at root)
+│   ├── src/
+│   ├── migrations/
+│   ├── scripts/
+│   ├── seed-data/
+│   └── Dockerfile
+├── render.yaml    Render Blueprint for the backend service
+└── .vercelignore  Excludes backend/ from the Vercel build
+```
+
+**Frontend stack:** Next.js 14 (App Router), TypeScript, Tailwind, Zustand, Razorpay (client).
+**Backend stack:** Node + Express + TypeScript, MySQL2, JWT, Razorpay, multer.
 
 ---
 
@@ -78,7 +95,36 @@ npm run build   # type-checks + builds optimized bundle into .next/
 npm start       # serves the built bundle on :3000
 ```
 
-For deployment (Vercel, Render, Fly, etc.), set the same three env vars in your host's dashboard and point the build command at `npm run build`, start at `npm start`.
+**Frontend** deploys to Vercel — Next.js is auto-detected at the repo root. `.vercelignore` keeps `backend/` out of the build context.
+
+---
+
+## Running the backend locally
+
+```bash
+cd backend
+cp .env.example .env
+npm install
+npm run migrate              # schema + seed_source tagging
+npm run seed                 # super admin + base categories
+npm run seed:marketplace     # 40 vendors + demo activity
+npm run dev                  # http://localhost:9090
+```
+
+See [`backend/README.md`](backend/README.md) for the full backend deploy walkthrough (Render Blueprint, MySQL provisioning, seed/unseed scripts).
+
+When the frontend dev server runs, set `NEXT_PUBLIC_API_URL=http://localhost:9090` in `.env.local` to point at the local backend.
+
+---
+
+## Deploying both halves
+
+| Service | Source | Build | Start |
+|---|---|---|---|
+| **Vercel** (web) | repo root | `npm run build` | `npm start` |
+| **Render** (backend) | `backend/` via `render.yaml` Blueprint | Dockerfile | `node dist/index.js` |
+
+After Render is live, set `NEXT_PUBLIC_API_URL` on Vercel to the Render URL and redeploy.
 
 ---
 
