@@ -49,10 +49,14 @@ export default function ProjectDetailPage() {
 
   const submitRating = async () => {
     try {
-      await customerApi.addReview({ order_id: Number(id), rating, comment, vendor_id: order?.vendor_id })
-      toast.success('Review submitted!')
+      // Canonical REST: POST /customer/projects/:id/signoff — also flips
+      // the order to "completed" and releases held escrow to the vendor.
+      await customerApi.signoff(id, { rating, comment })
+      toast.success('Project signed off and review submitted')
       setRatingOpen(false)
-    } catch { toast.error('Failed to submit review') }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to submit sign-off')
+    }
   }
 
   const payMilestone = async (amount: number, milestoneId?: number) => {
@@ -187,12 +191,24 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Rating — show when completed */}
-      {order.status === 'COMPLETED' && (
+      {/* Sign-off / rework — show on completed or ongoing */}
+      <div className="flex gap-3">
         <Button full variant="outline" onClick={() => setRatingOpen(true)}>
-          <Star className="w-4 h-4" /> Rate this Service
+          <Star className="w-4 h-4" /> {order.status === 'COMPLETED' ? 'Rate this Service' : 'Sign off & rate'}
         </Button>
-      )}
+        <Button variant="outline" onClick={async () => {
+          const reason = window.prompt('What still needs to be fixed?')?.trim()
+          if (!reason) return
+          try {
+            await customerApi.requestRework(id, reason)
+            toast.success('Rework requested — vendor will follow up')
+          } catch (err: any) {
+            toast.error(err?.response?.data?.error || 'Failed to request rework')
+          }
+        }}>
+          Request rework
+        </Button>
+      </div>
 
       <Modal open={ratingOpen} onClose={() => setRatingOpen(false)} title="Rate & Review">
         <div className="space-y-5">

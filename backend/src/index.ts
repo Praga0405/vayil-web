@@ -9,11 +9,18 @@ import { customerRouter } from './routes/customer';
 import { vendorRouter } from './routes/vendor';
 import { opsRouter } from './routes/ops';
 import { commonRouter } from './routes/common';
+import { paymentsRouter } from './routes/payments';
 
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins, credentials: true }));
+
+// Webhooks MUST receive the raw body for signature verification, so mount
+// the webhook route BEFORE the global JSON parser.
+app.use('/payments/webhooks', paymentsRouter);
+app.use('/webhooks', paymentsRouter);
+
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 240 }));
@@ -23,6 +30,7 @@ app.use('/auth', authRouter);
 app.use('/customers', customerRouter);
 app.use('/vendors', vendorRouter);
 app.use('/ops', opsRouter);
+app.use('/payments', paymentsRouter);
 
 // Legacy aliases for the existing mobile/admin codebase.
 app.use('/', authRouter);

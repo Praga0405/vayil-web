@@ -7,6 +7,7 @@ import { Button, Input, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { vendorApi } from '@/lib/api/client'
 
 type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'>
 
@@ -31,11 +32,26 @@ export default function MaterialsManagerPage() {
   const remove = (i: number) => setItems(items.filter((_, idx) => idx !== i))
   const total = items.reduce((s, m) => s + (m.quantity * m.rate), 0)
 
-  const save = () => {
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
     if (items.some(m => !m.name.trim() || m.quantity <= 0 || m.rate < 0)) {
       toast.error('Fill all material rows with valid quantities'); return
     }
-    toast.success('Materials saved')
+    if (!id) return
+    setSaving(true)
+    try {
+      // For now we POST each new item; existing items (those with matching
+      // backend IDs) would call updateMaterial. Mock list has no IDs so all
+      // are treated as new — fine for the demo flow.
+      for (const m of items) {
+        await vendorApi.addMaterial(id, {
+          name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
+        })
+      }
+      toast.success('Materials saved')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to save materials')
+    } finally { setSaving(false) }
   }
 
   return (
@@ -83,7 +99,7 @@ export default function MaterialsManagerPage() {
           <span className="text-sm text-gray-500">Materials Total</span>
           <span className="text-lg font-bold text-navy">{formatCurrency(total)}</span>
         </div>
-        <Button full onClick={save}>Save Materials</Button>
+        <Button full onClick={save} loading={saving}>Save Materials</Button>
       </div>
     </div>
   )

@@ -34,11 +34,8 @@ export default function SendQuotePage() {
       ])
       toast.success('Quote sent to customer')
       router.push(`/vendor-studio/enquiries/${id}`)
-    } catch {
-      // Offline-mode fallback while backend is being wired.
-      // TODO(post-launch): surface real errors instead of swallowing.
-      toast.success('Quote queued (offline mode)')
-      router.push(`/vendor-studio/enquiries/${id}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || err?.message || 'Failed to send quote')
     } finally {
       setSubmitting(false)
     }

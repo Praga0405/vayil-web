@@ -1,165 +1,256 @@
+/**
+ * Vayil API client — canonical REST surface only.
+ *
+ * All marketplace/auth/payment calls go through `customerApi`, `vendorApi`,
+ * `commonApi`, or `paymentsApi`. They mirror the routes defined in the
+ * vayil-web-backend repo (now under `backend/`):
+ *
+ *   /auth/*            — OTP flows (phone-based)
+ *   /customer/*        — customer surfaces (REST)
+ *   /vendor/*          — vendor surfaces (REST)
+ *   /payments/*        — create-order, verify (+ webhook server-to-server)
+ *   /ops/*             — admin/staff (not exposed in this client yet)
+ *
+ * Legacy mobile-app endpoints (POST /vendorInfo, /ServiceList, etc.) are
+ * isolated under `legacyMobileApi` so accidental usage is obvious. Don't
+ * call them from production screens.
+ */
 import axios, { AxiosError, type AxiosInstance } from 'axios'
 import type { ApiResponse } from '@/types'
 
-const BASE_CUSTOMER = process.env.NEXT_PUBLIC_API_URL
-  ? `${process.env.NEXT_PUBLIC_API_URL}/customer`
-  : 'https://app.vayil.in/customer'
+const BASE = process.env.NEXT_PUBLIC_API_URL || 'https://app.vayil.in'
 
-// PRD §9 (P0-03): vendor endpoints are root-level on the backend
-// (/vendorInfo, /createPlan, /vendorEnuqiryList…). Mount at root, not /vendor.
-const BASE_VENDOR = process.env.NEXT_PUBLIC_API_URL || 'https://app.vayil.in'
-
-const BASE_COMMON = process.env.NEXT_PUBLIC_API_URL
-  || 'https://app.vayil.in'
-
-// ── Token getters ─────────────────────────────────────────────
+/* ── Token getters ─────────────────────────────────────────────── */
 const getToken    = () => typeof window !== 'undefined' ? localStorage.getItem('vayil_token')     : null
 const getOpsToken = () => typeof window !== 'undefined' ? localStorage.getItem('vayil_ops_token') : null
 
-// ── Factory ───────────────────────────────────────────────────
+/* ── Client factory ────────────────────────────────────────────── */
 function makeClient(baseURL: string, tokenFn: () => string | null): AxiosInstance {
   const client = axios.create({ baseURL, timeout: 30_000 })
-
   client.interceptors.request.use((cfg) => {
     const tok = tokenFn()
     if (tok) cfg.headers.Authorization = `Bearer ${tok}`
     return cfg
   })
-
   client.interceptors.response.use(
     (r) => r,
     (err: AxiosError) => {
       if (err.response?.status === 401 && typeof window !== 'undefined') {
         const p = window.location.pathname
-        if      (p.startsWith('/vendor'))   window.location.href = '/vendor/login'
-        else if (p.startsWith('/customer')) window.location.href = '/customer/login'
+        if      (p.startsWith('/vendor-studio')) window.location.href = '/vendor/login'
+        else if (p.startsWith('/account'))       window.location.href = '/customer/login'
       }
       return Promise.reject(err)
-    }
+    },
   )
   return client
 }
 
-export const customerClient = makeClient(BASE_CUSTOMER, getToken)
-export const vendorClient   = makeClient(BASE_VENDOR,   getToken)
-export const commonClient   = makeClient(BASE_COMMON,   getToken)
+// One axios instance per logical surface. They all hit the same host but
+// the base path differs for nicer call sites.
+export const authClient     = makeClient(`${BASE}/auth`,     getToken)
+export const customerClient = makeClient(`${BASE}/customer`, getToken)
+export const vendorClient   = makeClient(`${BASE}/vendor`,   getToken)
+export const paymentsClient = makeClient(`${BASE}/payments`, getToken)
+export const commonClient   = makeClient(BASE,               getToken)
+export const opsClient      = makeClient(`${BASE}/ops`,      getOpsToken)
 
-// ── Unwrap helper ─────────────────────────────────────────────
+/* ── Idempotency helper ────────────────────────────────────────── */
+const newIdempotencyKey = () =>
+  (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+    ? (crypto as any).randomUUID()
+    : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+const idemHeader = (key?: string) => ({ 'Idempotency-Key': key || newIdempotencyKey() })
+
+/* ── Unwrap helper for screens that prefer raw payloads ────────── */
 export function unwrap<T>(res: { data: ApiResponse<T> }): T {
-  const d = res.data
-  // backend uses 'data' or 'result' key
-  return (d.data ?? (d as any).result ?? d) as T
+  const d = res.data as any
+  return (d?.data ?? d?.result ?? d) as T
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  CUSTOMER APIs
-// ═══════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════════
+ *  AUTH (canonical)
+ * ═════════════════════════════════════════════════════════════════ */
+export const authApi = {
+  sendOTP:   (phone: string, userType: 'customer' | 'vendor') =>
+               authClient.post('/otp/send', { phone, userType }),
+  verifyOTP: (phone: string, otp: string, userType: 'customer' | 'vendor', name?: string) =>
+               authClient.post('/otp/verify', { phone, otp, userType, name }),
+  staffLogin: (email: string, password: string) =>
+               authClient.post('/staff/login', { email, password }),
+  staffMe:    () => authClient.get('/staff/me'),
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ *  CUSTOMER (canonical REST)
+ * ═════════════════════════════════════════════════════════════════ */
 export const customerApi = {
-  // Auth
-  sendOTP:    (mobile: string)             => commonClient.post('/customer/register', { mobile_number: mobile }),
-  verifyOTP:  (mobile: string, otp: string) => commonClient.post('/customer/verifyCustomerOTP', { mobile_number: mobile, otp }),
-  loginOTP:   (mobile: string)             => commonClient.post('/customer/logincustomerWithOTP', { mobile_number: mobile }),
-  verifyLogin:(mobile: string, otp: string) => commonClient.post('/customer/verifyLogincustomerOTP', { mobile_number: mobile, otp }),
-  // PRD §9: backend exposes resendcustomerOTP for resending.
-  resendOTP:  (mobile: string)             => commonClient.post('/customer/resendcustomerOTP', { mobile_number: mobile }),
-
   // Profile
-  saveProfile: (data: Record<string, unknown>) => customerClient.post('/saveCustomerInfo', data),
-  getProfile:  ()                              => customerClient.get('/getCustomerInfo'),
+  getProfile:  () => customerClient.get('/me'),
+  saveProfile: (data: Record<string, unknown>) => customerClient.put('/me', data),
 
-  // Settings (fees, Razorpay key)
-  getSettings: () => commonClient.get('/customer/getSettings'),
-
-  // Services / Marketplace
-  getCategories:    ()               => commonClient.get('/service-categories'),
-  getSubcategories: (catId?: number) => commonClient.get('/service-subcategories', { params: { category_id: catId } }),
-  getServices:      (params?: Record<string, unknown>) => customerClient.post('/ServiceList', params ?? {}),
-  getServiceInfo:   (service_id: number) => customerClient.post('/ServiceInfo', { service_id }),
-  // PRD §9 (P0-04): backend exposes /vendorInfo, not /vendorInfomation (typo).
-  getVendorInfo:    (vendor_id: number)  => customerClient.post('/vendorInfo', { vendor_id }),
-
-  // RESTful marketplace endpoints — what the new backend (vayil-web-backend)
-  // actually exposes. Use these for new screens.
-  listVendors:      ()                  => customerClient.get('/vendors'),
+  // Marketplace
+  listVendors:      () => customerClient.get('/vendors'),
   getVendorDetail:  (vendor_id: string | number) => customerClient.get(`/vendors/${vendor_id}`),
-  createEnquiry:    (data: Record<string, unknown>) => customerClient.post('/enquiries', data),
 
-  // Cart
-  addToCart:     (data: Record<string, unknown>) => customerClient.post('/addToCart', data),
-  getCart:       ()                              => customerClient.post('/getCart', {}),
-  removeCart:    (cart_id: number)               => customerClient.post('/removeCartItem', { cart_id }),
-  clearCart:     ()                              => customerClient.post('/clearCart', {}),
+  // Enquiries
+  listEnquiries:    () => customerClient.get('/enquiries'),
+  getEnquiryDetail: (id: string | number) => customerClient.get(`/enquiries/${id}`),
+  createEnquiry:    (data: Record<string, unknown>, idempotencyKey?: string) =>
+                      customerClient.post('/enquiries', data, { headers: idemHeader(idempotencyKey) }),
 
-  // Enquiry
-  sendEnquiry:    (data: Record<string, unknown>) => customerClient.post('/sendEnquiry', data),
-  getEnquiries:   ()                              => customerClient.post('/enquiryList', {}),
-  getEnquiryDetail:(enquiry_id: number)           => customerClient.post('/enquiryDetails', { enquiry_id }),
-  getQuote:       (enquiry_id: number)            => customerClient.post('/QuotationList', { enquiry_id }),
-  updateQuote:    (data: Record<string, unknown>) => customerClient.post('/updateQuotation', data),
+  // Quotes
+  getQuote:         (enquiry_id: string | number) => customerClient.get(`/quotes/${enquiry_id}`),
 
-  // Plan — PRD §9: mobile/backend use order_id in some flows. Accept either.
-  getPlan:        (id: number, by: 'enquiry_id' | 'order_id' = 'enquiry_id') =>
-                    customerClient.post('/getPlan', { [by]: id }),
-  updatePlan:     (data: Record<string, unknown>) => customerClient.post('/CustomerupdatePlan', data),
+  // Projects
+  listProjects:     () => customerClient.get('/projects'),
+  getProjectDetail: (id: string | number) => customerClient.get(`/projects/${id}`),
+  approvePlan:      (id: string | number) => customerClient.post(`/projects/${id}/plan/approve`, {}),
+  requestPlanRevision: (id: string | number, reason: string) =>
+                      customerClient.post(`/projects/${id}/plan/request-revision`, { reason }),
+  approveMilestone: (id: string | number, milestoneId: string | number) =>
+                      customerClient.post(`/projects/${id}/milestones/${milestoneId}/approve`, {}),
 
-  // Order
-  placeOrder:     (data: Record<string, unknown>) => customerClient.post('/placeOrder', data),
-  getOrderDetail: (order_id: number) => customerClient.post('/orderDetails', { order_id }),
-  getPaymentDetails: (order_id: number) => customerClient.post('/getPaymentDetails', { order_id }),
-  getPaymentSummary: (order_id: number) => customerClient.post('/NeedPaymentSummary', { order_id }),
-  paymentUpdate:  (data: Record<string, unknown>) => customerClient.post('/payment_update', data),
-  finalStep:      (data: Record<string, unknown>) => customerClient.post('/finalStep', data),
+  // Materials
+  listMaterials:    (id: string | number) => customerClient.get(`/projects/${id}/materials`),
+  createMaterialsPaymentOrder: (id: string | number, material_ids: number[], idempotencyKey?: string) =>
+                      customerClient.post(`/projects/${id}/materials/payment-order`,
+                                          { material_ids },
+                                          { headers: idemHeader(idempotencyKey) }),
 
-  // Reviews
-  addReview:    (data: Record<string, unknown>) => customerClient.post('/addReview', data),
-  listReviews:  (vendor_id: number)             => commonClient.post('/vendorlistReviews', { vendor_id }),
+  // Signoff / rework
+  signoff:          (id: string | number, data: { rating?: number; comment?: string }) =>
+                      customerClient.post(`/projects/${id}/signoff`, data),
+  requestRework:    (id: string | number, reason: string) =>
+                      customerClient.post(`/projects/${id}/rework-request`, { reason }),
 
-  // Notifications
-  getNotifications: () => customerClient.post('/customerNotificationList', {}),
+  // Payments (legacy log)
+  listPayments:     () => customerClient.get('/payments'),
 
-  // Upload
-  uploadFiles: (formData: FormData) => commonClient.post('/customer/upload_files', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }),
+  // Settings / fees
+  getSettings:      () => commonClient.get('/customer/getSettings'),
+  taxPreview:       (data: Record<string, unknown>) => customerClient.post('/tax-preview', data),
+
+  // Uploads
+  uploadFiles:      (formData: FormData) => commonClient.post('/customer/upload_files', formData, {
+                      headers: { 'Content-Type': 'multipart/form-data' },
+                    }),
+
+  /* ─────────────── LEGACY MOBILE ALIASES ────────────────────────
+   * These predate the REST surface above. The unmigrated /customer/*
+   * pages and a few /account/* pages still call them. New screens must
+   * use the canonical methods above. Each call here maps to a legacy
+   * POST endpoint that the backend keeps as a compatibility shim.
+   * TODO(post-launch): delete after every consumer is migrated.
+   * ────────────────────────────────────────────────────────────── */
+  sendOTP:           (mobile: string)             => commonClient.post('/customer/register', { mobile_number: mobile }),
+  verifyOTP:         (mobile: string, otp: string) => commonClient.post('/customer/verifyCustomerOTP', { mobile_number: mobile, otp }),
+  loginOTP:          (mobile: string)             => commonClient.post('/customer/logincustomerWithOTP', { mobile_number: mobile }),
+  verifyLogin:       (mobile: string, otp: string) => commonClient.post('/customer/verifyLogincustomerOTP', { mobile_number: mobile, otp }),
+  resendOTP:         (mobile: string)             => commonClient.post('/customer/resendcustomerOTP', { mobile_number: mobile }),
+  getServices:       (params?: Record<string, unknown>) => customerClient.post('/ServiceList', params ?? {}),
+  getServiceInfo:    (service_id: number) => customerClient.post('/ServiceInfo', { service_id }),
+  getVendorInfo:     (vendor_id: number) => customerClient.post('/vendorInfo', { vendor_id }),
+  getEnquiries:      ()                              => customerClient.post('/enquiryList', {}),
+  sendEnquiry:       (data: Record<string, unknown>) => customerClient.post('/sendEnquiry', data),
+  getQuoteLegacy:    (enquiry_id: number)            => customerClient.post('/QuotationList', { enquiry_id }),
+  updateQuote:       (data: Record<string, unknown>) => customerClient.post('/updateQuotation', data),
+  getPlan:           (id: number, by: 'enquiry_id' | 'order_id' = 'enquiry_id') =>
+                       customerClient.post('/getPlan', { [by]: id }),
+  updatePlan:        (data: Record<string, unknown>) => customerClient.post('/CustomerupdatePlan', data),
+  placeOrder:        (data: Record<string, unknown>) => customerClient.post('/placeOrder', data),
+  getOrderDetail:    (order_id: number)              => customerClient.post('/orderDetails', { order_id }),
+  getPaymentDetails: (order_id: number)              => customerClient.post('/getPaymentDetails', { order_id }),
+  getPaymentSummary: (order_id: number)              => customerClient.post('/NeedPaymentSummary', { order_id }),
+  paymentUpdate:     (data: Record<string, unknown>) => customerClient.post('/payment_update', data),
+  finalStep:         (data: Record<string, unknown>) => customerClient.post('/finalStep', data),
+  addReview:         (data: Record<string, unknown>) => customerClient.post('/addReview', data),
+  listReviews:       (vendor_id: number)             => commonClient.post('/vendorlistReviews', { vendor_id }),
+  getNotifications:  () => customerClient.post('/customerNotificationList', {}),
+  // Cart (legacy bucket persistence — frontend keeps its own bucketStore now)
+  addToCart:         (data: Record<string, unknown>) => customerClient.post('/addToCart', data),
+  getCart:           ()                              => customerClient.post('/getCart', {}),
+  removeCart:        (cart_id: number)               => customerClient.post('/removeCartItem', { cart_id }),
+  clearCart:         ()                              => customerClient.post('/clearCart', {}),
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  VENDOR APIs
-// ═══════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════════
+ *  VENDOR (canonical REST)
+ * ═════════════════════════════════════════════════════════════════ */
 export const vendorApi = {
-  // Auth
-  sendOTP:    (mobile: string)             => commonClient.post('/register', { mobile_number: mobile }),
-  verifyOTP:  (mobile: string, otp: string) => commonClient.post('/verifyVendorOTP', { mobile_number: mobile, otp }),
-  loginOTP:   (mobile: string)             => commonClient.post('/vendor-login-otp', { mobile_number: mobile }),
-  verifyLogin:(mobile: string, otp: string) => commonClient.post('/vendor-login-verify-otp', { mobile_number: mobile, otp }),
-  resendOTP:  (mobile: string)             => commonClient.post('/resendVendorOTP', { mobile_number: mobile }),
-
-  // Onboarding steps
-  saveStep1:        (data: Record<string, unknown>) => vendorClient.post('/step1', data),
-  saveServiceTags:  (data: Record<string, unknown>) => vendorClient.post('/serviceTagStep', data),
-  saveStep2:        (data: Record<string, unknown>) => vendorClient.post('/step2', data),
-  saveStep3:        (data: Record<string, unknown>) => vendorClient.post('/step3', data),
-  // PRD §9 (P0-09): KYC v2 expects id_type/id_number/id_image_url/selfie_url/consent.
-  // Old payload (proof_type_id/document_url) still accepted by current backend; we
-  // normalise here so new screens can pass the mobile-parity shape.
-  submitKYC:        (data: Record<string, unknown>) => {
-    const payload: Record<string, unknown> = { ...data }
-    if (data.id_type        && !payload.proof_type_id) payload.proof_type_id = data.id_type
-    if (data.id_image_url   && !payload.document_url)  payload.document_url  = data.id_image_url
-    return vendorClient.post('/step4', payload)
-  },
-
   // Profile
-  getProfile: () => vendorClient.get('/vendorInfo'),
-  getSettings:() => commonClient.get('/vendor/vendorGetSettings'),
+  getProfile:       () => vendorClient.get('/me'),
+  saveProfile:      (data: Record<string, unknown>) => vendorClient.put('/me', data),
 
-  // Services
-  saveServiceListing:   (data: Record<string, unknown>) => vendorClient.post('/saveServiceListing', data),
+  // Dashboard
+  getDashboard:     () => vendorClient.get('/dashboard'),
+
+  // Enquiries
+  listEnquiries:    () => vendorClient.get('/enquiries'),
+  getEnquiryDetail: (id: string | number) => vendorClient.get(`/enquiries/${id}`),
+  acceptEnquiry:    (id: string | number) => vendorClient.post(`/enquiries/${id}/accept`, {}),
+  rejectEnquiry:    (id: string | number, reason?: string) =>
+                      vendorClient.post(`/enquiries/${id}/reject`, { reason }),
+  postQuote:        (id: string | number, data: Record<string, unknown>) =>
+                      vendorClient.post(`/enquiries/${id}/quotes`, data),
+
+  // Projects
+  listProjects:     () => vendorClient.get('/projects'),
+  getProjectDetail: (id: string | number) => vendorClient.get(`/projects/${id}`),
+
+  // Plan
+  createPlan:       (id: string | number, milestones: any[]) =>
+                      vendorClient.post(`/projects/${id}/plan`, { milestones }),
+  updatePlan:       (id: string | number, milestones: any[]) =>
+                      vendorClient.put(`/projects/${id}/plan`, { milestones }),
+  submitPlan:       (id: string | number) =>
+                      vendorClient.post(`/projects/${id}/plan/submit`, {}),
+
+  // Materials
+  listMaterials:    (id: string | number) => vendorClient.get(`/projects/${id}/materials`),
+  addMaterial:      (id: string | number, data: Record<string, unknown>) =>
+                      vendorClient.post(`/projects/${id}/materials`, data),
+  updateMaterial:   (id: string | number, materialId: string | number, data: Record<string, unknown>) =>
+                      vendorClient.put(`/projects/${id}/materials/${materialId}`, data),
+
+  // Milestones
+  postMilestoneUpdate:  (milestoneId: string | number, data: { comment?: string; image_urls?: string[] }) =>
+                          vendorClient.post(`/milestones/${milestoneId}/updates`, data),
+  requestMilestonePayment: (milestoneId: string | number) =>
+                          vendorClient.post(`/milestones/${milestoneId}/payment-request`, {}),
+  completeMilestone:    (milestoneId: string | number) =>
+                          vendorClient.post(`/milestones/${milestoneId}/complete`, {}),
+
+  // KYC
+  postKYC:          (data: Record<string, unknown>) => vendorClient.post('/kyc', data),
+
+  // Listings + earnings
+  listListings:     () => vendorClient.get('/listings'),
+  postListing:      (data: Record<string, unknown>) => vendorClient.post('/listings', data),
+  getEarnings:      () => vendorClient.get('/earnings'),
+
+  // Uploads
+  uploadFiles:      (formData: FormData) => commonClient.post('/upload_files', formData, {
+                      headers: { 'Content-Type': 'multipart/form-data' },
+                    }),
+
+  /* ─────────────── LEGACY MOBILE ALIASES ──────────────────────── */
+  sendOTP:           (mobile: string)             => commonClient.post('/register', { mobile_number: mobile }),
+  verifyOTP:         (mobile: string, otp: string) => commonClient.post('/verifyVendorOTP', { mobile_number: mobile, otp }),
+  loginOTP:           (mobile: string)            => commonClient.post('/vendor-login-otp', { mobile_number: mobile }),
+  verifyLogin:        (mobile: string, otp: string) => commonClient.post('/vendor-login-verify-otp', { mobile_number: mobile, otp }),
+  resendOTP:          (mobile: string)             => commonClient.post('/resendVendorOTP', { mobile_number: mobile }),
+  saveStep1:          (data: Record<string, unknown>) => vendorClient.post('/step1', data),
+  saveServiceTags:    (data: Record<string, unknown>) => vendorClient.post('/serviceTagStep', data),
+  saveStep2:          (data: Record<string, unknown>) => vendorClient.post('/step2', data),
+  saveStep3:          (data: Record<string, unknown>) => vendorClient.post('/step3', data),
+  submitKYC:          (data: Record<string, unknown>) => vendorClient.post('/step4', data),
+  getSettings:        () => commonClient.get('/vendor/vendorGetSettings'),
+  saveServiceListing: (data: Record<string, unknown>) => vendorClient.post('/saveServiceListing', data),
   updateServiceListing: (data: Record<string, unknown>) => vendorClient.post('/updateServiceListing', data),
-  getMyServices:        ()                              => vendorClient.get('/getVendorServiceList'),
-  // PRD §9 (P0-11): backend prefers { id, is_active }. Accept legacy
-  // { service_id, status } and translate.
-  updateServiceStatus:  (data: Record<string, unknown>) => {
+  getMyServices:      ()                              => vendorClient.get('/getVendorServiceList'),
+  updateServiceStatus:(data: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...data }
     if (data.service_id && !payload.id) payload.id = data.service_id
     if (typeof data.status === 'string' && payload.is_active === undefined) {
@@ -167,80 +258,66 @@ export const vendorApi = {
     }
     return vendorClient.post('/ServiceStatusUpdate', payload)
   },
-  getServiceDetail:     (data: Record<string, unknown>) => vendorClient.post('/ServiceDetails', data),
-  addServiceTag:        (data: Record<string, unknown>) => vendorClient.post('/VendorAddServiceTag', data),
-
-  // Enquiries
-  getEnquiries:     (data: Record<string, unknown>) => vendorClient.post('/vendorEnuqiryList', data),
-  acceptEnquiry:    (data: Record<string, unknown>) => vendorClient.post('/AcceptEnquiredStatusUpdate', data),
-  rejectEnquiry:    (data: Record<string, unknown>) => vendorClient.post('/vendorRejectEnquiry', data),
-  sendQuote:        (data: Record<string, unknown>) => vendorClient.post('/sendQuotationToCustomer', data),
-
-  // Plans
-  createPlan:       (data: Record<string, unknown>) => vendorClient.post('/createPlan', data),
-  updatePlan:       (data: Record<string, unknown>) => vendorClient.post('/updatePlan', data),
-  updatePlanStatus: (data: Record<string, unknown>) => vendorClient.post('/updatePlanStatus', data),
-  getPlans:         (data: Record<string, unknown>) => vendorClient.post('/vendorgetPlan', data),
-  getPlanDetail:    (data: Record<string, unknown>) => vendorClient.post('/vendorPlanDetails', data),
-  createAcceptPlan: (data: Record<string, unknown>) => vendorClient.post('/createAcceptPlan', data),
-
-  // Materials
-  addMaterial:      (data: Record<string, unknown>) => vendorClient.post('/addPlanMaterial', data),
-  editMaterial:     (data: Record<string, unknown>) => vendorClient.post('/editPlanMaterial', data),
-  getMaterials:     (data: Record<string, unknown>) => vendorClient.post('/vendorgetMaterial', data),
-  getMaterialDetail:(data: Record<string, unknown>) => vendorClient.post('/vendorMaterialDetails', data),
-
-  // Orders
-  getOrderDetail:   (data: Record<string, unknown>) => vendorClient.post('/vendorOrderDetails', data),
-  askPayment:       (data: Record<string, unknown>) => vendorClient.post('/AskPyament', data),
-  getPaymentSummary:(data: Record<string, unknown>) => vendorClient.post('/vendorPaymentSummary', data),
-
-  // Earnings
-  getBalance:       () => vendorClient.post('/vendorBalance', {}),
-  getRevenueChart:  () => vendorClient.get('/getVendorRevenueChart'),
-  getTransactions:  (data: Record<string, unknown>) => vendorClient.post('/vendorTransactionHistory', data),
-  getCurrentMonth:  (data: Record<string, unknown>) => vendorClient.post('/vendorTransHistoryCurMon', data),
-  requestPayout:    (data: Record<string, unknown>) => vendorClient.post('/vendorPayout', data),
-
-  // Bank
-  addBank:      (data: Record<string, unknown>) => vendorClient.post('/AddBankDetails', data),
-  editBank:     (data: Record<string, unknown>) => vendorClient.post('/EditBankDetails', data),
-  getBank:      () => vendorClient.post('/GetBankDetails', {}),
-  editBankReq:  (data: Record<string, unknown>) => vendorClient.post('/EditBankDetailsReq', data),
-
-  // Notifications
-  getNotifications: () => vendorClient.post('/vendorNotificationList', {}),
-
-  // Uploads
-  uploadFiles: (formData: FormData) => commonClient.post('/upload_files', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }),
-
-  // Reviews
-  getReviews: (data: Record<string, unknown>) => commonClient.post('/vendorlistReviews', data),
-
-  // ── RESTful endpoints (new backend: vayil-web-backend) ────────
-  // Use these in new screens. Legacy methods above kept for back-compat
-  // until every consumer is migrated.
-  getDashboard:     ()                     => vendorClient.get('/vendor/dashboard'),
-  listEnquiries:    ()                     => vendorClient.get('/vendor/enquiries'),
-  getEnquiryDetail: (id: string | number)  => vendorClient.get(`/vendor/enquiries/${id}`),
-  postQuote:        (id: string | number, data: Record<string, unknown>) =>
-                                              vendorClient.post(`/vendor/enquiries/${id}/quotes`, data),
-  listProjects:     ()                     => vendorClient.get('/vendor/projects'),
-  getProjectDetail: (id: string | number)  => vendorClient.get(`/vendor/projects/${id}`),
-  postKYC:          (data: Record<string, unknown>) => vendorClient.post('/vendor/kyc', data),
-  getEarnings:      ()                     => vendorClient.get('/vendor/earnings'),
-  listListings:     ()                     => vendorClient.get('/vendor/listings'),
-  postListing:      (data: Record<string, unknown>) => vendorClient.post('/vendor/listings', data),
+  getServiceDetail:   (data: Record<string, unknown>) => vendorClient.post('/ServiceDetails', data),
+  addServiceTag:      (data: Record<string, unknown>) => vendorClient.post('/VendorAddServiceTag', data),
+  getEnquiriesLegacy: (data: Record<string, unknown>) => vendorClient.post('/vendorEnuqiryList', data),
+  acceptEnquiryLegacy:(data: Record<string, unknown>) => vendorClient.post('/AcceptEnquiredStatusUpdate', data),
+  rejectEnquiryLegacy:(data: Record<string, unknown>) => vendorClient.post('/vendorRejectEnquiry', data),
+  sendQuote:          (data: Record<string, unknown>) => vendorClient.post('/sendQuotationToCustomer', data),
+  createPlanLegacy:   (data: Record<string, unknown>) => vendorClient.post('/createPlan', data),
+  updatePlanLegacy:   (data: Record<string, unknown>) => vendorClient.post('/updatePlan', data),
+  updatePlanStatus:   (data: Record<string, unknown>) => vendorClient.post('/updatePlanStatus', data),
+  getPlans:           (data: Record<string, unknown>) => vendorClient.post('/vendorgetPlan', data),
+  getPlanDetail:      (data: Record<string, unknown>) => vendorClient.post('/vendorPlanDetails', data),
+  createAcceptPlan:   (data: Record<string, unknown>) => vendorClient.post('/createAcceptPlan', data),
+  addMaterialLegacy:  (data: Record<string, unknown>) => vendorClient.post('/addPlanMaterial', data),
+  editMaterialLegacy: (data: Record<string, unknown>) => vendorClient.post('/editPlanMaterial', data),
+  getMaterials:       (data: Record<string, unknown>) => vendorClient.post('/vendorgetMaterial', data),
+  getMaterialDetail:  (data: Record<string, unknown>) => vendorClient.post('/vendorMaterialDetails', data),
+  getOrderDetail:     (data: Record<string, unknown>) => vendorClient.post('/vendorOrderDetails', data),
+  askPayment:         (data: Record<string, unknown>) => vendorClient.post('/AskPyament', data),
+  getPaymentSummary:  (data: Record<string, unknown>) => vendorClient.post('/vendorPaymentSummary', data),
+  getBalance:         () => vendorClient.post('/vendorBalance', {}),
+  getRevenueChart:    () => vendorClient.get('/getVendorRevenueChart'),
+  getTransactions:    (data: Record<string, unknown>) => vendorClient.post('/vendorTransactionHistory', data),
+  getCurrentMonth:    (data: Record<string, unknown>) => vendorClient.post('/vendorTransHistoryCurMon', data),
+  requestPayout:      (data: Record<string, unknown>) => vendorClient.post('/vendorPayout', data),
+  addBank:            (data: Record<string, unknown>) => vendorClient.post('/AddBankDetails', data),
+  editBank:           (data: Record<string, unknown>) => vendorClient.post('/EditBankDetails', data),
+  getBank:            () => vendorClient.post('/GetBankDetails', {}),
+  editBankReq:        (data: Record<string, unknown>) => vendorClient.post('/EditBankDetailsReq', data),
+  getNotifications:   () => vendorClient.post('/vendorNotificationList', {}),
+  getReviews:         (data: Record<string, unknown>) => commonClient.post('/vendorlistReviews', data),
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  COMMON APIs
-// ═══════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════════
+ *  PAYMENTS (canonical)
+ * ═════════════════════════════════════════════════════════════════ */
+export const paymentsApi = {
+  createOrder: (data: {
+    amount:        number
+    purpose:       'quote' | 'milestone' | 'materials'
+    enquiry_id?:   number
+    order_id?:     number
+    milestone_id?: number
+    material_ids?: number[]
+    idempotency_key?: string
+  }) => paymentsClient.post('/create-order', data, { headers: idemHeader(data.idempotency_key) }),
+  verify: (data: {
+    razorpay_order_id:   string
+    razorpay_payment_id: string
+    razorpay_signature:  string
+    idempotency_key?:    string
+  }) => paymentsClient.post('/verify', data, { headers: idemHeader(data.idempotency_key) }),
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ *  COMMON
+ * ═════════════════════════════════════════════════════════════════ */
 export const commonApi = {
   getCategories:    () => commonClient.get('/service-categories'),
-  getSubcategories: (catId?: number) => commonClient.get('/service-subcategories', { params: catId ? { category_id: catId } : undefined }),
+  getSubcategories: (catId?: number) => commonClient.get('/service-subcategories',
+                      { params: catId ? { category_id: catId } : undefined }),
   getTags:          () => commonClient.get('/service-tags'),
   getTools:         () => commonClient.get('/getTools'),
   getLanguages:     () => commonClient.get('/getLanguages'),
@@ -248,17 +325,42 @@ export const commonApi = {
   getStates:        () => commonClient.get('/get_states_by_country_id', { params: { country_id: 101 } }),
   listProofTypes:   () => commonClient.post('/listProofTypes', {}),
   listStatuses:     () => commonClient.get('/listStatus'),
+  health:           () => commonClient.get('/health'),
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  HELPERS
-// ═══════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════════
+ *  LEGACY MOBILE ENDPOINTS — DO NOT USE FROM NEW SCREENS
+ *  These remain because a few unmigrated /customer/* dashboard pages
+ *  still call them. Once those are gone, delete this object.
+ * ═════════════════════════════════════════════════════════════════ */
+export const legacyMobileApi = {
+  // OTP
+  customer_register:     (mobile: string) => commonClient.post('/customer/register', { mobile_number: mobile }),
+  customer_verifyOTP:    (mobile: string, otp: string) => commonClient.post('/customer/verifyCustomerOTP', { mobile_number: mobile, otp }),
+  customer_loginOTP:     (mobile: string) => commonClient.post('/customer/logincustomerWithOTP', { mobile_number: mobile }),
+  customer_verifyLogin:  (mobile: string, otp: string) => commonClient.post('/customer/verifyLogincustomerOTP', { mobile_number: mobile, otp }),
+  customer_resendOTP:    (mobile: string) => commonClient.post('/customer/resendcustomerOTP', { mobile_number: mobile }),
+  vendor_register:       (mobile: string) => commonClient.post('/register', { mobile_number: mobile }),
+  vendor_verifyOTP:      (mobile: string, otp: string) => commonClient.post('/verifyVendorOTP', { mobile_number: mobile, otp }),
+  vendor_loginOTP:       (mobile: string) => commonClient.post('/vendor-login-otp', { mobile_number: mobile }),
+  vendor_verifyLogin:    (mobile: string, otp: string) => commonClient.post('/vendor-login-verify-otp', { mobile_number: mobile, otp }),
+  vendor_resendOTP:      (mobile: string) => commonClient.post('/resendVendorOTP', { mobile_number: mobile }),
 
-/**
- * PRD §9 (P0-10): the upload endpoint returns `{ uploadedUrls: { files: [...] } }`,
- * but older code expected `data: [...]` or `files: [...]`. Pass any upload
- * response through this helper to get a flat string[] of URLs.
- */
+  // Older POST endpoints kept only for the /customer/dashboard legacy page.
+  saveCustomerInfo: (data: Record<string, unknown>) => customerClient.post('/saveCustomerInfo', data),
+  getCustomerInfo:  ()                              => customerClient.get('/getCustomerInfo'),
+  ServiceList:      (params?: Record<string, unknown>) => customerClient.post('/ServiceList', params ?? {}),
+  ServiceInfo:      (service_id: number) => customerClient.post('/ServiceInfo', { service_id }),
+  enquiryList:      ()                              => customerClient.post('/enquiryList', {}),
+  enquiryDetails:   (enquiry_id: number)            => customerClient.post('/enquiryDetails', { enquiry_id }),
+  QuotationList:    (enquiry_id: number)            => customerClient.post('/QuotationList', { enquiry_id }),
+  updateQuotation:  (data: Record<string, unknown>) => customerClient.post('/updateQuotation', data),
+  placeOrder:       (data: Record<string, unknown>) => customerClient.post('/placeOrder', data),
+  orderDetails:     (order_id: number)              => customerClient.post('/orderDetails', { order_id }),
+  paymentUpdate:    (data: Record<string, unknown>) => customerClient.post('/payment_update', data),
+}
+
+/* Normalise uploads regardless of backend response shape. */
 export function normalizeUploadedUrls(res: any): string[] {
   const d = res?.data ?? res ?? {}
   const candidates =
@@ -273,4 +375,3 @@ export function normalizeUploadedUrls(res: any): string[] {
     .map((f: any) => (typeof f === 'string' ? f : f?.url || f?.location || f?.file_url))
     .filter(Boolean)
 }
-

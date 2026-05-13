@@ -1,18 +1,15 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Button, Input } from '@/components/ui'
+import { Button, Input, PageLoader } from '@/components/ui'
 import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { customerApi } from '@/lib/api/client'
+import { customerApi, paymentsApi } from '@/lib/api/client'
 
 declare global { interface Window { Razorpay: any } }
 
 type Option = 'full' | 'min' | 'custom'
-
-// TODO(backend): replace with customerApi.getQuote(enquiry_id) when backend exposes it.
-const MOCK_QUOTE_TOTAL = 850000
 
 async function loadRazorpay(): Promise<void> {
   if (typeof window === 'undefined') return
@@ -33,9 +30,43 @@ export default function PaymentOptionSheetPage() {
   const [option, setOption] = useState<Option>('full')
   const [custom, setCustom] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [total, setTotal] = useState<number | null>(null)
+  const [loadingQuote, setLoadingQuote] = useState(true)
 
-  const total = MOCK_QUOTE_TOTAL
-  const min   = Math.round(total * 0.25)
+  // PRD audit P0-9 — read the real quote amount from /customer/quotes/:enquiryId.
+  // If it fails, surface an error rather than guessing.
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    customerApi.getQuote(id)
+      .then((res: any) => {
+        if (cancelled) return
+        const quotes = res?.data?.data?.quotes ?? res?.data?.quotes ?? []
+        const latest = Array.isArray(quotes) && quotes[0]
+        if (!latest) throw new Error('No quote available for this enquiry yet')
+        setTotal(Number(latest.amount))
+      })
+      .catch(err => {
+        if (cancelled) return
+        setError(err?.response?.data?.error || err?.message || 'Failed to load quote')
+      })
+      .finally(() => { if (!cancelled) setLoadingQuote(false) })
+    return () => { cancelled = true }
+  }, [id])
+
+  if (loadingQuote) return <PageLoader />
+  if (total === null) {
+    return (
+      <div className="space-y-5 pb-10 max-w-md">
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+          <p className="text-sm font-semibold text-red-700">{error || 'Quote unavailable'}</p>
+          <button onClick={() => router.back()} className="text-xs text-red-700 underline mt-1">Go back</button>
+        </div>
+      </div>
+    )
+  }
+  const min = Math.round(total * 0.25)
 
   const amount =
     option === 'full' ? total :
@@ -48,19 +79,22 @@ export default function PaymentOptionSheetPage() {
   const pay = async () => {
     if (!valid) { toast.error(`Custom amount must be between ${formatCurrency(min)} and ${formatCurrency(total)}`); return }
     setSubmitting(true)
+    setError(null)
 
-    // Idempotency key — stash per intent so a refresh+retry doesn't double-charge.
-    const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
+    // Idempotency key — survives refresh-retries (server dedupes within 5 min).
+    const idempotencyKey = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+      ? (crypto as any).randomUUID()
       : `pay-${id}-${Date.now()}`
 
     try {
-      // 1) Ask backend to create a Razorpay order (idempotent).
-      const orderRes: any = await Promise.race([
-        customerApi.placeOrder({ enquiry_id: Number(id), amount: fees.total, idempotency_key: idempotencyKey }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
-      ])
-      const orderData = orderRes?.data?.data || orderRes?.data?.result || {}
+      // 1) Server creates a Razorpay order (idempotent).
+      const orderRes: any = await paymentsApi.createOrder({
+        amount:          fees.total,
+        purpose:         'quote',
+        enquiry_id:      Number(id),
+        idempotency_key: idempotencyKey,
+      })
+      const orderData = orderRes?.data?.data || orderRes?.data || {}
       const razorpayOrderId = orderData.razorpay_order_id
 
       // 2) Open Razorpay checkout
@@ -79,31 +113,26 @@ export default function PaymentOptionSheetPage() {
         description: 'Service Advance Payment',
         theme:    { color: '#E8943A' },
         handler: async (response: any) => {
-          // 3) Server-verifies signature before flipping status.
+          // 3) Server verifies signature before flipping intent to escrow_held.
           try {
-            await customerApi.paymentUpdate({
-              order_id:           orderData.order_id || orderData.id,
-              razorpay_order_id:  response.razorpay_order_id,
-              razorpay_payment_id:response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              status:             'SUCCESS',
-              idempotency_key:    idempotencyKey,
+            await paymentsApi.verify({
+              razorpay_order_id:   response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature:  response.razorpay_signature,
+              idempotency_key:     idempotencyKey,
             })
             toast.success('Payment successful — funds held in escrow')
             router.push('/account/projects')
-          } catch {
-            toast.error('Payment confirmed but verification failed — support has been notified')
+          } catch (verifyErr: any) {
+            setError(verifyErr?.response?.data?.error || 'Payment captured but verification failed — try again or contact support')
           } finally {
             setSubmitting(false)
           }
         },
-        modal: { ondismiss: () => setSubmitting(false) },
+        modal: { ondismiss: () => { setSubmitting(false); setError('Payment cancelled') } },
       }).open()
-    } catch {
-      // Offline fallback so the demo flow completes when no backend is wired.
-      // TODO(post-launch): surface real failures instead of succeeding silently.
-      toast.success('Payment queued (offline mode) — funds will be held in escrow once live')
-      router.push('/account/projects')
+    } catch (err: any) {
+      setError(err?.response?.data?.error || err?.message || 'Failed to start payment')
       setSubmitting(false)
     }
   }
@@ -164,8 +193,13 @@ export default function PaymentOptionSheetPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       <Button full loading={submitting} onClick={pay} disabled={!valid || amount <= 0}>
-        <CreditCard className="w-4 h-4" /> Pay {formatCurrency(fees.total)}
+        <CreditCard className="w-4 h-4" /> {error ? 'Retry payment' : `Pay ${formatCurrency(fees.total)}`}
       </Button>
     </div>
   )

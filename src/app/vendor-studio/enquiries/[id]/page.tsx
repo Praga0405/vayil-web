@@ -2,6 +2,7 @@
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useLiveEnquiry } from '@/hooks/useVendorStudio'
+import { vendorApi } from '@/lib/api/client'
 import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, XCircle, FileText, Phone, MapPin, Calendar, Home, Ruler } from 'lucide-react'
@@ -19,8 +20,29 @@ export default function VendorEnquiryDetailPage() {
   if (loading)   return <PageLoader />
   if (!enquiry)  return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
 
-  const accept = () => { setLocalStatus('ACCEPTED'); toast.success('Enquiry accepted — customer notified') }
-  const reject = () => { setLocalStatus('REJECTED'); toast.success('Enquiry rejected') }
+  const [pending, setPending] = useState<'accept' | 'reject' | null>(null)
+  const accept = async () => {
+    if (!id) return
+    setPending('accept')
+    try {
+      await vendorApi.acceptEnquiry(id)
+      setLocalStatus('ACCEPTED')
+      toast.success('Enquiry accepted — customer notified')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to accept enquiry')
+    } finally { setPending(null) }
+  }
+  const reject = async () => {
+    if (!id) return
+    setPending('reject')
+    try {
+      await vendorApi.rejectEnquiry(id)
+      setLocalStatus('REJECTED')
+      toast.success('Enquiry rejected')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to reject enquiry')
+    } finally { setPending(null) }
+  }
 
   return (
     <div className="space-y-5 pb-10">
@@ -59,10 +81,10 @@ export default function VendorEnquiryDetailPage() {
         <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3">
           <h2 className="text-base font-bold text-navy">Next Step</h2>
           <div className="flex gap-3">
-            <Button full onClick={accept}>
+            <Button full onClick={accept} loading={pending === 'accept'}>
               <CheckCircle className="w-4 h-4" /> Accept Enquiry
             </Button>
-            <Button variant="outline" onClick={reject}>
+            <Button variant="outline" onClick={reject} loading={pending === 'reject'}>
               <XCircle className="w-4 h-4" /> Reject
             </Button>
           </div>

@@ -1,33 +1,49 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { customerApi } from '@/lib/api/client'
 import { adaptVendorDetail, adaptVendorListRow } from '@/lib/adapters/vendor'
 import { getVendorById, DUMMY_VENDORS, type DummyVendor } from '@/lib/dummyData'
 
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === 'true'
-// Skip the API call when no backend URL is configured. Avoids a 30 s axios
-// timeout on every page hit during local/staging demos. Once Vercel has
-// NEXT_PUBLIC_API_URL set, this branch goes away automatically.
-const NO_BACKEND = !process.env.NEXT_PUBLIC_API_URL
-
-interface DetailState { vendor: DummyVendor | null; loading: boolean; error: string | null; source: 'live' | 'fallback' }
-
 /**
- * Loads a single vendor profile. Strategy:
- *   1. If USE_MOCK is on, return dummy immediately.
- *   2. Otherwise call backend; on success adapt → DummyVendor shape.
- *   3. On 4xx/5xx/network: fall back to dummy by id (so the page never
- *      goes blank in front of a demo while the backend stabilises).
+ * Fallback policy
+ * ────────────────────────────────────────────────────────────────
+ * `NEXT_PUBLIC_USE_MOCK_DATA=true`  → always use dummy (story / offline mode)
+ * `NEXT_PUBLIC_USE_MOCK_DATA=false` → live only; on failure expose an error
+ *                                     instead of silently returning dummy.
+ * (Default when the flag is unset is "true" if NEXT_PUBLIC_API_URL is also
+ * unset — i.e. local dev without a backend keeps working — otherwise live.)
  */
+const USE_MOCK   = process.env.NEXT_PUBLIC_USE_MOCK_DATA === 'true'
+const NO_BACKEND = !process.env.NEXT_PUBLIC_API_URL
+const FALLBACK_MODE = USE_MOCK || (NO_BACKEND && process.env.NEXT_PUBLIC_USE_MOCK_DATA !== 'false')
+
+const TIMEOUT_MS = 8000
+function race<T>(p: Promise<T>): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS)),
+  ])
+}
+
+interface DetailState {
+  vendor: DummyVendor | null
+  loading: boolean
+  error: string | null
+  source: 'live' | 'fallback'
+  reload: () => void
+}
+
 export function useLiveVendor(id: string | undefined): DetailState {
-  const [state, setState] = useState<DetailState>({
-    vendor: null, loading: true, error: null, source: 'live',
+  const [state, setState] = useState<Omit<DetailState, 'reload'>>({
+    vendor: null, loading: true, error: null, source: FALLBACK_MODE ? 'fallback' : 'live',
   })
+  const [nonce, setNonce] = useState(0)
+  const reload = useCallback(() => setNonce(n => n + 1), [])
 
   useEffect(() => {
     if (!id) { setState({ vendor: null, loading: false, error: 'no id', source: 'fallback' }); return }
 
-    if (USE_MOCK || NO_BACKEND) {
+    if (FALLBACK_MODE) {
       setState({ vendor: getVendorById(id) ?? null, loading: false, error: null, source: 'fallback' })
       return
     }
@@ -35,66 +51,65 @@ export function useLiveVendor(id: string | undefined): DetailState {
     let cancelled = false
     setState(s => ({ ...s, loading: true, error: null }))
 
-    customerApi.getVendorDetail(id)
+    race(customerApi.getVendorDetail(id))
       .then(res => {
         if (cancelled) return
         const body: any = res.data ?? res
-        const vendor  = body?.data?.vendor   ?? body?.vendor
+        const vendor   = body?.data?.vendor   ?? body?.vendor
         const listings = body?.data?.listings ?? body?.listings ?? []
-        if (!vendor) throw new Error('empty vendor payload')
+        if (!vendor) throw new Error('Vendor not found')
         setState({ vendor: adaptVendorDetail(vendor, listings), loading: false, error: null, source: 'live' })
       })
       .catch(err => {
         if (cancelled) return
-        // Graceful fallback: backend not ready, or vendor not in DB yet.
-        const fallback = getVendorById(id) ?? null
-        setState({ vendor: fallback, loading: false, error: fallback ? null : (err?.message || 'fetch failed'), source: 'fallback' })
+        // Production: do NOT fall back silently. Surface the error so the
+        // page can show a real error state with retry.
+        setState({ vendor: null, loading: false, error: err?.message || 'Failed to load vendor', source: 'live' })
       })
 
     return () => { cancelled = true }
-  }, [id])
+  }, [id, nonce])
 
-  return state
+  return { ...state, reload }
 }
 
-interface ListState { vendors: DummyVendor[]; loading: boolean; error: string | null; source: 'live' | 'fallback' }
+interface ListState {
+  vendors: DummyVendor[]
+  loading: boolean
+  error: string | null
+  source: 'live' | 'fallback'
+  reload: () => void
+}
 
-/**
- * Loads the vendor list for /search. Live data is the source of truth
- * when the backend has rows; if the backend returns an empty array OR
- * fails, falls back to the bundled DUMMY_VENDORS so the page stays
- * populated. UI components consume the same `DummyVendor[]` shape
- * regardless of source.
- */
 export function useLiveVendors(): ListState {
-  const fallback = USE_MOCK || NO_BACKEND
-  const [state, setState] = useState<ListState>({
-    vendors: fallback ? DUMMY_VENDORS : [], loading: !fallback, error: null, source: fallback ? 'fallback' : 'live',
+  const [state, setState] = useState<Omit<ListState, 'reload'>>({
+    vendors: FALLBACK_MODE ? DUMMY_VENDORS : [],
+    loading: !FALLBACK_MODE, error: null,
+    source: FALLBACK_MODE ? 'fallback' : 'live',
   })
+  const [nonce, setNonce] = useState(0)
+  const reload = useCallback(() => setNonce(n => n + 1), [])
 
   useEffect(() => {
-    if (fallback) return
+    if (FALLBACK_MODE) return
     let cancelled = false
+    setState(s => ({ ...s, loading: true, error: null }))
 
-    customerApi.listVendors()
+    race(customerApi.listVendors())
       .then(res => {
         if (cancelled) return
         const body: any = res.data ?? res
         const rows = body?.data?.vendors ?? body?.vendors ?? []
-        if (!Array.isArray(rows) || rows.length === 0) {
-          setState({ vendors: DUMMY_VENDORS, loading: false, error: null, source: 'fallback' })
-          return
-        }
+        if (!Array.isArray(rows)) throw new Error('Bad vendor list payload')
         setState({ vendors: rows.map(adaptVendorListRow), loading: false, error: null, source: 'live' })
       })
       .catch(err => {
         if (cancelled) return
-        setState({ vendors: DUMMY_VENDORS, loading: false, error: err?.message || 'fetch failed', source: 'fallback' })
+        setState({ vendors: [], loading: false, error: err?.message || 'Failed to load vendors', source: 'live' })
       })
 
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [nonce])
 
-  return state
+  return { ...state, reload }
 }

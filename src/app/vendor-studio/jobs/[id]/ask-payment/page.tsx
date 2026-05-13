@@ -6,6 +6,7 @@ import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { vendorApi } from '@/lib/api/client'
 
 type Selection = { type: 'milestone' | 'material'; id: number; title: string; amount: number }
 
@@ -30,10 +31,24 @@ export default function AskPaymentPage() {
   const isSelected = (type: Selection['type'], itemId: number) => selected.some(s => s.type === type && s.id === itemId)
   const total = selected.reduce((s, x) => s + x.amount, 0)
 
-  const submit = () => {
+  const [submitting, setSubmitting] = useState(false)
+  const submit = async () => {
     if (selected.length === 0) { toast.error('Select at least one item'); return }
-    toast.success(`Payment request for ${formatCurrency(total)} sent to customer`)
-    router.push(`/vendor-studio/jobs/${id}`)
+    setSubmitting(true)
+    try {
+      // For each selected milestone, hit /vendor/milestones/:id/payment-request.
+      // Material items will be paid by the customer directly via the
+      // /customer/projects/:id/materials/payment-order flow; vendor doesn't
+      // need to "request" those — flagging them awaiting_payment is enough.
+      const milestoneIds = selected.filter(s => s.type === 'milestone').map(s => s.id)
+      for (const mid of milestoneIds) {
+        await vendorApi.requestMilestonePayment(mid)
+      }
+      toast.success(`Payment request for ${formatCurrency(total)} sent to customer`)
+      router.push(`/vendor-studio/jobs/${id}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to send payment request')
+    } finally { setSubmitting(false) }
   }
 
   return (
@@ -113,7 +128,7 @@ export default function AskPaymentPage() {
           <span className="text-sm text-gray-500">Total Request</span>
           <span className="text-lg font-bold text-navy">{formatCurrency(total)}</span>
         </div>
-        <Button full onClick={submit} disabled={selected.length === 0}>
+        <Button full onClick={submit} disabled={selected.length === 0} loading={submitting}>
           <Wallet className="w-4 h-4" /> Send Payment Request
         </Button>
       </div>

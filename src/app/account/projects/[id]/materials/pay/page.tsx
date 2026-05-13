@@ -6,7 +6,7 @@ import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { customerApi } from '@/lib/api/client'
+import { customerApi, paymentsApi } from '@/lib/api/client'
 
 declare global { interface Window { Razorpay: any } }
 
@@ -61,22 +61,21 @@ export default function MaterialsPaymentPage() {
   const subtotal = items.reduce((s, m) => s + m.total, 0)
   const fees     = calculateFees(subtotal, 5, 18, 0)
 
+  const [payError, setPayError] = useState<string | null>(null)
   const pay = async () => {
     if (items.length === 0) { toast.error('Select at least one material item'); return }
-    setSubmitting(true)
-    const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID() : `mat-${id}-${Date.now()}`
+    setSubmitting(true); setPayError(null)
+    const idempotencyKey = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+      ? (crypto as any).randomUUID() : `mat-${id}-${Date.now()}`
     try {
-      const orderRes: any = await Promise.race([
-        customerApi.placeOrder({
-          order_id:        Number(id),
-          amount:          fees.total,
-          material_ids:    items.map(m => m.id),
-          idempotency_key: idempotencyKey,
-        }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
-      ])
-      const orderData = orderRes?.data?.data || orderRes?.data?.result || {}
+      const orderRes: any = await paymentsApi.createOrder({
+        amount:          fees.total,
+        purpose:         'materials',
+        order_id:        Number(id),
+        material_ids:    items.map(m => m.id),
+        idempotency_key: idempotencyKey,
+      })
+      const orderData = orderRes?.data?.data || orderRes?.data || {}
       const settings: any = await customerApi.getSettings().catch(() => ({}))
       const key = settings?.data?.data?.razorpay_key
               ?? settings?.data?.result?.razorpay_key
@@ -89,30 +88,22 @@ export default function MaterialsPaymentPage() {
         theme: { color: '#E8943A' },
         handler: async (response: any) => {
           try {
-            await customerApi.paymentUpdate({
-              order_id:           orderData.order_id || orderData.id,
-              razorpay_order_id:  response.razorpay_order_id,
-              razorpay_payment_id:response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              status:             'SUCCESS',
-              material_ids:       items.map(m => m.id),
-              idempotency_key:    idempotencyKey,
+            await paymentsApi.verify({
+              razorpay_order_id:   response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature:  response.razorpay_signature,
+              idempotency_key:     idempotencyKey,
             })
             toast.success('Materials paid — vendor will start procurement')
             router.push(`/account/projects/${id}`)
-          } catch {
-            toast.error('Payment captured but verification failed — support notified')
-          } finally {
-            setSubmitting(false)
-          }
+          } catch (verifyErr: any) {
+            setPayError(verifyErr?.response?.data?.error || 'Payment captured but verification failed — retry or contact support')
+          } finally { setSubmitting(false) }
         },
-        modal: { ondismiss: () => setSubmitting(false) },
+        modal: { ondismiss: () => { setSubmitting(false); setPayError('Payment cancelled') } },
       }).open()
-    } catch {
-      // Offline fallback for demo / pre-deploy.
-      // TODO(post-launch): surface real failure once backend is reachable.
-      toast.success('Materials payment queued (offline mode)')
-      router.push(`/account/projects/${id}`)
+    } catch (err: any) {
+      setPayError(err?.response?.data?.error || err?.message || 'Failed to start payment')
       setSubmitting(false)
     }
   }
@@ -170,8 +161,14 @@ export default function MaterialsPaymentPage() {
         </div>
       </div>
 
+      {payError && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-700">
+          {payError}
+        </div>
+      )}
+
       <Button full loading={submitting} onClick={pay} disabled={items.length === 0}>
-        <CreditCard className="w-4 h-4" /> Pay {fees.total > 0 ? formatCurrency(fees.total) : ''}
+        <CreditCard className="w-4 h-4" /> {payError ? 'Retry payment' : `Pay ${fees.total > 0 ? formatCurrency(fees.total) : ''}`}
       </Button>
     </div>
   )

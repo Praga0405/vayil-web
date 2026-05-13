@@ -21,7 +21,7 @@ export default function VendorProfilePage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { user } = useUserAuth()
-  const { vendor, loading } = useLiveVendor(id ? String(id) : undefined)
+  const { vendor, loading, error, reload } = useLiveVendor(id ? String(id) : undefined)
 
   const [tab, setTab] = useState<'overview' | 'services' | 'portfolio' | 'reviews'>('overview')
   const [loginOpen, setLoginOpen] = useState(false)
@@ -50,15 +50,27 @@ export default function VendorProfilePage() {
   }
 
   if (!vendor) {
+    const hasError = !!error
     return (
       <div className="min-h-screen bg-[#F4F7FA]">
         <PublicHeader />
         <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-20 text-center">
-          <h1 className="text-2xl font-bold text-navy mb-2">Vendor not found</h1>
-          <p className="text-sm text-gray-500 mb-6">This vendor may have been removed or is no longer active.</p>
-          <Link href="/search" className="bg-orange text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-orange-600">
-            Browse all vendors
-          </Link>
+          <h1 className="text-2xl font-bold text-navy mb-2">
+            {hasError ? 'Couldn\'t load this vendor' : 'Vendor not found'}
+          </h1>
+          <p className="text-sm text-gray-500 mb-6">
+            {hasError ? error : 'This vendor may have been removed or is no longer active.'}
+          </p>
+          <div className="flex gap-3 justify-center">
+            {hasError && (
+              <button onClick={reload} className="bg-orange text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-orange-600">
+                Retry
+              </button>
+            )}
+            <Link href="/search" className="bg-white border border-gray-200 text-navy px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50">
+              Browse all vendors
+            </Link>
+          </div>
         </div>
       </div>
     )
@@ -444,15 +456,13 @@ function EnquiryModal({ open, onClose, vendor, service }: {
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
 
+  const [error, setError] = useState<string | null>(null)
   const submit = async () => {
     if (!desc.trim()) { toast.error('Please describe what you need'); return }
     if (!vendor)      { toast.error('Vendor not loaded'); return }
 
     setSubmitting(true)
-    // Race the API call against a 5 s timeout so a stale/wrong API URL never
-    // leaves the form hanging. If we time out we drop into the offline path
-    // (record locally + success toast). Once the real backend is reachable
-    // this branch effectively never runs.
+    setError(null)
     try {
       await Promise.race([
         customerApi.createEnquiry({
@@ -461,16 +471,20 @@ function EnquiryModal({ open, onClose, vendor, service }: {
           description: desc.trim(),
           location:    location.trim() || vendor.area,
         }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), 8000)),
       ])
       setDone(true)
     } catch (err: any) {
-      // While the new backend is being deployed, treat every failure as
-      // offline so the customer always sees a success state. Once Render is
-      // live we'll tighten this to network-error only.
-      // TODO(post-launch): change to `!err?.response || err?.message === 'timeout'`.
-      toast.success('Enquiry queued (offline mode)')
-      setDone(true)
+      // Production: surface the real failure with a retry CTA. No silent
+      // success — the enquiry must persist through POST /customer/enquiries
+      // before we say "Sent" (PRD audit P0-4).
+      const status = err?.response?.status
+      const msg    = err?.response?.data?.error || err?.message || 'Failed to send enquiry'
+      setError(
+        status === 401 ? 'Please sign in again to send this enquiry.' :
+        status === 0 || /network|timeout/i.test(msg) ? 'Network error — check your connection and retry.' :
+        msg,
+      )
     } finally {
       setSubmitting(false)
     }
@@ -542,9 +556,14 @@ function EnquiryModal({ open, onClose, vendor, service }: {
                   className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange transition"
                 />
               </div>
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">
+                  {error}
+                </div>
+              )}
               <button onClick={submit} disabled={submitting}
                 className="w-full flex items-center justify-center gap-2 bg-orange text-white py-3 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-60">
-                {submitting ? 'Sending…' : <><Send className="w-4 h-4" /> Send Enquiry</>}
+                {submitting ? 'Sending…' : <><Send className="w-4 h-4" /> {error ? 'Retry' : 'Send Enquiry'}</>}
               </button>
             </div>
           </>

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { exec, one, query } from '../db';
@@ -41,15 +41,21 @@ authRouter.post('/otp/verify', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Legacy mobile aliases.
-authRouter.post('/customer/logincustomerWithOTP', async (req, res, next) => {
-  req.body = { phone: req.body.phone || req.body.mobile, userType: 'customer' };
-  return authRouter.handle(Object.assign(req, { url: '/otp/send', method: 'POST' }), res, next);
-});
-authRouter.post('/vendor-login-otp', async (req, res, next) => {
-  req.body = { phone: req.body.phone || req.body.mobile, userType: 'vendor' };
-  return authRouter.handle(Object.assign(req, { url: '/otp/send', method: 'POST' }), res, next);
-});
+// Legacy mobile aliases. Inline the send-OTP logic so we don't rely on
+// internal Router internals (Router.handle is not part of the public type).
+async function legacySendOtp(userType: 'customer' | 'vendor', phone: string, res: any, next: NextFunction) {
+  try {
+    if (!phone || phone.length < 8) throw new ApiError(400, 'Phone is required');
+    const otp = generateOtp();
+    await storeOtp(phone, `${userType}_login`, otp);
+    await sendOtp(phone, otp);
+    ok(res, { message: 'OTP sent successfully' });
+  } catch (err) { next(err); }
+}
+authRouter.post('/customer/logincustomerWithOTP', (req, res, next) =>
+  legacySendOtp('customer', (req.body.phone || req.body.mobile || req.body.mobile_number) as string, res, next));
+authRouter.post('/vendor-login-otp', (req, res, next) =>
+  legacySendOtp('vendor', (req.body.phone || req.body.mobile || req.body.mobile_number) as string, res, next));
 
 authRouter.post('/staff/login', async (req, res, next) => {
   try {

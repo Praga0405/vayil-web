@@ -14,9 +14,9 @@ opsRouter.get('/dashboard/stats', async (_req, res, next) => {
     const [c, v, p, kyc, d, todayC, rev, escrow] = await Promise.all([
       one<any>('SELECT COUNT(*) total FROM customers'),
       one<any>('SELECT COUNT(*) total FROM vendors'),
-      one<any("SELECT COUNT(*) total FROM orders WHERE status NOT IN ('completed','cancelled')"),
-      one<any("SELECT COUNT(*) total FROM vendors WHERE status = 'kyc_submitted'"),
-      one<any("SELECT COUNT(*) total FROM disputes WHERE status = 'open'"),
+      one<any>("SELECT COUNT(*) total FROM orders WHERE status NOT IN ('completed','cancelled')"),
+      one<any>("SELECT COUNT(*) total FROM vendors WHERE status = 'kyc_submitted'"),
+      one<any>("SELECT COUNT(*) total FROM disputes WHERE status = 'open'"),
       one<any>('SELECT COUNT(*) total FROM customers WHERE DATE(created_at)=CURDATE()'),
       one<any>('SELECT COALESCE(SUM(amount),0) todayRevenue FROM payment_log WHERE DATE(created_at)=CURDATE()'),
       one<any>("SELECT COALESCE(SUM(amount),0) escrowHeld FROM payment_log WHERE status = 'escrow_held'")

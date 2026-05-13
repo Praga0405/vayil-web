@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useLiveJob } from '@/hooks/useVendorStudio'
 import { type MockMilestone } from '@/lib/mockData'
 import { Button, Input, PageLoader } from '@/components/ui'
+import { vendorApi } from '@/lib/api/client'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -35,14 +36,30 @@ export default function PlanBuilderPage() {
   const add = () => setDrafts([...drafts, { title: '', days: 1, percentage: 0, mandatory: true }])
   const remove = (i: number) => setDrafts(drafts.filter((_, idx) => idx !== i))
 
-  const submit = () => {
+  const [submitting, setSubmitting] = useState(false)
+  const submit = async () => {
     if (!canSubmit) {
       if (totalPct !== 100) toast.error(`Total must equal 100% (currently ${totalPct}%)`)
       else toast.error('Fill all milestone titles and days')
       return
     }
-    toast.success('Plan submitted — customer will review and approve')
-    router.push(`/vendor-studio/jobs/${id}`)
+    if (!id) return
+    setSubmitting(true)
+    try {
+      const milestones = drafts.map(m => ({
+        title:       m.title,
+        amount:      Math.round((job!.total * (m.percentage || 0)) / 100),
+        days:        m.days,
+        percentage:  m.percentage,
+        mandatory:   m.mandatory,
+      }))
+      await vendorApi.createPlan(id, milestones)
+      await vendorApi.submitPlan(id)
+      toast.success('Plan submitted — customer will review and approve')
+      router.push(`/vendor-studio/jobs/${id}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || err?.message || 'Failed to submit plan')
+    } finally { setSubmitting(false) }
   }
 
   return (
@@ -95,7 +112,7 @@ export default function PlanBuilderPage() {
           <div className={`h-full transition-all ${totalPct === 100 ? 'bg-green-500' : 'bg-orange'}`}
             style={{ width: `${Math.min(totalPct, 100)}%` }} />
         </div>
-        <Button full onClick={submit} disabled={!canSubmit}>
+        <Button full onClick={submit} disabled={!canSubmit} loading={submitting}>
           <Send className="w-4 h-4" /> Submit Plan to Customer
         </Button>
       </div>

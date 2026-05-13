@@ -260,8 +260,29 @@ function SearchInner() {
             </div>
           </div>
 
+          {/* Loading / error banner — only renders when the live hook is in a
+              real waiting/failed state. Layout below is unchanged. */}
+          {live.loading && (
+            <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center text-sm text-gray-500 mb-4">
+              Loading vendors…
+            </div>
+          )}
+          {live.error && !live.loading && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 flex items-start gap-3">
+              <span className="text-red-500 text-xl leading-none">⚠</span>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-red-700">Couldn't load vendors from the backend</p>
+                <p className="text-xs text-red-600 mt-0.5">{live.error}</p>
+              </div>
+              <button onClick={live.reload}
+                className="text-xs font-semibold text-red-700 underline hover:text-red-900">
+                Retry
+              </button>
+            </div>
+          )}
+
           {/* Result grid */}
-          {results.length === 0 ? (
+          {!live.loading && results.length === 0 ? (
             <div className="bg-white border border-gray-100 rounded-2xl p-12 text-center">
               <div className="w-16 h-16 mx-auto rounded-full bg-orange/10 flex items-center justify-center mb-4 text-3xl">🔍</div>
               <h3 className="text-xl font-bold text-navy mb-2">No vendors match these filters</h3>

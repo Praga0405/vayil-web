@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { exec, one, query } from '../db';
+import { exec, one, query, transaction } from '../db';
 import { requireAuth } from '../middleware/auth';
+import { idempotent } from '../middleware/idempotency';
 import { AuthRequest } from '../types';
-import { ok } from '../utils/http';
+import { ApiError, ok } from '../utils/http';
 import { calculateTax } from '../services/tax';
+import { releaseEscrow } from './payments';
 
 export const customerRouter = Router();
 customerRouter.use(requireAuth(['customer']));
@@ -101,5 +103,160 @@ customerRouter.post('/tax-preview', async (req, res, next) => {
   try {
     const tax = calculateTax(req.body);
     ok(res, { tax });
+  } catch (err) { next(err); }
+});
+
+/* ─────────────────────────────────────────────────────────────
+ *  P0 additions — plan approval/revision, materials list+pay,
+ *  signoff, rework, milestone payment request shortcut.
+ * ───────────────────────────────────────────────────────────── */
+
+async function assertProjectBelongs(orderId: string | number | undefined | string[], customerId: number | string) {
+  const row = await one<any>(
+    `SELECT order_id FROM orders WHERE order_id = :id AND customer_id = :customerId LIMIT 1`,
+    { id: String(orderId ?? ''), customerId },
+  );
+  if (!row) throw new ApiError(404, 'Project not found');
+}
+
+/* ── Quote (read) ────────────────────────────────────────── */
+customerRouter.get('/quotes/:enquiryId', async (req: AuthRequest, res, next) => {
+  try {
+    const enquiry = await one<any>(
+      `SELECT * FROM enquiries WHERE enquiry_id = :id AND customer_id = :cid`,
+      { id: req.params.enquiryId, cid: req.user!.id },
+    );
+    if (!enquiry) throw new ApiError(404, 'Enquiry not found');
+    const quotes = await query<any>(
+      `SELECT * FROM quotation WHERE enquiry_id = :id ORDER BY quotation_id DESC`,
+      { id: req.params.enquiryId },
+    );
+    ok(res, { enquiry, quotes });
+  } catch (err) { next(err); }
+});
+
+/* ── Plan approve / revision ─────────────────────────────── */
+customerRouter.post('/projects/:id/plan/approve', async (req: AuthRequest, res, next) => {
+  try {
+    await assertProjectBelongs(req.params.id, req.user!.id);
+    await transaction(async (conn) => {
+      await conn.query(
+        `UPDATE order_plan SET customer_status = 'approved' WHERE order_id = ?`,
+        [req.params.id],
+      );
+      await conn.query(
+        `UPDATE plan_submissions SET status = 'approved', reviewed_at = NOW()
+           WHERE order_id = ? AND status = 'submitted'`,
+        [req.params.id],
+      );
+    });
+    ok(res, { order_id: Number(req.params.id), status: 'plan_approved' });
+  } catch (err) { next(err); }
+});
+
+customerRouter.post('/projects/:id/plan/request-revision', async (req: AuthRequest, res, next) => {
+  try {
+    await assertProjectBelongs(req.params.id, req.user!.id);
+    const { reason } = z.object({ reason: z.string().min(1) }).parse(req.body);
+    await transaction(async (conn) => {
+      await conn.query(
+        `UPDATE order_plan SET customer_status = 'revision_requested', revision_reason = ?
+           WHERE order_id = ?`,
+        [reason, req.params.id],
+      );
+      await conn.query(
+        `UPDATE plan_submissions SET status = 'revision_requested', reviewed_at = NOW(),
+                                       reviewer_note = ?
+           WHERE order_id = ? AND status = 'submitted'`,
+        [reason, req.params.id],
+      );
+    });
+    ok(res, { order_id: Number(req.params.id), status: 'revision_requested', reason });
+  } catch (err) { next(err); }
+});
+
+/* ── Materials (customer view + pay) ─────────────────────── */
+customerRouter.get('/projects/:id/materials', async (req: AuthRequest, res, next) => {
+  try {
+    await assertProjectBelongs(req.params.id, req.user!.id);
+    const planApproved = await one<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status = 'approved'`,
+      { id: req.params.id },
+    );
+    const locked = !planApproved || Number(planApproved.n) === 0;
+    const materials = await query<any>(
+      `SELECT * FROM materials WHERE order_id = :id ORDER BY material_id ASC`,
+      { id: req.params.id },
+    );
+    ok(res, { materials, locked });
+  } catch (err) { next(err); }
+});
+
+// Convenience endpoint: bundles "create payment order for selected materials".
+// Frontend can also hit /payments/create-order directly with purpose='materials'.
+customerRouter.post('/projects/:id/materials/payment-order',
+  idempotent(),
+  async (req: AuthRequest, res, next) => {
+  try {
+    await assertProjectBelongs(req.params.id, req.user!.id);
+    const { material_ids } = z.object({ material_ids: z.array(z.number().int()).min(1) }).parse(req.body);
+    const rows = await query<any>(
+      `SELECT material_id, total FROM materials WHERE order_id = :id AND material_id IN (:ids)`,
+      { id: req.params.id, ids: material_ids } as any,
+    );
+    if (rows.length !== material_ids.length) throw new ApiError(400, 'One or more materials not found');
+    const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
+    const tax = calculateTax({ baseAmount: subtotal });
+    // Mark items awaiting_payment optimistically — payment verification flips to PAID.
+    await exec(
+      `UPDATE materials SET status = 'AWAITING_PAYMENT' WHERE material_id IN (:ids)`,
+      { ids: material_ids } as any,
+    );
+    ok(res, { subtotal, tax, total: tax.customerTotal, material_ids });
+  } catch (err) { next(err); }
+});
+
+/* ── Sign-off / rework ───────────────────────────────────── */
+customerRouter.post('/projects/:id/signoff', async (req: AuthRequest, res, next) => {
+  try {
+    await assertProjectBelongs(req.params.id, req.user!.id);
+    const { rating, comment } = z.object({
+      rating: z.number().int().min(1).max(5).optional(),
+      comment: z.string().optional(),
+    }).parse(req.body);
+
+    await transaction(async (conn) => {
+      await conn.query(
+        `INSERT INTO signoffs (order_id, customer_id, rating, comment)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment)`,
+        [req.params.id, req.user!.id, rating ?? null, comment ?? null],
+      );
+      await conn.query(
+        `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
+        [req.params.id],
+      );
+    });
+
+    // Release any held escrow for this order.
+    const intents = await query<any>(
+      `SELECT intent_id FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
+      { id: req.params.id },
+    );
+    for (const i of intents) await releaseEscrow(i.intent_id);
+
+    ok(res, { order_id: Number(req.params.id), status: 'completed' });
+  } catch (err) { next(err); }
+});
+
+customerRouter.post('/projects/:id/rework-request', async (req: AuthRequest, res, next) => {
+  try {
+    await assertProjectBelongs(req.params.id, req.user!.id);
+    const { reason } = z.object({ reason: z.string().min(1) }).parse(req.body);
+    const result: any = await exec(
+      `INSERT INTO rework_requests (order_id, customer_id, reason) VALUES (:id, :cid, :reason)`,
+      { id: req.params.id, cid: req.user!.id, reason },
+    );
+    ok(res, { rework_id: result.insertId, status: 'open' });
   } catch (err) { next(err); }
 });

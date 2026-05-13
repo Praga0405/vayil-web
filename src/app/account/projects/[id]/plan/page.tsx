@@ -1,29 +1,46 @@
 'use client'
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getMockJob } from '@/lib/mockData'
-import { Button, Textarea, StatusBadge } from '@/components/ui'
+import { useLiveJob } from '@/hooks/useVendorStudio'
+import { Button, Textarea, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, XCircle, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { customerApi } from '@/lib/api/client'
 
 export default function CustomerPlanApprovalPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const job = getMockJob(Number(id))
+  const { data: job, loading, error } = useLiveJob(id)
   const [reason, setReason] = useState('')
   const [showReject, setShowReject] = useState(false)
+  const [pending, setPending] = useState<'approve' | 'reject' | null>(null)
 
-  if (!job) return <div className="text-center py-20 text-gray-500">Plan not found</div>
+  if (loading) return <PageLoader />
+  if (!job)    return <div className="text-center py-20 text-gray-500">{error || 'Plan not found'}</div>
 
-  const approve = () => {
-    toast.success('Plan approved — vendor will begin execution')
-    router.push(`/account/projects/${id}`)
+  const approve = async () => {
+    if (!id) return
+    setPending('approve')
+    try {
+      await customerApi.approvePlan(id)
+      toast.success('Plan approved — vendor will begin execution')
+      router.push(`/account/projects/${id}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to approve plan')
+    } finally { setPending(null) }
   }
-  const reject = () => {
+  const reject = async () => {
     if (!reason.trim()) { toast.error('Please share what to change'); return }
-    toast.success('Revision requested — vendor will update the plan')
-    router.push(`/account/projects/${id}`)
+    if (!id) return
+    setPending('reject')
+    try {
+      await customerApi.requestPlanRevision(id, reason.trim())
+      toast.success('Revision requested — vendor will update the plan')
+      router.push(`/account/projects/${id}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to request revision')
+    } finally { setPending(null) }
   }
 
   return (
@@ -67,7 +84,7 @@ export default function CustomerPlanApprovalPage() {
       {/* Actions */}
       {!showReject ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 flex gap-3 sticky bottom-4">
-          <Button full onClick={approve}>
+          <Button full onClick={approve} loading={pending === 'approve'}>
             <CheckCircle className="w-4 h-4" /> Approve Plan
           </Button>
           <Button variant="outline" onClick={() => setShowReject(true)}>
@@ -81,7 +98,7 @@ export default function CustomerPlanApprovalPage() {
             placeholder="e.g. Painting should come before tiling, swap milestones 3 and 4." />
           <div className="flex gap-3">
             <Button full variant="outline" onClick={() => setShowReject(false)}>Cancel</Button>
-            <Button full onClick={reject}>Send Revision Request</Button>
+            <Button full onClick={reject} loading={pending === 'reject'}>Send Revision Request</Button>
           </div>
         </div>
       )}
