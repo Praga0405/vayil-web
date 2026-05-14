@@ -27,11 +27,14 @@ export default function MaterialsPaymentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
+  // All hooks declared up-front — never after any conditional return,
+  // including the plan-status gate below (PRD audit P0-1).
   const [selected, setSelected] = useState<number[]>(() => {
     if (typeof window === 'undefined') return []
     try { return JSON.parse(sessionStorage.getItem(`vayil_mat_sel_${id}`) || '[]') } catch { return [] }
   })
   const [submitting, setSubmitting] = useState(false)
+  const [payError, setPayError] = useState<string | null>(null)
 
   if (loading) return <PageLoader />
   if (!job)    return <div className="text-center py-20 text-gray-500">Project not found</div>
@@ -65,7 +68,6 @@ export default function MaterialsPaymentPage() {
   const subtotal = items.reduce((s, m) => s + m.total, 0)
   const fees     = calculateFees(subtotal, 5, 18, 0)
 
-  const [payError, setPayError] = useState<string | null>(null)
   const pay = async () => {
     if (items.length === 0) { toast.error('Select at least one material item'); return }
     setSubmitting(true); setPayError(null)

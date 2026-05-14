@@ -2,8 +2,8 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { customerApi } from '@/lib/api/client'
-import { demoOrLive } from '@/lib/demoMode'
+import { customerApi, paymentsApi } from '@/lib/api/client'
+import { demoOrLive, IS_DEMO_MODE } from '@/lib/demoMode'
 import { PageLoader, InfoRow, StatusBadge, Amount, Button, Modal } from '@/components/ui'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, Star, CreditCard, FileText } from 'lucide-react'
@@ -63,27 +63,63 @@ export default function ProjectDetailPage() {
 
   const payMilestone = async (amount: number, milestoneId?: number) => {
     setPaying(true)
+
+    if (IS_DEMO_MODE) {
+      await new Promise(r => setTimeout(r, 800))
+      toast.success('Payment successful — funds held in escrow (demo)')
+      router.refresh()
+      setPaying(false); return
+    }
+
+    const idempotencyKey = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+      ? (crypto as any).randomUUID()
+      : `pay-mile-${id}-${milestoneId ?? 'rem'}-${Date.now()}`
+
     try {
+      // Canonical REST: paymentsApi.createOrder → Razorpay → verify.
+      const orderRes: any = await paymentsApi.createOrder({
+        amount,
+        purpose:         milestoneId ? 'milestone' : 'quote',
+        order_id:        Number(id),
+        milestone_id:    milestoneId,
+        idempotency_key: idempotencyKey,
+      })
+      const od = orderRes?.data?.data || orderRes?.data || {}
       const razorpayKey = settings?.razorpay_key || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ''
-      const orderRes = await customerApi.placeOrder({ order_id: Number(id), amount, milestone_id: milestoneId })
-      const od = orderRes.data?.data || orderRes.data?.result || {}
+
       if (!window.Razorpay) {
-        await new Promise<void>((res) => {
-          const s = document.createElement('script'); s.src = 'https://checkout.razorpay.com/v1/checkout.js'
-          s.onload = () => res(); document.head.appendChild(s)
+        await new Promise<void>((res, rej) => {
+          const s = document.createElement('script')
+          s.src = 'https://checkout.razorpay.com/v1/checkout.js'
+          s.onload = () => res(); s.onerror = () => rej(new Error('razorpay-load-failed'))
+          document.head.appendChild(s)
         })
       }
-      const rz = new window.Razorpay({
+      new window.Razorpay({
         key: razorpayKey, amount: Math.round(amount * 100), currency: 'INR',
-        order_id: od.razorpay_order_id, name: 'Vayil', theme: { color: '#E8943A' },
+        order_id: od.razorpay_order_id, name: 'Vayil',
+        description: milestoneId ? `Milestone payment` : 'Remaining payment',
+        theme: { color: '#E8943A' },
         handler: async (response: any) => {
-          await customerApi.paymentUpdate({ order_id: Number(id), ...response, status: 'SUCCESS' })
-          toast.success('Payment successful!')
-          router.refresh()
+          try {
+            await paymentsApi.verify({
+              razorpay_order_id:   response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature:  response.razorpay_signature,
+              idempotency_key:     idempotencyKey,
+            })
+            toast.success('Payment successful — funds held in escrow')
+            router.refresh()
+          } catch (verifyErr: any) {
+            toast.error(verifyErr?.response?.data?.error || 'Payment captured but verification failed — contact support')
+          } finally { setPaying(false) }
         },
-        modal: { ondismiss: () => setPaying(false) },
-      }); rz.open()
-    } catch { toast.error('Payment failed'); setPaying(false) }
+        modal: { ondismiss: () => { setPaying(false); toast('Payment cancelled') } },
+      }).open()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to start payment')
+      setPaying(false)
+    }
   }
 
   if (loading) return <PageLoader />

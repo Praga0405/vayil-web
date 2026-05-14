@@ -13,7 +13,9 @@ export default function VendorEnquiryDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data: enquiry, loading } = useLiveEnquiry(id)
+  // All hooks declared up-front — never after a conditional return.
   const [localStatus, setLocalStatus] = useState<string>(enquiry?.status || 'NEW')
+  const [pending, setPending] = useState<'accept' | 'reject' | null>(null)
 
   // Sync localStatus when the enquiry first loads (live or fallback).
   React.useEffect(() => { if (enquiry?.status) setLocalStatus(enquiry.status) }, [enquiry?.status])
@@ -21,7 +23,6 @@ export default function VendorEnquiryDetailPage() {
   if (loading)   return <PageLoader />
   if (!enquiry)  return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
 
-  const [pending, setPending] = useState<'accept' | 'reject' | null>(null)
   const accept = async () => {
     if (!id) return
     setPending('accept')

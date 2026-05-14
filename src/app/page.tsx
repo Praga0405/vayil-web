@@ -308,13 +308,26 @@ export default function HomePage() {
                 <Avatar name={user.name} src={user.profile_image} size={8} />
                 <span className="text-sm font-medium text-navy">{user.name.split(' ')[0]}</span>
               </button>
-              <div className="absolute right-0 top-full mt-2 w-44 bg-white rounded-2xl shadow-lg border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                 <div className="p-2">
-                  <Link href="/account/enquiries" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Enquiries</Link>
-                  <Link href="/account/projects" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Projects</Link>
+                  {user.type === 'vendor' ? (
+                    <>
+                      <Link href="/vendor-studio/dashboard"  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">Vendor Studio</Link>
+                      <Link href="/vendor-studio/enquiries"  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">Enquiries</Link>
+                      <Link href="/vendor-studio/jobs"       className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">Jobs</Link>
+                      <Link href="/vendor-studio/earnings"   className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">Earnings</Link>
+                    </>
+                  ) : (
+                    <>
+                      <Link href="/account/enquiries" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Enquiries</Link>
+                      <Link href="/account/projects"  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">My Projects</Link>
+                      <Link href="/account/payments"  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">Payments</Link>
+                    </>
+                  )}
+                  <Link href="/account/profile" className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-navy hover:bg-gray-100">Profile</Link>
                   <button onClick={() => { clearAuth(); router.push('/') }}
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-500 hover:bg-red-50">
-                    <LogOut className="w-4 h-4" /> Logout
+                    <LogOut className="w-4 h-4" /> Sign out
                   </button>
                 </div>
               </div>
