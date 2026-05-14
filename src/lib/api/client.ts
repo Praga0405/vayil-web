@@ -224,6 +224,9 @@ export const vendorApi = {
 
   // KYC
   postKYC:          (data: Record<string, unknown>) => vendorClient.post('/kyc', data),
+  // Admin review queue — called after first-time signup so the Vayil
+  // admin panel can pick this vendor up for manual KYC.
+  submitForReview:  (note?: string) => vendorClient.post('/submit-for-review', note ? { note } : {}),
 
   // Listings + earnings
   listListings:     () => vendorClient.get('/listings'),

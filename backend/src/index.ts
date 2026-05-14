@@ -10,6 +10,7 @@ import { vendorRouter } from './routes/vendor';
 import { opsRouter } from './routes/ops';
 import { commonRouter } from './routes/common';
 import { paymentsRouter } from './routes/payments';
+import { adminRouter } from './routes/admin';
 
 const app = express();
 
@@ -31,6 +32,11 @@ app.use('/customers', customerRouter);
 app.use('/vendors', vendorRouter);
 app.use('/ops', opsRouter);
 app.use('/payments', paymentsRouter);
+
+// Admin panel — Vayil-Admin-Panel-main posts to these paths verbatim.
+// Mount under both casings since Express paths are case-sensitive.
+app.use('/Admin', adminRouter);
+app.use('/admin', adminRouter);
 
 // Legacy aliases for the existing mobile/admin codebase.
 app.use('/', authRouter);

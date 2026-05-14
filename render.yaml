@@ -43,3 +43,7 @@ services:
         sync: false
       - key: OTP_BYPASS_CODE
         value: "123456"
+      - key: ADMIN_PORTAL_NOTIFY_URL
+        sync: false
+      - key: ADMIN_PORTAL_NOTIFY_TOKEN
+        sync: false

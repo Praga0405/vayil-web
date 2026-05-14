@@ -173,6 +173,11 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
           await customerApi.saveProfile({ name: name.trim(), email: email.trim() || undefined, city: city.trim() || undefined })
         } else {
           await vendorApi.saveProfile({ name: name.trim(), company_name: company.trim(), email: email.trim() || undefined, city: city.trim() || undefined })
+          // New vendors land in the admin review queue right away so the
+          // Vayil admin panel can do manual KYC. Best-effort: if this fails
+          // the signup still completes and the vendor can resubmit from the
+          // onboarding wizard.
+          try { await vendorApi.submitForReview() } catch { /* swallow */ }
         }
       }
       finishLogin(true, false)

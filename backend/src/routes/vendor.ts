@@ -332,3 +332,61 @@ vendorRouter.post('/milestones/:id/payment-request', async (req: AuthRequest, re
     ok(res, { plan_id: Number(req.params.id), status: 'awaiting_payment', amount: Number(owner.amount) });
   } catch (err) { next(err); }
 });
+
+/* ─────────────────────────────────────────────────────────────
+ *  Vendor self-service: submit for admin review.
+ *  Called by the web app right after a new vendor finishes the
+ *  sign-up / onboarding form. Drops the vendor into
+ *  vendor_review_queue and fires an optional notification to the
+ *  admin portal so the ops team can pick it up for manual KYC.
+ * ───────────────────────────────────────────────────────────── */
+vendorRouter.post('/submit-for-review', async (req: AuthRequest, res, next) => {
+  try {
+    const vendorId = Number(req.user!.id);
+    const reason = z.object({ note: z.string().optional() }).parse(req.body || {}).note ?? null;
+
+    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id: vendorId });
+    if (!vendor) throw new ApiError(404, 'Vendor not found');
+
+    // Flip the vendor row into kyc_submitted state so /Admin/GetVendorList
+    // (and the existing mobile app) can pick it up via the status filter.
+    await exec(
+      `UPDATE vendors SET status = 'kyc_submitted', rejection_reason = NULL WHERE vendor_id = :id`,
+      { id: vendorId },
+    );
+
+    // Upsert into the review queue. The unique key (vendor_id, status)
+    // means re-submitting an already-pending vendor doesn't duplicate.
+    let queueId: number;
+    const existing = await one<any>(
+      `SELECT id FROM vendor_review_queue WHERE vendor_id = :id AND status = 'PENDING' LIMIT 1`,
+      { id: vendorId },
+    );
+    if (existing) {
+      queueId = existing.id;
+      await exec(
+        `UPDATE vendor_review_queue SET submitted_at = NOW(), reviewer_note = :note WHERE id = :id`,
+        { id: queueId, note: reason },
+      );
+    } else {
+      const result: any = await exec(
+        `INSERT INTO vendor_review_queue (vendor_id, status, source, reviewer_note)
+         VALUES (:vendorId, 'PENDING', 'web_signup', :note)`,
+        { vendorId, note: reason },
+      );
+      queueId = result.insertId;
+    }
+
+    // Fire-and-forget notification to the admin portal (env-configurable).
+    // We don't block the response on it — failure is logged + retryable.
+    const { notifyAdminNewVendor } = await import('../utils/adminNotify');
+    notifyAdminNewVendor({ queueId, vendorId, vendor }).catch(() => { /* swallow */ })
+
+    ok(res, {
+      queue_id:  queueId,
+      vendor_id: vendorId,
+      status:    'PENDING',
+      message:   'Submitted for admin verification',
+    }, 201);
+  } catch (err) { next(err); }
+});

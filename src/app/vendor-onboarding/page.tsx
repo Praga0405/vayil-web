@@ -82,6 +82,10 @@ export default function VendorOnboardingWizard() {
       proofNumber:  kyc.id_number,
       documentUrl:  '', // ID image upload wired in Phase 5; backend accepts empty for now
     }))
+    // Land in the admin review queue regardless of which path got us here —
+    // signup-modal vendors or full-wizard vendors. Best-effort; failure
+    // doesn't block the wizard from advancing.
+    try { await vendorApi.submitForReview() } catch { /* swallow */ }
     setSaving(false)
     toast.success(ok ? 'KYC submitted' : 'KYC submitted (offline mode)')
     next()
