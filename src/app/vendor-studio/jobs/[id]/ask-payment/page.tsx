@@ -7,6 +7,7 @@ import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { vendorApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 
 type Selection = { type: 'milestone' | 'material'; id: number; title: string; amount: number }
 
@@ -41,9 +42,11 @@ export default function AskPaymentPage() {
       // /customer/projects/:id/materials/payment-order flow; vendor doesn't
       // need to "request" those — flagging them awaiting_payment is enough.
       const milestoneIds = selected.filter(s => s.type === 'milestone').map(s => s.id)
-      for (const mid of milestoneIds) {
-        await vendorApi.requestMilestonePayment(mid)
-      }
+      await demoOrLive(async () => {
+        for (const mid of milestoneIds) {
+          await vendorApi.requestMilestonePayment(mid)
+        }
+      })
       toast.success(`Payment request for ${formatCurrency(total)} sent to customer`)
       router.push(`/vendor-studio/jobs/${id}`)
     } catch (err: any) {

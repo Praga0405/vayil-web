@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { vendorApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 
 type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'>
 
@@ -43,11 +44,13 @@ export default function MaterialsManagerPage() {
       // For now we POST each new item; existing items (those with matching
       // backend IDs) would call updateMaterial. Mock list has no IDs so all
       // are treated as new — fine for the demo flow.
-      for (const m of items) {
-        await vendorApi.addMaterial(id, {
-          name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
-        })
-      }
+      await demoOrLive(async () => {
+        for (const m of items) {
+          await vendorApi.addMaterial(id, {
+            name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
+          })
+        }
+      })
       toast.success('Materials saved')
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Failed to save materials')

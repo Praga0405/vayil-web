@@ -9,6 +9,7 @@ import { getVendorsByService, type DummyService } from '@/lib/dummyData'
 import { useLiveVendor } from '@/hooks/useLiveVendor'
 import { PageLoader } from '@/components/ui'
 import { customerApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 import toast from 'react-hot-toast'
 import {
   Star, MapPin, Shield, Clock, ChevronLeft, ChevronRight, Phone, Mail,
@@ -464,7 +465,7 @@ function EnquiryModal({ open, onClose, vendor, service }: {
     setSubmitting(true)
     setError(null)
     try {
-      await Promise.race([
+      await demoOrLive(() => Promise.race([
         customerApi.createEnquiry({
           vendorId:    Number(vendor.id) || undefined,
           category:    service?.title || vendor.service_label,
@@ -472,7 +473,7 @@ function EnquiryModal({ open, onClose, vendor, service }: {
           location:    location.trim() || vendor.area,
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), 8000)),
-      ])
+      ]))
       setDone(true)
     } catch (err: any) {
       // Production: surface the real failure with a retry CTA. No silent

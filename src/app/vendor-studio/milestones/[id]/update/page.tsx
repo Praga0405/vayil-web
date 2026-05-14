@@ -12,6 +12,7 @@ import { Button, Textarea } from '@/components/ui'
 import { ChevronLeft, ImagePlus, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { vendorApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { demoOrLive, IS_DEMO_MODE } from '@/lib/demoMode'
 
 export default function MilestoneUpdatePage() {
   const { id } = useParams<{ id: string }>()
@@ -30,16 +31,16 @@ export default function MilestoneUpdatePage() {
     setSubmitting(true); setError(null)
     try {
       let image_urls: string[] = []
-      if (files.length > 0) {
+      if (files.length > 0 && !IS_DEMO_MODE) {
         const fd = new FormData()
         for (const f of files) fd.append('files', f)
         const upRes = await vendorApi.uploadFiles(fd)
         image_urls = normalizeUploadedUrls(upRes)
       }
-      await vendorApi.postMilestoneUpdate(id, {
+      await demoOrLive(() => vendorApi.postMilestoneUpdate(id, {
         comment: comment.trim() || undefined,
         image_urls: image_urls.length ? image_urls : undefined,
-      })
+      }))
       toast.success('Update posted — customer will be notified')
       router.back()
     } catch (err: any) {

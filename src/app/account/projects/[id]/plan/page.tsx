@@ -7,6 +7,7 @@ import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, XCircle, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 
 export default function CustomerPlanApprovalPage() {
   const { id } = useParams<{ id: string }>()
@@ -23,7 +24,7 @@ export default function CustomerPlanApprovalPage() {
     if (!id) return
     setPending('approve')
     try {
-      await customerApi.approvePlan(id)
+      await demoOrLive(() => customerApi.approvePlan(id))
       toast.success('Plan approved — vendor will begin execution')
       router.push(`/account/projects/${id}`)
     } catch (err: any) {
@@ -35,7 +36,7 @@ export default function CustomerPlanApprovalPage() {
     if (!id) return
     setPending('reject')
     try {
-      await customerApi.requestPlanRevision(id, reason.trim())
+      await demoOrLive(() => customerApi.requestPlanRevision(id, reason.trim()))
       toast.success('Revision requested — vendor will update the plan')
       router.push(`/account/projects/${id}`)
     } catch (err: any) {

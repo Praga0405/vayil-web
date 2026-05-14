@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useLiveEnquiry } from '@/hooks/useVendorStudio'
 import { vendorApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, XCircle, FileText, Phone, MapPin, Calendar, Home, Ruler } from 'lucide-react'
@@ -25,7 +26,7 @@ export default function VendorEnquiryDetailPage() {
     if (!id) return
     setPending('accept')
     try {
-      await vendorApi.acceptEnquiry(id)
+      await demoOrLive(() => vendorApi.acceptEnquiry(id))
       setLocalStatus('ACCEPTED')
       toast.success('Enquiry accepted — customer notified')
     } catch (err: any) {
@@ -36,7 +37,7 @@ export default function VendorEnquiryDetailPage() {
     if (!id) return
     setPending('reject')
     try {
-      await vendorApi.rejectEnquiry(id)
+      await demoOrLive(() => vendorApi.rejectEnquiry(id))
       setLocalStatus('REJECTED')
       toast.success('Enquiry rejected')
     } catch (err: any) {

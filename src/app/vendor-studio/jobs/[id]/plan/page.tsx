@@ -5,6 +5,7 @@ import { useLiveJob } from '@/hooks/useVendorStudio'
 import { type MockMilestone } from '@/lib/mockData'
 import { Button, Input, PageLoader } from '@/components/ui'
 import { vendorApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -53,8 +54,10 @@ export default function PlanBuilderPage() {
         percentage:  m.percentage,
         mandatory:   m.mandatory,
       }))
-      await vendorApi.createPlan(id, milestones)
-      await vendorApi.submitPlan(id)
+      await demoOrLive(async () => {
+        await vendorApi.createPlan(id, milestones)
+        await vendorApi.submitPlan(id)
+      })
       toast.success('Plan submitted — customer will review and approve')
       router.push(`/vendor-studio/jobs/${id}`)
     } catch (err: any) {

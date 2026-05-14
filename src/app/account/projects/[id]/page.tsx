@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { customerApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 import { PageLoader, InfoRow, StatusBadge, Amount, Button, Modal } from '@/components/ui'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, Star, CreditCard, FileText } from 'lucide-react'
@@ -51,7 +52,7 @@ export default function ProjectDetailPage() {
     try {
       // Canonical REST: POST /customer/projects/:id/signoff — also flips
       // the order to "completed" and releases held escrow to the vendor.
-      await customerApi.signoff(id, { rating, comment })
+      await demoOrLive(() => customerApi.signoff(id, { rating, comment }))
       toast.success('Project signed off and review submitted')
       setRatingOpen(false)
     } catch (err: any) {
@@ -200,7 +201,7 @@ export default function ProjectDetailPage() {
           const reason = window.prompt('What still needs to be fixed?')?.trim()
           if (!reason) return
           try {
-            await customerApi.requestRework(id, reason)
+            await demoOrLive(() => customerApi.requestRework(id, reason))
             toast.success('Rework requested — vendor will follow up')
           } catch (err: any) {
             toast.error(err?.response?.data?.error || 'Failed to request rework')

@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useLiveEnquiry } from '@/hooks/useVendorStudio'
 import { Button, Input, Textarea, PageLoader } from '@/components/ui'
 import { vendorApi } from '@/lib/api/client'
+import { demoOrLive } from '@/lib/demoMode'
 import { ChevronLeft, FileText, Paperclip } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -24,14 +25,14 @@ export default function SendQuotePage() {
     if (Number(form.price) <= 0) { toast.error('Price must be greater than 0'); return }
     setSubmitting(true)
     try {
-      await Promise.race([
+      await demoOrLive(() => Promise.race([
         vendorApi.postQuote(id, {
           amount:        Number(form.price),
           message:       form.description.trim(),
           estimatedDays: form.days ? Number(form.days) : undefined,
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-      ])
+      ]))
       toast.success('Quote sent to customer')
       router.push(`/vendor-studio/enquiries/${id}`)
     } catch (err: any) {

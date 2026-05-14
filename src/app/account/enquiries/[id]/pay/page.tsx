@@ -6,6 +6,7 @@ import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
+import { IS_DEMO_MODE } from '@/lib/demoMode'
 
 declare global { interface Window { Razorpay: any } }
 
@@ -39,6 +40,13 @@ export default function PaymentOptionSheetPage() {
   useEffect(() => {
     if (!id) return
     let cancelled = false
+    if (IS_DEMO_MODE) {
+      // Demo: use the mock job total so the full Razorpay-options sheet
+      // is exercisable without a real quote in the database.
+      setTotal(850000)
+      setLoadingQuote(false)
+      return
+    }
     customerApi.getQuote(id)
       .then((res: any) => {
         if (cancelled) return
@@ -80,6 +88,15 @@ export default function PaymentOptionSheetPage() {
     if (!valid) { toast.error(`Custom amount must be between ${formatCurrency(min)} and ${formatCurrency(total)}`); return }
     setSubmitting(true)
     setError(null)
+
+    // Demo mode: skip Razorpay entirely and fake a successful escrow hold.
+    if (IS_DEMO_MODE) {
+      await new Promise(r => setTimeout(r, 800))
+      toast.success('Payment successful — funds held in escrow (demo)')
+      router.push('/account/projects')
+      setSubmitting(false)
+      return
+    }
 
     // Idempotency key — survives refresh-retries (server dedupes within 5 min).
     const idempotencyKey = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
