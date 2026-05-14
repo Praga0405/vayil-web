@@ -135,6 +135,57 @@ customerRouter.get('/quotes/:enquiryId', async (req: AuthRequest, res, next) => 
   } catch (err) { next(err); }
 });
 
+/* ── Quote accept / reject (canonical) ───────────────────── */
+async function assertQuoteBelongs(quoteId: string | number | undefined | string[], customerId: number | string) {
+  const row = await one<any>(
+    `SELECT q.quotation_id, q.enquiry_id
+       FROM quotation q
+       JOIN enquiries e ON e.enquiry_id = q.enquiry_id
+      WHERE q.quotation_id = :id AND e.customer_id = :customerId
+      LIMIT 1`,
+    { id: String(quoteId ?? ''), customerId },
+  );
+  if (!row) throw new ApiError(404, 'Quote not found');
+  return row as { quotation_id: number; enquiry_id: number };
+}
+
+customerRouter.post('/quotes/:quoteId/accept', async (req: AuthRequest, res, next) => {
+  try {
+    const { quotation_id, enquiry_id } = await assertQuoteBelongs(req.params.quoteId, req.user!.id);
+    await transaction(async (conn) => {
+      await conn.query(
+        `UPDATE quotation SET status = 'accepted' WHERE quotation_id = ?`,
+        [quotation_id],
+      );
+      // Reject any sibling quotes on the same enquiry so the customer can't
+      // accept two at once.
+      await conn.query(
+        `UPDATE quotation SET status = 'rejected'
+           WHERE enquiry_id = ? AND quotation_id <> ? AND status = 'sent'`,
+        [enquiry_id, quotation_id],
+      );
+      await conn.query(
+        `UPDATE enquiries SET status = 'accepted' WHERE enquiry_id = ?`,
+        [enquiry_id],
+      );
+    });
+    ok(res, { quotation_id, enquiry_id, status: 'accepted' });
+  } catch (err) { next(err); }
+});
+
+customerRouter.post('/quotes/:quoteId/reject', async (req: AuthRequest, res, next) => {
+  try {
+    const { quotation_id, enquiry_id } = await assertQuoteBelongs(req.params.quoteId, req.user!.id);
+    const reason = z.object({ reason: z.string().optional() }).parse(req.body || {}).reason ?? null;
+    await exec(
+      `UPDATE quotation SET status = 'rejected', message = COALESCE(:reason, message)
+         WHERE quotation_id = :id`,
+      { id: quotation_id, reason },
+    );
+    ok(res, { quotation_id, enquiry_id, status: 'rejected', reason });
+  } catch (err) { next(err); }
+});
+
 /* ── Plan approve / revision ─────────────────────────────── */
 customerRouter.post('/projects/:id/plan/approve', async (req: AuthRequest, res, next) => {
   try {

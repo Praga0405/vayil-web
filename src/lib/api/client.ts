@@ -102,6 +102,10 @@ export const customerApi = {
 
   // Quotes
   getQuote:         (enquiry_id: string | number) => customerClient.get(`/quotes/${enquiry_id}`),
+  acceptQuote:      (quote_id: string | number) =>
+                      customerClient.post(`/quotes/${quote_id}/accept`, {}),
+  rejectQuote:      (quote_id: string | number, reason?: string) =>
+                      customerClient.post(`/quotes/${quote_id}/reject`, reason ? { reason } : {}),
 
   // Projects
   listProjects:     () => customerClient.get('/projects'),

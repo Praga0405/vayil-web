@@ -71,30 +71,27 @@ export default function EnquiryDetailPage() {
   if (loading)  return <PageLoader />
   if (!enquiry) return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
 
-  /* ── Quote accept / reject ── */
+  /* ── Quote accept / reject (canonical REST) ── */
+  const quoteId = quote?.quotation_id || quote?.id
   const acceptQuote = async () => {
-    if (!quote) return
+    if (!quote || !quoteId) return
     setActing('accept')
     try {
-      await demoOrLive(() => customerApi.updateQuote({
-        enquiry_id: Number(id), status: 'ACCEPTED', quotation_id: quote.id || quote.quotation_id,
-      }))
+      await demoOrLive(() => customerApi.acceptQuote(quoteId))
       toast.success('Quote accepted')
-      setEnquiry((e: any) => ({ ...e, status: 'ONGOING' }))
-      setQuote((q: any) => ({ ...q, status: 'ACCEPTED' }))
+      setEnquiry((e: any) => ({ ...e, status: 'accepted' }))
+      setQuote((q: any) => ({ ...q, status: 'accepted' }))
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Failed to accept quote')
     } finally { setActing(null) }
   }
   const rejectQuote = async () => {
-    if (!quote) return
+    if (!quote || !quoteId) return
     setActing('reject')
     try {
-      await demoOrLive(() => customerApi.updateQuote({
-        enquiry_id: Number(id), status: 'REJECTED', quotation_id: quote.id || quote.quotation_id,
-      }))
+      await demoOrLive(() => customerApi.rejectQuote(quoteId))
       toast.success('Quote rejected')
-      setQuote((q: any) => ({ ...q, status: 'REJECTED' }))
+      setQuote((q: any) => ({ ...q, status: 'rejected' }))
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Failed to reject quote')
     } finally { setActing(null) }

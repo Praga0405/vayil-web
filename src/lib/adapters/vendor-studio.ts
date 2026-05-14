@@ -81,8 +81,16 @@ export function adaptJob(order: BackendOrder, plan: BackendOrderPlan[] = []): Mo
   }))
   const paid = milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID')
                          .reduce((s, m) => s + m.amount, 0)
-  const planStatus: MockJob['plan_status'] = plan.some(p => p.customer_status === 'pending') ? 'SUBMITTED'
-    : plan.length > 0 ? 'APPROVED' : 'NOT_STARTED'
+  // Plan-status mapping precedence (most-urgent first):
+  //   any milestone with revision_requested → REVISION_REQUESTED
+  //   any milestone with pending             → SUBMITTED
+  //   plan exists and all approved           → APPROVED
+  //   otherwise                              → NOT_STARTED
+  const planStatus: MockJob['plan_status'] =
+    plan.some(p => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
+    : plan.some(p => p.customer_status === 'pending')           ? 'SUBMITTED'
+    : plan.length > 0                                            ? 'APPROVED'
+    :                                                              'NOT_STARTED'
   return {
     id:           order.order_id,
     order_id:     order.order_id,
