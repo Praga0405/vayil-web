@@ -10,17 +10,21 @@ import toast from 'react-hot-toast'
 import { vendorApi } from '@/lib/api/client'
 import { demoOrLive } from '@/lib/demoMode'
 
-type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'>
+type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'> & { id?: number }
 
 export default function MaterialsManagerPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
 
+  // All hooks declared up-front — never after a conditional return.
   const [items, setItems] = useState<Draft[]>([])
+  const [saving, setSaving] = useState(false)
   React.useEffect(() => {
     if (job?.materials && items.length === 0) {
-      setItems(job.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status })))
+      setItems(job.materials.map(m => ({
+        id: m.id, name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
+      })))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id])
@@ -33,7 +37,6 @@ export default function MaterialsManagerPage() {
   const remove = (i: number) => setItems(items.filter((_, idx) => idx !== i))
   const total = items.reduce((s, m) => s + (m.quantity * m.rate), 0)
 
-  const [saving, setSaving] = useState(false)
   const save = async () => {
     if (items.some(m => !m.name.trim() || m.quantity <= 0 || m.rate < 0)) {
       toast.error('Fill all material rows with valid quantities'); return
@@ -41,14 +44,19 @@ export default function MaterialsManagerPage() {
     if (!id) return
     setSaving(true)
     try {
-      // For now we POST each new item; existing items (those with matching
-      // backend IDs) would call updateMaterial. Mock list has no IDs so all
-      // are treated as new — fine for the demo flow.
+      // PRD P1: existing rows update via PUT; new rows POST. Mock items
+      // get an `id` when seeded from the live hook, so we know which is which.
       await demoOrLive(async () => {
         for (const m of items) {
-          await vendorApi.addMaterial(id, {
-            name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
-          })
+          if (m.id) {
+            await vendorApi.updateMaterial(id, m.id, {
+              name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
+            })
+          } else {
+            await vendorApi.addMaterial(id, {
+              name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
+            })
+          }
         }
       })
       toast.success('Materials saved')

@@ -17,7 +17,9 @@ export default function PlanBuilderPage() {
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
 
+  // All hooks declared up-front — never after a conditional return.
   const [drafts, setDrafts] = useState<Draft[]>([])
+  const [submitting, setSubmitting] = useState(false)
   React.useEffect(() => {
     if (job?.milestones && drafts.length === 0) {
       setDrafts(job.milestones.map(m => ({ title: m.title, days: m.days, percentage: m.percentage, mandatory: m.mandatory })))
@@ -37,7 +39,6 @@ export default function PlanBuilderPage() {
   const add = () => setDrafts([...drafts, { title: '', days: 1, percentage: 0, mandatory: true }])
   const remove = (i: number) => setDrafts(drafts.filter((_, idx) => idx !== i))
 
-  const [submitting, setSubmitting] = useState(false)
   const submit = async () => {
     if (!canSubmit) {
       if (totalPct !== 100) toast.error(`Total must equal 100% (currently ${totalPct}%)`)

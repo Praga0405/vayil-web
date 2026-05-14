@@ -15,7 +15,9 @@ export default function AskPaymentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
+  // All hooks declared up-front — never after a conditional return.
   const [selected, setSelected] = useState<Selection[]>([])
+  const [submitting, setSubmitting] = useState(false)
 
   if (loading) return <PageLoader />
   if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
@@ -32,7 +34,6 @@ export default function AskPaymentPage() {
   const isSelected = (type: Selection['type'], itemId: number) => selected.some(s => s.type === type && s.id === itemId)
   const total = selected.reduce((s, x) => s + x.amount, 0)
 
-  const [submitting, setSubmitting] = useState(false)
   const submit = async () => {
     if (selected.length === 0) { toast.error('Select at least one item'); return }
     setSubmitting(true)

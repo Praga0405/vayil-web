@@ -1,5 +1,6 @@
 'use client'
 import React, { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { customerApi } from '@/lib/api/client'
 import { demoOrLive } from '@/lib/demoMode'
@@ -166,7 +167,13 @@ export default function ProjectDetailPage() {
       {/* Materials */}
       {materials.length > 0 && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5">
-          <h2 className="text-base font-bold text-navy mb-3">Materials</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold text-navy">Materials</h2>
+            <Link href={`/account/projects/${id}/materials`}
+              className="text-xs font-semibold text-orange hover:text-orange/80 underline">
+              Manage &amp; pay
+            </Link>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -211,8 +218,12 @@ export default function ProjectDetailPage() {
         </Button>
       </div>
 
-      <Modal open={ratingOpen} onClose={() => setRatingOpen(false)} title="Rate & Review">
+      <Modal open={ratingOpen} onClose={() => setRatingOpen(false)} title="Sign off this project">
         <div className="space-y-5">
+          <p className="text-sm text-gray-500">
+            Signing off marks the project complete and releases any escrow funds held with Vayil to the vendor's wallet.
+            If something still needs fixing, choose <span className="font-semibold text-navy">Request rework</span> instead.
+          </p>
           <div className="flex justify-center gap-2">
             {[1,2,3,4,5].map(v => (
               <button key={v} onClick={() => setRating(v)}>
@@ -221,9 +232,12 @@ export default function ProjectDetailPage() {
             ))}
           </div>
           <textarea className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange" rows={3}
-            placeholder="Share your experience…"
+            placeholder="Optional — share your experience"
             value={comment} onChange={e => setComment(e.target.value)} />
-          <Button full onClick={submitRating}>Submit Review</Button>
+          <div className="bg-navy/5 border border-navy/10 rounded-xl p-3 text-xs text-gray-600">
+            Funds will be released to <span className="font-semibold text-navy">the vendor</span> after sign-off.
+          </div>
+          <Button full onClick={submitRating}>Sign off &amp; release funds</Button>
         </div>
       </Modal>
     </div>

@@ -27,7 +27,10 @@ export default function MaterialsPaymentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
-  const [selected, setSelected] = useState<number[]>([])
+  const [selected, setSelected] = useState<number[]>(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(sessionStorage.getItem(`vayil_mat_sel_${id}`) || '[]') } catch { return [] }
+  })
   const [submitting, setSubmitting] = useState(false)
 
   if (loading) return <PageLoader />
