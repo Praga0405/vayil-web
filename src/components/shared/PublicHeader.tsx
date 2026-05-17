@@ -19,6 +19,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
   const { user, clearAuth } = useUserAuth()
   const [search, setSearch] = useState(defaultQuery)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [loginTab,  setLoginTab]  = useState<'customer' | 'vendor'>('customer')
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -39,10 +40,11 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
             <Link href="/search" className="hover:text-white transition flex items-center gap-1">
               <Plus className="w-3 h-3" /> Post a Job
             </Link>
-            {!isVendor && (
-              <Link href="/vendor/login" className="hover:text-white transition flex items-center gap-1">
+            {!isVendor && !user && (
+              <button onClick={() => { setLoginTab('vendor'); setLoginOpen(true) }}
+                className="hover:text-white transition flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Become a vendor
-              </Link>
+              </button>
             )}
           </div>
         </div>
@@ -149,7 +151,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
               </div>
             </div>
           ) : (
-            <button onClick={() => setLoginOpen(true)}
+            <button onClick={() => { setLoginTab('customer'); setLoginOpen(true) }}
               className="bg-[#183954] text-white px-4 lg:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
               Sign in
             </button>
@@ -159,6 +161,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
 
       <LoginModal
         isOpen={loginOpen}
+        initialTab={loginTab}
         onClose={() => setLoginOpen(false)}
         onSuccess={() => setLoginOpen(false)}
       />

@@ -208,6 +208,7 @@ export default function HomePage() {
   const router = useRouter()
   const { user, clearAuth } = useUserAuth()
   const [loginOpen, setLoginOpen] = useState(false)
+  const [loginTab,  setLoginTab]  = useState<'customer' | 'vendor'>('customer')
   const [search, setSearch] = useState('')
   const [recentEnquiries, setRecentEnquiries] = useState<any[]>([])
 
@@ -258,9 +259,12 @@ export default function HomePage() {
             <a href="#" className="hover:text-white transition flex items-center gap-1">
               <Plus className="w-3 h-3" /> Post a Job
             </a>
-            <a href="#" className="hover:text-white transition flex items-center gap-1">
-              <Plus className="w-3 h-3" /> Become a vendor
-            </a>
+            {!user && (
+              <button onClick={() => { setLoginTab('vendor'); setLoginOpen(true) }}
+                className="hover:text-white transition flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Become a vendor
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -333,7 +337,7 @@ export default function HomePage() {
               </div>
             </div>
           ) : (
-            <button onClick={() => setLoginOpen(true)}
+            <button onClick={() => { setLoginTab('customer'); setLoginOpen(true) }}
               className="bg-[#183954] text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
               Sign in
             </button>
@@ -716,7 +720,7 @@ export default function HomePage() {
             <h2 className="text-[42px] font-bold text-white leading-snug mb-8">
               Join the network of pros who are growing their client base and managing their schedules on their own terms
             </h2>
-            <button onClick={() => setLoginOpen(true)}
+            <button onClick={() => { setLoginTab('vendor'); setLoginOpen(true) }}
               className="bg-orange text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition">
               Sign Up
             </button>
@@ -835,6 +839,7 @@ export default function HomePage() {
           with the new auth state, no portal redirect. */}
       <LoginModal
         isOpen={loginOpen}
+        initialTab={loginTab}
         onClose={() => setLoginOpen(false)}
         onSuccess={() => setLoginOpen(false)}
       />

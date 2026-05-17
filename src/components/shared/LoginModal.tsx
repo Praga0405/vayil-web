@@ -31,6 +31,8 @@ interface Props {
   onClose: () => void
   onSuccess?: () => void
   redirectTo?: string
+  /** Pre-select customer vs vendor when the modal opens. Defaults to customer. */
+  initialTab?: 'customer' | 'vendor'
 }
 
 type Tab   = 'customer' | 'vendor'
@@ -58,12 +60,12 @@ const rememberMobile = (mobile: string) => {
   } catch {}
 }
 
-export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: Props) {
+export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, initialTab = 'customer' }: Props) {
   const router = useRouter()
   const { setAuth } = useUserAuth()
 
   /* ── State (all hooks declared up-front) ── */
-  const [tab,     setTab]     = useState<Tab>('customer')
+  const [tab,     setTab]     = useState<Tab>(initialTab)
   const [stage,   setStage]   = useState<Stage>('phone')
   const [mobile,  setMobile]  = useState('')
   const [otp,     setOtp]     = useState('')
@@ -84,13 +86,15 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
     return () => clearTimeout(t)
   }, [resendIn])
 
-  /* Reset everything when the modal closes */
+  /* Reset everything when the modal closes; re-apply initialTab on each open. */
   useEffect(() => {
     if (!isOpen) {
       setStage('phone'); setMobile(''); setOtp(''); setError(null)
       setName(''); setEmail(''); setCompany(''); setResendIn(0)
+    } else {
+      setTab(initialTab)
     }
-  }, [isOpen])
+  }, [isOpen, initialTab])
 
   if (!isOpen) return null
 
