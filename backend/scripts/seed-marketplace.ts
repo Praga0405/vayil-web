@@ -102,7 +102,10 @@ async function seedVendors(vendors: DummyVendor[], catIds: Map<string, number>) 
       mobile:       v.phone,
       email:        v.email,
       city:         v.city,
-      status:       v.kyc_verified ? 'active' : 'pending',
+      // 'verified' matches the customer-facing query in routes/customer.ts
+      // (SELECT … WHERE status='verified'). 'pending' for unverified rows
+      // so they show up in /Admin/GetVendorList with the kyc_submitted bucket.
+      status:       v.kyc_verified ? 'verified' : 'pending',
       proof_type:   v.kyc_verified ? 'aadhaar' : null,
       proof_number: v.kyc_verified ? `XXXX-XXXX-${v.phone.slice(-4)}` : null,
       kyc_document_url: v.kyc_verified ? `https://placehold.co/600x400?text=KYC+${v.id}` : null,
@@ -193,14 +196,19 @@ async function seedActivity(enqs: any[], quotes: any[], orders: any[], customerI
     await exec(`DELETE FROM ${t} WHERE seed_source = :tag`, { tag: SEED_TAG });
   }
 
-  // Build a quick lookup of vendor_id by demo vendor id (string) using ordered insertion.
-  // We rely on the fact that dummyData has stable string IDs and we know phones via vendors.json.
+  // Build a quick lookup of vendor_id by demo vendor id. The activity
+  // JSONs (enquiries / quotations / orders) reference vendors by their
+  // 1-based array position in vendors.json (e.g. vendor_id=21 = the
+  // 21st vendor). We map both that numeric key AND the original string
+  // slug ("electrical-1") so either shape works.
   const vendorsJson: DummyVendor[] = loadJSON('vendors.json');
   const vendorIdByDemoId = new Map<string, number>();
-  for (const v of vendorsJson) {
+  vendorsJson.forEach((v, idx) => {
     const id = vMap.get(v.phone);
-    if (id) vendorIdByDemoId.set(v.id, id);
-  }
+    if (!id) return;
+    vendorIdByDemoId.set(v.id, id);            // "electrical-1" → vendor_id
+    vendorIdByDemoId.set(String(idx + 1), id); // "21"            → vendor_id
+  });
 
   const enqMap = new Map<number, number>(); // demoEnqId → real enquiry_id
   for (const e of enqs) {

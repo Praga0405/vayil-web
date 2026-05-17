@@ -1,9 +1,46 @@
 import { Router } from 'express';
-import { query } from '../db';
-import { ok } from '../utils/http';
+import { one, query } from '../db';
+import { ApiError, ok } from '../utils/http';
 
 export const commonRouter = Router();
 commonRouter.get('/health', (_req, res) => ok(res, { status: 'ok', service: 'vayil-backend', timestamp: new Date().toISOString() }));
+
+// Public marketplace endpoints — vendor browsing must work for
+// signed-out visitors so the /search page can populate before login.
+// Same paths the frontend already calls (/customer/vendors,
+// /customer/vendors/:id); also exposed at /vendors so signed-in users
+// hit them via the customerClient without an extra round-trip.
+async function publicVendorList(_req: any, res: any, next: any) {
+  try {
+    const vendors = await query<any>(
+      `SELECT vendor_id AS id, name, company_name, city, rating, status
+         FROM vendors
+        WHERE status = 'verified'
+        ORDER BY vendor_id DESC LIMIT 100`,
+    );
+    ok(res, { vendors });
+  } catch (err) { next(err); }
+}
+async function publicVendorDetail(req: any, res: any, next: any) {
+  try {
+    const vendor = await one<any>(
+      `SELECT vendor_id, name, company_name, city, rating, status, proof_type
+         FROM vendors WHERE vendor_id = :id`,
+      { id: req.params.id },
+    );
+    if (!vendor) throw new ApiError(404, 'Vendor not found');
+    const listings = await query<any>(
+      `SELECT * FROM vendor_services WHERE vendor_id = :id AND status = 1`,
+      { id: req.params.id },
+    );
+    ok(res, { vendor, listings });
+  } catch (err) { next(err); }
+}
+commonRouter.get('/vendors',           publicVendorList);
+commonRouter.get('/vendors/:id',       publicVendorDetail);
+commonRouter.get('/customer/vendors',  publicVendorList);
+commonRouter.get('/customer/vendors/:id', publicVendorDetail);
+
 commonRouter.get('/service-categories', async (_req, res, next) => {
   try { ok(res, { categories: await query('SELECT * FROM service_categories WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }
 });

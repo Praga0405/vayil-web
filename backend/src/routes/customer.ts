@@ -21,7 +21,16 @@ customerRouter.get('/me', async (req: AuthRequest, res, next) => {
 customerRouter.put('/me', async (req: AuthRequest, res, next) => {
   try {
     const body = z.object({ name: z.string().optional(), email: z.string().email().optional(), city: z.string().optional(), address: z.string().optional() }).parse(req.body);
-    await exec(`UPDATE customers SET name = COALESCE(:name, name), email = COALESCE(:email, email), city = COALESCE(:city, city), address = COALESCE(:address, address) WHERE customer_id = :id`, { ...body, id: req.user!.id });
+    // mysql2 rejects bound `undefined` — normalise every optional field to
+    // null so the COALESCE keeps the existing column value.
+    const params = {
+      id:      req.user!.id,
+      name:    body.name    ?? null,
+      email:   body.email   ?? null,
+      city:    body.city    ?? null,
+      address: body.address ?? null,
+    };
+    await exec(`UPDATE customers SET name = COALESCE(:name, name), email = COALESCE(:email, email), city = COALESCE(:city, city), address = COALESCE(:address, address) WHERE customer_id = :id`, params);
     const customer = await one<any>('SELECT * FROM customers WHERE customer_id = :id', { id: req.user!.id });
     ok(res, { customer });
   } catch (err) { next(err); }
@@ -52,10 +61,20 @@ customerRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
 customerRouter.post('/enquiries', async (req: AuthRequest, res, next) => {
   try {
     const body = z.object({ vendorId: z.any().optional(), serviceId: z.any().optional(), category: z.string().optional(), description: z.string().min(5), location: z.string().optional(), email: z.string().email().optional() }).parse(req.body);
+    // mysql2 rejects bound `undefined` — coerce every optional to null.
+    const params = {
+      customerId:  req.user!.id,
+      vendorId:    body.vendorId    ?? null,
+      serviceId:   body.serviceId   ?? null,
+      category:    body.category    ?? null,
+      description: body.description,
+      location:    body.location    ?? null,
+      email:       body.email       ?? null,
+    };
     const result = await exec(
       `INSERT INTO enquiries (customer_id, vendor_id, service_id, category, description, location, email, status, created_at)
        VALUES (:customerId, :vendorId, :serviceId, :category, :description, :location, :email, 'new', NOW())`,
-      { ...body, customerId: req.user!.id }
+      params,
     );
     const enquiry = await one<any>('SELECT * FROM enquiries WHERE enquiry_id = :id', { id: result.insertId });
     ok(res, { enquiry }, 201);

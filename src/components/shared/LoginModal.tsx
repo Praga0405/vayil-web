@@ -139,16 +139,29 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
       } else {
         const res: any = await authApi.verifyOTP(mobile, otp, tab)
         const body = res?.data?.data ?? res?.data ?? {}
-        const user = body?.user
+        const rawUser = body?.user
         const token = body?.token
         if (!token) throw new Error('Auth response missing token')
-        // Backend creates the row on first verify; if the user has no name
-        // yet, surface the signup step to collect it.
-        if (!user?.name || user?.name === 'Customer' || user?.name === 'Vendor') {
-          // Stash token so the signup step can call saveProfile.
-          try { localStorage.setItem('vayil_token', token) } catch {}
+        // The backend creates the row on first verify; if the user has no
+        // proper name yet, surface the signup step. Either way stash the
+        // real JWT in localStorage so the axios interceptor authenticates
+        // every subsequent call.
+        try { localStorage.setItem('vayil_token', token) } catch {}
+        const newish = !rawUser?.name || rawUser?.name === 'Customer' || rawUser?.name === 'Vendor'
+        if (newish) {
           setStage('signup')
         } else {
+          // Normalise to the auth store's shape (id is customer_id|vendor_id).
+          const user = {
+            id:            rawUser.customer_id ?? rawUser.vendor_id ?? rawUser.id ?? 0,
+            name:          rawUser.name,
+            mobile:        rawUser.mobile || rawUser.phone || mobile,
+            email:         rawUser.email || '',
+            profile_image: rawUser.profile_image || '',
+            city:          rawUser.city || 'Coimbatore',
+            type:          tab,
+          }
+          rememberMobile(mobile)
           completeAuth(user, token)
         }
       }
@@ -168,21 +181,54 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
     if (tab === 'vendor'   && (!company.trim() || !name.trim())) { setError('Company name and your name are required'); return }
     setError(null); setLoading(true)
     try {
-      if (!IS_DEMO_MODE) {
-        if (tab === 'customer') {
-          await customerApi.saveProfile({ name: name.trim(), email: email.trim() || undefined, city: city.trim() || undefined })
-        } else {
-          await vendorApi.saveProfile({ name: name.trim(), company_name: company.trim(), email: email.trim() || undefined, city: city.trim() || undefined })
-          // New vendors land in the admin review queue right away so the
-          // Vayil admin panel can do manual KYC. Best-effort: if this fails
-          // the signup still completes and the vendor can resubmit from the
-          // onboarding wizard.
-          try { await vendorApi.submitForReview() } catch { /* swallow */ }
-        }
+      if (IS_DEMO_MODE) {
+        finishLogin(true, false)
+        return
       }
-      finishLogin(true, false)
+
+      // Live mode: save profile, then promote the real JWT (stashed in
+      // localStorage by verifyOTP) and the returned user row into the
+      // auth store. Never use the synthetic dev token for live-mode users.
+      let userRow: any = null
+      if (tab === 'customer') {
+        const res: any = await customerApi.saveProfile({
+          name:  name.trim(),
+          email: email.trim() || undefined,
+          city:  city.trim()  || undefined,
+        })
+        const body = res?.data?.data ?? res?.data ?? {}
+        userRow = body?.customer
+      } else {
+        const res: any = await vendorApi.saveProfile({
+          name:         name.trim(),
+          company_name: company.trim(),
+          email:        email.trim() || undefined,
+          city:         city.trim()  || undefined,
+        })
+        const body = res?.data?.data ?? res?.data ?? {}
+        userRow = body?.vendor
+        // New vendors land in the admin review queue right away so the
+        // Vayil admin panel can do manual KYC. Best-effort.
+        try { await vendorApi.submitForReview() } catch { /* swallow */ }
+      }
+
+      const liveToken =
+        (typeof window !== 'undefined' && localStorage.getItem('vayil_token')) || ''
+      const user = {
+        id:            userRow?.customer_id ?? userRow?.vendor_id ?? 0,
+        name:          userRow?.name || name.trim(),
+        mobile:        userRow?.mobile || mobile,
+        email:         userRow?.email || email || '',
+        profile_image: userRow?.profile_image || '',
+        city:          userRow?.city || city || 'Coimbatore',
+        type:          tab,
+      }
+      rememberMobile(mobile)
+      completeAuth(user, liveToken)
+
+      if (tab === 'vendor' && !redirectTo) router.push('/vendor-onboarding')
     } catch (err: any) {
-      setError(err?.response?.data?.error || 'Failed to save profile')
+      setError(err?.response?.data?.error || err?.message || 'Failed to save profile')
     } finally { setLoading(false) }
   }
 

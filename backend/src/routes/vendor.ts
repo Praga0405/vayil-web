@@ -15,7 +15,17 @@ vendorRouter.get('/me', async (req: AuthRequest, res, next) => {
 vendorRouter.put('/me', async (req: AuthRequest, res, next) => {
   try {
     const body = z.object({ name: z.string().optional(), company_name: z.string().optional(), email: z.string().email().optional(), city: z.string().optional(), gst_number: z.string().optional(), is_gst_registered: z.boolean().optional() }).parse(req.body);
-    await exec(`UPDATE vendors SET name = COALESCE(:name, name), company_name = COALESCE(:company_name, company_name), email = COALESCE(:email, email), city = COALESCE(:city, city), gst_number = COALESCE(:gst_number, gst_number), is_gst_registered = COALESCE(:is_gst_registered, is_gst_registered) WHERE vendor_id = :id`, { ...body, id: req.user!.id });
+    // mysql2 rejects bound `undefined` — normalise every optional to null.
+    const params = {
+      id:                req.user!.id,
+      name:              body.name              ?? null,
+      company_name:      body.company_name      ?? null,
+      email:             body.email             ?? null,
+      city:              body.city              ?? null,
+      gst_number:        body.gst_number        ?? null,
+      is_gst_registered: body.is_gst_registered ?? null,
+    };
+    await exec(`UPDATE vendors SET name = COALESCE(:name, name), company_name = COALESCE(:company_name, company_name), email = COALESCE(:email, email), city = COALESCE(:city, city), gst_number = COALESCE(:gst_number, gst_number), is_gst_registered = COALESCE(:is_gst_registered, is_gst_registered) WHERE vendor_id = :id`, params);
     ok(res, { vendor: await one<any>('SELECT * FROM vendors WHERE vendor_id = :id', { id: req.user!.id }) });
   } catch (err) { next(err); }
 });
