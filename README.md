@@ -24,7 +24,7 @@ This repo contains both deployable surfaces in one place:
 │   │   ├── services/        # tax (GST/TDS/platform fee)
 │   │   ├── db.ts            # mysql2 pool + transaction helper
 │   │   └── config.ts
-│   ├── migrations/          # 001 schema, 002 PRD workflow tables, 003 seed tagging, 004 vendor review queue
+│   ├── migrations/          # 001 schema, 002 PRD workflow tables, 003 seed tagging, 004 vendor review queue, 005 orders enquiry unique
 │   ├── scripts/             # migrate, seed, seed-marketplace, smoke
 │   ├── seed-data/           # 40 vendors, 8 customers, demo activity (JSON)
 │   └── Dockerfile
@@ -67,12 +67,18 @@ This repo contains both deployable surfaces in one place:
 ### Data flow for a payment (canonical)
 
 1. Customer picks Full / 25 % min / Custom amount → frontend computes GST via `calculateFees`.
-2. **`POST /payments/create-order`** with `Idempotency-Key` header → backend creates a `payment_intent` row (`status='initiated'`) and a Razorpay order via the server SDK.
+2. **`POST /payments/create-order`** with `Idempotency-Key` header → backend:
+   - Validates the request belongs to this customer (enquiry / order / milestone ownership)
+   - Validates state preconditions (quote `accepted`, plan `approved` for materials, milestone `awaiting_payment`)
+   - **Re-derives the chargeable amount server-side** (`calculateTax`) and rejects mismatched client amounts (≤ ₹1 paise tolerance)
+   - Creates a `payment_intent` row (`status='initiated'`) and a Razorpay order via the server SDK using the **server-derived** amount.
 3. Razorpay Checkout opens client-side with `order_id`.
 4. On Razorpay's `handler`, the frontend calls **`POST /payments/verify`** with the signature.
-5. Backend HMAC-checks the signature (`crypto.timingSafeEqual`), flips the intent to `escrow_held`, writes an `escrow_ledger` hold row, and (if `purpose='quote'`) materialises the `orders` row. For `purpose='materials'`, the selected items flip to `PAID`.
-6. On project sign-off, **`POST /customer/projects/:id/signoff`** calls `releaseEscrow()` which credits the vendor wallet and writes a `release` ledger row.
-7. Razorpay webhook (`POST /payments/webhooks/razorpay`) is a server-to-server safety net for `payment.captured` / `payment.failed` if the browser leaves before `verify`.
+5. Backend HMAC-checks the signature (`crypto.timingSafeEqual`), flips the intent to `escrow_held`, writes an `escrow_ledger` hold row, and:
+   - `purpose='quote'` → materialises (or reuses, via `UNIQUE(enquiry_id)`) the `orders` row
+   - `purpose='materials'` → selected items flip to `PAID`
+6. On project sign-off, **`POST /customer/projects/:id/signoff`** calls `releaseEscrow()` which ensures the `vendor_wallet` row exists, credits balance + total_earning, and writes a `release` ledger row.
+7. Razorpay webhook **`POST /payments/webhooks/razorpay`** (raw body, HMAC-verified, lives on a separate router mounted before `express.json()`) is the server-to-server safety net for `payment.captured` / `payment.failed` if the browser leaves before `verify`.
 
 Idempotency: every state-mutating POST that originates from the customer/vendor surfaces accepts an `Idempotency-Key` header. The first call runs the handler and caches the response in `idempotency_keys`; replays return the cached response without re-running side effects.
 
@@ -210,7 +216,7 @@ Hot reload is on for both. Edits to `src/` reflect immediately; backend uses `ts
 | `npm run dev`      | Start dev server with HMR on port 3000           |
 | `npm run build`    | Production build (`.next/`)                      |
 | `npm start`        | Serve the production build                       |
-| `npm run lint`     | Run `next lint`                                  |
+| `npm run lint`     | Run `next lint` (config: `.eslintrc.json`)       |
 | `npx tsc --noEmit` | Type-check without emitting files                |
 
 ### Backend (`backend/`)

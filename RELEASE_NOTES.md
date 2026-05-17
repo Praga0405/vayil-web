@@ -1,5 +1,91 @@
 # Release Notes
 
+## v3.4.0 — Audit P0: webhook routing, payment hardening, escrow guards (2026-05-17)
+
+Commit: `28aadfb9`.
+
+Closes the five production blockers from the latest audit.
+
+### Backend
+
+- **Razorpay webhook routing — split + fix doubled path**
+
+  Previously `paymentsRouter` defined `POST /webhooks/razorpay` AND was
+  mounted at `/payments/webhooks`, producing the unreachable URL
+  `/payments/webhooks/webhooks/razorpay`.
+
+  `src/routes/payments.ts` now exports two routers:
+
+  | Export | Defines | Mount in `index.ts` |
+  |---|---|---|
+  | `paymentsWebhookRouter` | `POST /razorpay` (raw body via `express.raw()`) | `/payments/webhooks` AND `/webhooks` — **before** `express.json()` |
+  | `paymentsRouter` | `POST /create-order`, `POST /verify` | `/payments` — after `express.json()` |
+
+  Final webhook URLs are `POST /payments/webhooks/razorpay` and the
+  legacy alias `POST /webhooks/razorpay`. Raw body is preserved for
+  HMAC verification.
+
+- **`POST /payments/create-order` hardened — ownership + server-derived amount**
+
+  New `resolveExpectedAmount()` re-derives the chargeable amount on the
+  server and validates ownership for every purpose:
+
+  | Purpose | Validations | Expected amount |
+  |---|---|---|
+  | `quote` | enquiry belongs to customer; latest quote exists with `status='accepted'` | `calculateTax(quote.amount).customerTotal` |
+  | `materials` | order belongs to customer; plan is approved; every `material_id` belongs to that order and is `UNPAID` or `AWAITING_PAYMENT` | `calculateTax(sum(material totals)).customerTotal` |
+  | `milestone` | milestone's order belongs to customer; `customer_status='awaiting_payment'` | `calculateTax(milestone.amount).customerTotal` |
+
+  Client-supplied amount is compared to the server expected with ≤ ₹1
+  paise-rounding tolerance. Mismatch returns 400 with both numbers.
+  The amount stored on `payment_intents` and forwarded to Razorpay is
+  the **server**-derived value — client can no longer underpay.
+
+- **Duplicate orders prevented for quote payment**
+
+  `migrations/005_orders_enquiry_unique.sql` adds
+  `UNIQUE KEY uniq_orders_enquiry (enquiry_id)` to `orders` (idempotent
+  — migrate.ts swallows errno 1061). The verify handler also pre-checks
+  for an existing `orders` row by `enquiry_id` and reuses it
+  (`UPDATE status='active'`) instead of inserting a second row, so the
+  behaviour is correct even if the UNIQUE constraint failed to install
+  on an older deploy.
+
+- **`releaseEscrow` ensures `vendor_wallet` exists**
+
+  Resolves `vendor_id` from `orders` first, then inside the transaction
+  runs `INSERT INTO vendor_wallet … ON DUPLICATE KEY UPDATE vendor_id =
+  vendor_id` before the balance UPDATE. A brand-new vendor's first
+  escrow release no longer silently becomes a 0-row UPDATE.
+
+### Lint setup
+
+- Added `.eslintrc.json` extending `next/core-web-vitals`.
+- Turned off stylistic `react/no-unescaped-entities` (pre-existing
+  legacy noise) and downgraded `@next/next/no-img-element` to a warning
+  so the build isn't blocked by pre-existing `<img>` usage.
+- Fixed the only real **rules-of-hooks** violation
+  (`components/ui/index.tsx` — `OTPInput` was calling `React.useRef`
+  inside `Array.from`). Rewrote to a single `useRef` holding
+  `HTMLInputElement[]`, refs populated via inline `ref` callback on
+  each `<input>`.
+
+### Build / lint / smoke
+
+```
+✅ npm run build (frontend)        passes
+✅ npm run lint  (frontend)        0 errors, 40 warnings
+                                   (pre-existing <img> + exhaustive-deps
+                                    advisories in legacy pages)
+✅ cd backend && npm run build     passes
+✅ cd backend && npm run smoke     "Smoke test passed"
+⚠️  cd backend && npm run migrate  ECONNREFUSED 127.0.0.1:3306
+                                   (no local MySQL — runs on Render)
+✅ tsc --noEmit on both halves     0 errors
+```
+
+---
+
 ## v3.3.0 — Audit P0: canonical quote APIs + migration rename + adapter fix (2026-05-17)
 
 Commits: `6d33e2c3`, `0576c134`.
