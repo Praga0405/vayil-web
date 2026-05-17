@@ -9,7 +9,7 @@ import { customerRouter } from './routes/customer';
 import { vendorRouter } from './routes/vendor';
 import { opsRouter } from './routes/ops';
 import { commonRouter } from './routes/common';
-import { paymentsRouter } from './routes/payments';
+import { paymentsRouter, paymentsWebhookRouter } from './routes/payments';
 import { adminRouter } from './routes/admin';
 
 const app = express();
@@ -18,9 +18,11 @@ app.use(helmet());
 app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins, credentials: true }));
 
 // Webhooks MUST receive the raw body for signature verification, so mount
-// the webhook route BEFORE the global JSON parser.
-app.use('/payments/webhooks', paymentsRouter);
-app.use('/webhooks', paymentsRouter);
+// the dedicated webhook router BEFORE the global JSON parser. The webhook
+// router only defines POST /razorpay so the final URL is exactly
+// /payments/webhooks/razorpay (and the legacy /webhooks/razorpay alias).
+app.use('/payments/webhooks', paymentsWebhookRouter);
+app.use('/webhooks',          paymentsWebhookRouter);
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
@@ -31,6 +33,8 @@ app.use('/auth', authRouter);
 app.use('/customers', customerRouter);
 app.use('/vendors', vendorRouter);
 app.use('/ops', opsRouter);
+// /payments only carries create-order + verify — webhook is on the
+// separate router mounted above with raw-body parsing.
 app.use('/payments', paymentsRouter);
 
 // Admin panel — Vayil-Admin-Panel-main posts to these paths verbatim.

@@ -296,7 +296,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
                 {loading ? 'Sending OTP…' : <><span>Continue</span><ArrowRight className="w-4 h-4" /></>}
               </button>
               <p className="text-center text-xs text-gray-400">
-                By continuing, you agree to Vayil's <span className="text-navy font-medium">Terms</span> &amp; <span className="text-navy font-medium">Privacy Policy</span>
+                By continuing, you agree to Vayil&apos;s <span className="text-navy font-medium">Terms</span> &amp; <span className="text-navy font-medium">Privacy Policy</span>
               </p>
             </>
           )}
@@ -325,7 +325,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
               </button>
               <div className="text-center text-xs text-gray-400">
                 {resendIn > 0
-                  ? <>Didn't get it? Resend in <span className="font-semibold text-navy">{resendIn}s</span></>
+                  ? <>Didn&apos;t get it? Resend in <span className="font-semibold text-navy">{resendIn}s</span></>
                   : <button onClick={resendOTP} className="text-orange font-semibold flex items-center gap-1 mx-auto hover:underline">
                       <RotateCw className="w-3 h-3" /> Resend OTP
                     </button>}
@@ -357,7 +357,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo }: P
               </button>
               {tab === 'vendor' && (
                 <p className="text-center text-xs text-gray-400">
-                  We'll guide you through KYC + service setup next.
+                  We&apos;ll guide you through KYC + service setup next.
                 </p>
               )}
             </>

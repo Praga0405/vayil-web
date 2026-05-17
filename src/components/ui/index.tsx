@@ -286,24 +286,28 @@ export function FileUpload({ label, onChange, multiple, accept='image/*' }: {
 
 // ── OTP Input ───────────────────────────────────────────────
 export function OTPInput({ value, onChange, length=6 }: { value: string; onChange: (v: string) => void; length?: number }) {
-  const refs = Array.from({ length }, () => React.useRef<HTMLInputElement>(null))
+  // Single ref to a fixed-size array of input elements — hooks must not
+  // be called inside a callback (rules-of-hooks), so we can't useRef per
+  // slot. One useRef holds the whole array; we just (re)populate it via
+  // the inline `ref={el => …}` callback below.
+  const refs = React.useRef<Array<HTMLInputElement | null>>([])
   const digits = value.split('').concat(Array(length).fill('')).slice(0, length)
 
   const handleKey = (i: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace' && !digits[i] && i > 0) refs[i-1].current?.focus()
+    if (e.key === 'Backspace' && !digits[i] && i > 0) refs.current[i-1]?.focus()
   }
   const handleChange = (i: number, v: string) => {
     const c = v.replace(/\D/g, '').slice(-1)
     const next = [...digits]; next[i] = c
     onChange(next.join(''))
-    if (c && i < length - 1) refs[i+1].current?.focus()
+    if (c && i < length - 1) refs.current[i+1]?.focus()
   }
   return (
     <div className="flex gap-3 justify-center">
       {digits.map((d, i) => (
         <input
           key={i}
-          ref={refs[i]}
+          ref={el => { refs.current[i] = el }}
           type="text"
           inputMode="numeric"
           maxLength={1}

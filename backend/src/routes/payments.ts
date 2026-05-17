@@ -1,13 +1,21 @@
 /**
  * Payment routes — PRD §12.2 escrow + verified payments.
  *
- *   POST /payments/create-order  → creates a Razorpay order + payment_intent (idempotent)
- *   POST /payments/verify        → verifies signature, flips intent to success/escrow_held
- *   POST /webhooks/razorpay      → server-to-server confirmation (raw body)
+ * Two separate routers ship from this module so the Express app can
+ * mount the webhook BEFORE the global express.json() parser (so the
+ * raw body survives for HMAC verification):
  *
- * Frontend MUST supply `Idempotency-Key` header (or `idempotency_key` in
- * the JSON body) on create-order and verify. Replays return the cached
- * response without double-charging.
+ *   paymentsWebhookRouter
+ *     POST /razorpay              ← mounted at /payments/webhooks and /webhooks
+ *                                   (consumes raw body via express.raw())
+ *
+ *   paymentsRouter
+ *     POST /create-order          ← validates ownership + recomputes amount
+ *     POST /verify                ← HMAC-checks signature, flips intent to escrow_held
+ *
+ * Frontend MUST supply `Idempotency-Key` header (or `idempotency_key`
+ * in the JSON body) on create-order and verify. Replays return the
+ * cached response without double-charging.
  */
 import { Router, raw, Request, Response } from 'express';
 import { z } from 'zod';
@@ -16,11 +24,19 @@ import { requireAuth } from '../middleware/auth';
 import { idempotent } from '../middleware/idempotency';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
+import { calculateTax } from '../services/tax';
 import { createRazorpayOrder, verifyRazorpaySignature, verifyWebhookSignature } from '../utils/razorpay';
 
 export const paymentsRouter = Router();
+export const paymentsWebhookRouter = Router();
 
-/* ───────────────────────── create-order ───────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+ *  create-order
+ *
+ *  PRD audit: refuse to trust the frontend-supplied amount. For each
+ *  purpose we re-derive the chargeable amount on the server and
+ *  validate ownership (enquiry/order/quote/material/milestone).
+ * ───────────────────────────────────────────────────────────── */
 const createOrderSchema = z.object({
   amount:        z.number().positive(),
   purpose:       z.enum(['quote', 'milestone', 'materials']).default('quote'),
@@ -32,6 +48,93 @@ const createOrderSchema = z.object({
   currency:      z.string().default('INR'),
 });
 
+/** Allow a small rounding tolerance (≤ ₹1) when comparing client-supplied
+ *  amount against the server-recomputed total, so paise rounding doesn't
+ *  reject a legit payment. */
+function amountMatches(claimed: number, expected: number): boolean {
+  return Math.abs(Math.round(claimed) - Math.round(expected)) <= 1;
+}
+
+async function resolveExpectedAmount(
+  purpose: 'quote' | 'milestone' | 'materials',
+  args: { customerId: number; enquiry_id?: number; order_id?: number; milestone_id?: number; material_ids?: number[] },
+): Promise<{ expected: number; orderId: number | null; vendorId: number | null }> {
+  if (purpose === 'quote') {
+    if (!args.enquiry_id) throw new ApiError(400, 'enquiry_id required for quote payment');
+    const enquiry = await one<any>(
+      `SELECT enquiry_id, customer_id, vendor_id FROM enquiries
+        WHERE enquiry_id = :id AND customer_id = :cid LIMIT 1`,
+      { id: args.enquiry_id, cid: args.customerId },
+    );
+    if (!enquiry) throw new ApiError(403, 'Enquiry not found for this customer');
+    const quote = await one<any>(
+      `SELECT quotation_id, amount, status FROM quotation
+        WHERE enquiry_id = :id ORDER BY quotation_id DESC LIMIT 1`,
+      { id: args.enquiry_id },
+    );
+    if (!quote) throw new ApiError(400, 'No quote available for this enquiry');
+    if (String(quote.status).toLowerCase() !== 'accepted') {
+      throw new ApiError(400, `Quote must be accepted before payment (status: ${quote.status})`);
+    }
+    // Expected: quote total + platform fee + GST (server is the source of truth).
+    const tax = calculateTax({ baseAmount: Number(quote.amount) });
+    return { expected: tax.customerTotal, orderId: null, vendorId: enquiry.vendor_id ?? null };
+  }
+
+  if (purpose === 'materials') {
+    if (!args.order_id) throw new ApiError(400, 'order_id required for material payment');
+    if (!args.material_ids?.length) throw new ApiError(400, 'material_ids required for material payment');
+    const order = await one<any>(
+      `SELECT order_id, customer_id, vendor_id FROM orders
+        WHERE order_id = :id AND customer_id = :cid LIMIT 1`,
+      { id: args.order_id, cid: args.customerId },
+    );
+    if (!order) throw new ApiError(403, 'Order not found for this customer');
+    // PRD §10.5 — plan must be approved before any material payment.
+    const planApproved = await one<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM order_plan
+        WHERE order_id = :id AND customer_status = 'approved'`,
+      { id: args.order_id },
+    );
+    if (!planApproved || Number(planApproved.n) === 0) {
+      throw new ApiError(400, 'Plan must be approved before material payment');
+    }
+    const rows = await query<any>(
+      `SELECT material_id, total, status FROM materials
+        WHERE order_id = :id AND material_id IN (:ids)`,
+      { id: args.order_id, ids: args.material_ids } as any,
+    );
+    if (rows.length !== args.material_ids.length) {
+      throw new ApiError(400, 'One or more materials not found on this order');
+    }
+    for (const m of rows) {
+      const s = String(m.status).toUpperCase();
+      if (s !== 'UNPAID' && s !== 'AWAITING_PAYMENT') {
+        throw new ApiError(400, `Material ${m.material_id} is not payable (status: ${m.status})`);
+      }
+    }
+    const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
+    const tax = calculateTax({ baseAmount: subtotal });
+    return { expected: tax.customerTotal, orderId: args.order_id, vendorId: order.vendor_id ?? null };
+  }
+
+  // milestone
+  if (!args.milestone_id) throw new ApiError(400, 'milestone_id required for milestone payment');
+  const milestone = await one<any>(
+    `SELECT p.plan_id, p.order_id, p.amount, p.customer_status, o.customer_id, o.vendor_id
+       FROM order_plan p
+       JOIN orders o ON o.order_id = p.order_id
+      WHERE p.plan_id = :id AND o.customer_id = :cid LIMIT 1`,
+    { id: args.milestone_id, cid: args.customerId },
+  );
+  if (!milestone) throw new ApiError(403, 'Milestone not found for this customer');
+  if (String(milestone.customer_status).toLowerCase() !== 'awaiting_payment') {
+    throw new ApiError(400, `Milestone is not awaiting payment (status: ${milestone.customer_status})`);
+  }
+  const tax = calculateTax({ baseAmount: Number(milestone.amount) });
+  return { expected: tax.customerTotal, orderId: milestone.order_id, vendorId: milestone.vendor_id ?? null };
+}
+
 paymentsRouter.post('/create-order',
   requireAuth(['customer']),
   idempotent(),
@@ -41,8 +144,8 @@ paymentsRouter.post('/create-order',
       const idempotencyKey = (req.header('Idempotency-Key') || body.idempotency_key || `pi-${Date.now()}-${Math.random()}`).toString();
       const customerId = Number(req.user!.id);
 
-      // If a payment_intent for this key already exists (race-safety on top
-      // of the idempotency middleware), return it.
+      // Race-safety on top of the idempotency middleware: if the same key
+      // already produced an intent, return it verbatim.
       const existing = await one<any>(
         `SELECT * FROM payment_intents WHERE idempotency_key = :key LIMIT 1`,
         { key: idempotencyKey },
@@ -57,8 +160,27 @@ paymentsRouter.post('/create-order',
         });
       }
 
+      // 1) Ownership + state validation.
+      // 2) Recompute expected amount; reject if client lied about the total.
+      const { expected, orderId } = await resolveExpectedAmount(body.purpose, {
+        customerId,
+        enquiry_id:   body.enquiry_id,
+        order_id:     body.order_id,
+        milestone_id: body.milestone_id,
+        material_ids: body.material_ids,
+      });
+      if (!amountMatches(body.amount, expected)) {
+        throw new ApiError(
+          400,
+          `Amount mismatch: client sent ${body.amount} but server expected ${expected}`,
+        );
+      }
+
+      // Use the server-derived order_id so the intent stays linked correctly.
+      const finalOrderId = orderId ?? body.order_id ?? null;
+
       const rzOrder = await createRazorpayOrder({
-        amount: body.amount,
+        amount: expected,
         currency: body.currency,
         receipt: idempotencyKey.slice(0, 40),
         notes: { customer_id: String(customerId), purpose: body.purpose },
@@ -73,11 +195,11 @@ paymentsRouter.post('/create-order',
         {
           key:          idempotencyKey,
           customerId,
-          orderId:      body.order_id ?? null,
+          orderId:      finalOrderId,
           enquiryId:    body.enquiry_id ?? null,
           milestoneId:  body.milestone_id ?? null,
           materialIds:  body.material_ids ? JSON.stringify(body.material_ids) : null,
-          amount:       body.amount,
+          amount:       expected,
           purpose:      body.purpose,
           razorpayOrderId: rzOrder.id,
         },
@@ -86,7 +208,7 @@ paymentsRouter.post('/create-order',
       ok(res, {
         intent_id:         result.insertId,
         razorpay_order_id: rzOrder.id,
-        amount:            body.amount,
+        amount:            expected,
         currency:          body.currency,
         status:            'initiated',
       }, 201);
@@ -140,17 +262,30 @@ paymentsRouter.post('/verify',
            VALUES (?, ?, NULL, ?, 'hold', ?)`,
           [intent.intent_id, intent.order_id, intent.amount, intent.purpose],
         );
-        // If this was a quote acceptance payment, materialise the order row.
+        // Quote payment → materialise (or reuse) the orders row. We pre-check
+        // existence to avoid relying on a UNIQUE constraint that older deploys
+        // may not have, and to give a deterministic insert id back when one
+        // is already there.
         if (intent.purpose === 'quote' && intent.enquiry_id) {
-          await conn.query(
-            `INSERT INTO orders (customer_id, vendor_id, enquiry_id, amount, status, created_at)
-             SELECT e.customer_id, e.vendor_id, e.enquiry_id, ?, 'active', NOW()
-               FROM enquiries e WHERE e.enquiry_id = ?
-             ON DUPLICATE KEY UPDATE status = VALUES(status)`,
-            [intent.amount, intent.enquiry_id],
+          const [existingOrder]: any = await conn.query(
+            `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
+            [intent.enquiry_id],
           );
+          if (Array.isArray(existingOrder) && existingOrder.length > 0) {
+            await conn.query(
+              `UPDATE orders SET status = 'active' WHERE enquiry_id = ?`,
+              [intent.enquiry_id],
+            );
+          } else {
+            await conn.query(
+              `INSERT INTO orders (customer_id, vendor_id, enquiry_id, amount, status, created_at)
+               SELECT e.customer_id, e.vendor_id, e.enquiry_id, ?, 'active', NOW()
+                 FROM enquiries e WHERE e.enquiry_id = ?`,
+              [intent.amount, intent.enquiry_id],
+            );
+          }
         }
-        // If materials, flip them to PAID.
+        // Materials → flip rows to PAID.
         if (intent.purpose === 'materials' && intent.material_ids) {
           const ids = JSON.parse(intent.material_ids);
           if (Array.isArray(ids) && ids.length > 0) {
@@ -168,8 +303,14 @@ paymentsRouter.post('/verify',
   },
 );
 
-/* ───────────────────────── webhook (raw body) ──────────────── */
-paymentsRouter.post('/webhooks/razorpay',
+/* ─────────────────────────────────────────────────────────────
+ *  webhook (raw body)
+ *  Lives on a separate router so index.ts can mount it BEFORE the
+ *  global express.json() parser. The path is /razorpay relative to
+ *  the mount point — DO NOT also include /webhooks here or the URL
+ *  becomes /payments/webhooks/webhooks/razorpay.
+ * ───────────────────────────────────────────────────────────── */
+paymentsWebhookRouter.post('/razorpay',
   raw({ type: '*/*', limit: '2mb' }),
   async (req: Request, res: Response, next) => {
     try {
@@ -180,7 +321,7 @@ paymentsRouter.post('/webhooks/razorpay',
       let payload: any = {};
       try { payload = JSON.parse(rawBody); } catch { /* keep empty */ }
 
-      await exec(
+      const inserted: any = await exec(
         `INSERT INTO webhook_deliveries (provider, event_id, event_type, payload, signature, status)
          VALUES ('razorpay', :eventId, :eventType, :payload, :sig, :status)`,
         {
@@ -191,10 +332,10 @@ paymentsRouter.post('/webhooks/razorpay',
           status:    valid ? 'received' : 'invalid',
         },
       );
+      const deliveryId = inserted?.insertId;
 
       if (!valid) return res.status(400).json({ ok: false, error: 'invalid signature' });
 
-      // Handle payment.captured / payment.failed
       const event = payload?.event as string | undefined;
       const entity = payload?.payload?.payment?.entity;
       if (event === 'payment.captured' && entity?.order_id) {
@@ -202,7 +343,7 @@ paymentsRouter.post('/webhooks/razorpay',
           `SELECT * FROM payment_intents WHERE razorpay_order_id = :id LIMIT 1`,
           { id: entity.order_id },
         );
-        if (intent && intent.status !== 'escrow_held' && intent.status !== 'success') {
+        if (intent && intent.status !== 'escrow_held' && intent.status !== 'released') {
           await exec(
             `UPDATE payment_intents SET status = 'escrow_held', razorpay_payment_id = :pid WHERE intent_id = :id`,
             { pid: entity.id, id: intent.intent_id },
@@ -222,21 +363,35 @@ paymentsRouter.post('/webhooks/razorpay',
         );
       }
 
-      await exec(
-        `UPDATE webhook_deliveries SET status = 'processed', processed_at = NOW()
-                                       WHERE id = LAST_INSERT_ID()`,
-      );
+      if (deliveryId) {
+        await exec(
+          `UPDATE webhook_deliveries SET status = 'processed', processed_at = NOW() WHERE id = :id`,
+          { id: deliveryId },
+        );
+      }
       res.json({ ok: true });
     } catch (err) { next(err); }
   },
 );
 
-/* ───────────────────────── helpers for other routes ─────────── */
-// Convenience: release escrow → vendor wallet. Called when milestone is
-// marked complete or the order is signed off.
+/* ─────────────────────────────────────────────────────────────
+ *  releaseEscrow — held → released; credits vendor_wallet.
+ *  Ensures a wallet row exists (INSERT ... ON DUPLICATE KEY UPDATE)
+ *  before crediting it, so a brand-new vendor never silently
+ *  swallows an escrow release.
+ * ───────────────────────────────────────────────────────────── */
 export async function releaseEscrow(intentId: number) {
   const intent = await one<any>(`SELECT * FROM payment_intents WHERE intent_id = :id`, { id: intentId });
   if (!intent || intent.status !== 'escrow_held') return;
+
+  // Resolve the vendor_id outside the transaction so we can pre-ensure
+  // a wallet row exists.
+  const vendor = intent.order_id ? await one<{ vendor_id: number | null }>(
+    `SELECT vendor_id FROM orders WHERE order_id = :id LIMIT 1`,
+    { id: intent.order_id },
+  ) : null;
+  const vendorId = vendor?.vendor_id ?? null;
+
   await transaction(async (conn) => {
     await conn.query(
       `UPDATE payment_intents SET status = 'released' WHERE intent_id = ?`,
@@ -244,16 +399,24 @@ export async function releaseEscrow(intentId: number) {
     );
     await conn.query(
       `INSERT INTO escrow_ledger (intent_id, order_id, vendor_id, amount, direction, reason)
-       SELECT intent_id, order_id,
-              (SELECT vendor_id FROM orders WHERE order_id = pi.order_id),
-              amount, 'release', 'milestone_complete'
-         FROM payment_intents pi WHERE intent_id = ?`,
-      [intentId],
+       VALUES (?, ?, ?, ?, 'release', 'milestone_complete')`,
+      [intentId, intent.order_id, vendorId, intent.amount],
     );
-    await conn.query(
-      `UPDATE vendor_wallet SET balance = balance + ?, total_earning = total_earning + ?
-         WHERE vendor_id = (SELECT vendor_id FROM orders WHERE order_id = ?)`,
-      [intent.amount, intent.amount, intent.order_id],
-    );
+    if (vendorId) {
+      // Make sure the wallet row exists, then credit it. Two-step keeps the
+      // SQL portable across MySQL versions.
+      await conn.query(
+        `INSERT INTO vendor_wallet (vendor_id, balance, total_earning)
+         VALUES (?, 0, 0)
+         ON DUPLICATE KEY UPDATE vendor_id = vendor_id`,
+        [vendorId],
+      );
+      await conn.query(
+        `UPDATE vendor_wallet
+            SET balance = balance + ?, total_earning = total_earning + ?
+          WHERE vendor_id = ?`,
+        [intent.amount, intent.amount, vendorId],
+      );
+    }
   });
 }

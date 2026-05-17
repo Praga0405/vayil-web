@@ -56,7 +56,7 @@ export default function MilestoneUpdatePage() {
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5">
         <h1 className="text-xl font-bold text-navy">Post milestone update</h1>
-        <p className="text-sm text-gray-500 mt-1">Share progress with photos and a short comment so the customer sees what's happening.</p>
+        <p className="text-sm text-gray-500 mt-1">Share progress with photos and a short comment so the customer sees what&apos;s happening.</p>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
