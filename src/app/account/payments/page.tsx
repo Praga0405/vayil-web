@@ -4,6 +4,7 @@ import { customerApi } from '@/lib/api/client'
 import { PageLoader, EmptyState, StatusBadge, Amount } from '@/components/ui'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { CreditCard } from 'lucide-react'
+import { PageHero } from '@/components/shared/PageLayout'
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<any[]>([])
@@ -38,10 +39,7 @@ export default function PaymentsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">Payments</h1>
-        <p className="text-sm text-gray-500 mt-1">Your payment history</p>
-      </div>
+      <PageHero title="Payments" subtitle="Every payment you've made through Vayil escrow." />
 
       {/* Summary card */}
       <div className="bg-navy rounded-2xl p-5 text-white">

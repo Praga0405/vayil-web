@@ -5,15 +5,16 @@ import { useLiveJobs } from '@/hooks/useVendorStudio'
 import { StatusBadge, EmptyState, PageLoader } from '@/components/ui'
 import { formatCurrency, formatRelative } from '@/lib/utils'
 import { Briefcase, ChevronRight } from 'lucide-react'
+import { PageHero } from '@/components/shared/PageLayout'
 
 export default function VendorJobsListPage() {
   const { data: jobs, loading } = useLiveJobs()
   return (
     <div className="space-y-5 pb-10">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">Ongoing Jobs</h1>
-        <p className="text-sm text-gray-500 mt-1">Active projects, plans, and payment requests</p>
-      </div>
+      <PageHero
+        title="Ongoing Jobs"
+        subtitle={`${jobs.length} active project${jobs.length !== 1 ? 's' : ''} — plans, materials, and payment requests.`}
+      />
 
       {loading ? <PageLoader /> : jobs.length === 0 ? (
         <EmptyState icon={Briefcase} title="No ongoing jobs"

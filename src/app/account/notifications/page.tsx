@@ -4,6 +4,7 @@ import { customerApi } from '@/lib/api/client'
 import { PageLoader, EmptyState } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { Bell } from 'lucide-react'
+import { PageHero } from '@/components/shared/PageLayout'
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([])
@@ -20,10 +21,7 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">Notifications</h1>
-        <p className="text-sm text-gray-500 mt-1">{notifications.length} notifications</p>
-      </div>
+      <PageHero title="Notifications" subtitle={`${notifications.length} notification${notifications.length !== 1 ? 's' : ''}`} />
 
       {loading ? <PageLoader /> : notifications.length === 0 ? (
         <EmptyState icon={Bell} title="No notifications" description="You're all caught up!" />

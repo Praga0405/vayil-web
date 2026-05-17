@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
 import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge } from '@/components/ui'
+import { PageHero, PageSection, TwoColumn, StatGrid, FieldGrid } from '@/components/shared/PageLayout'
 import { LogOut, Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -91,109 +92,162 @@ export default function VendorListingPage() {
   }
 
   const logout = () => { clearAuth(); router.push('/') }
+  const activeCount   = services.filter((s: any) => s.status === 'active').length
+  const inactiveCount = services.length - activeCount
 
   return (
-    <div className="space-y-5 pb-10">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">My Listing</h1>
-        <p className="text-sm text-gray-500 mt-1">Manage your business profile and services</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex bg-white border border-gray-100 rounded-2xl p-1">
-        {(['profile', 'services'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold capitalize transition-all ${
-              tab === t ? 'bg-navy text-white' : 'text-gray-500 hover:text-navy'
-            }`}>
-            {t === 'profile' ? 'Business Profile' : 'My Services'}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-6 pb-10">
+      <PageHero
+        title="My Listing"
+        subtitle="Manage your business profile and the services you offer"
+        actions={
+          <Button variant="danger" onClick={logout}>
+            <LogOut className="w-4 h-4" /> Sign out
+          </Button>
+        }
+        meta={
+          <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 max-w-md">
+            {(['profile', 'services'] as Tab[]).map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
+                  tab === t ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
+                }`}>
+                {t === 'profile' ? 'Business Profile' : `My Services${services.length ? ` (${services.length})` : ''}`}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {tab === 'profile' && (
-        <div className="space-y-5 max-w-xl">
-          {/* Avatar */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 flex items-center gap-4">
-            <div className="relative">
-              <Avatar name={user?.name} src={user?.profile_image} size={16} />
-              <button className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-orange flex items-center justify-center">
-                <Camera className="w-3.5 h-3.5 text-white" />
-              </button>
-            </div>
-            <div>
-              <p className="font-bold text-navy">{user?.name || 'Vendor'}</p>
-              <p className="text-sm text-gray-500">+91 {user?.mobile}</p>
-              <span className="inline-block mt-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-orange/10 text-orange">Vendor</span>
-            </div>
-          </div>
-
-          {/* Form */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
-            <h2 className="text-base font-bold text-navy">Business Details</h2>
-            <Input label="Company Name" value={form.company_name} onChange={set('company_name')} />
-            <Textarea label="Description" rows={3} value={form.description} onChange={set('description')} />
-            <Input label="Email" type="email" value={form.email_id} onChange={set('email_id')} />
-            <div className="grid grid-cols-2 gap-3">
-              <Select label="State" value={form.state_id} onChange={set('state_id')}
-                options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
-              <Select label="City" value={form.city_id} onChange={set('city_id')}
-                options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
-            </div>
-            <Button full loading={saving} onClick={save}>Save Changes</Button>
-          </div>
-
-          <Button full variant="danger" onClick={logout}>
-            <LogOut className="w-4 h-4" /> Sign Out
-          </Button>
-        </div>
+        <TwoColumn
+          left={
+            <PageSection>
+              <div className="flex flex-col items-center text-center">
+                <div className="relative">
+                  <Avatar name={user?.name} src={user?.profile_image} size={24} />
+                  <button className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-orange ring-4 ring-white flex items-center justify-center hover:bg-orange-600 transition">
+                    <Camera className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+                <p className="font-bold text-navy text-lg mt-4">{user?.name || 'Vendor'}</p>
+                <p className="text-sm text-gray-500 mt-0.5">+91 {user?.mobile}</p>
+                <span className="inline-flex items-center gap-1 mt-3 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-orange/10 text-orange">
+                  <Wrench className="w-3 h-3" /> Vendor
+                </span>
+              </div>
+              <div className="h-px bg-gray-100 my-5" />
+              <ul className="space-y-2 text-xs">
+                <li className="flex items-center justify-between text-gray-500">
+                  <span>Listing visibility</span>
+                  <span className="font-semibold text-navy">Live</span>
+                </li>
+                <li className="flex items-center justify-between text-gray-500">
+                  <span>Services live</span>
+                  <span className="font-semibold text-navy">{activeCount} of {services.length}</span>
+                </li>
+                <li className="flex items-center justify-between text-gray-500">
+                  <span>Public profile</span>
+                  <Link href={user?.id ? `/vendors/${user.id}` : '/search'}
+                    className="font-semibold text-orange hover:underline">
+                    View as customer
+                  </Link>
+                </li>
+              </ul>
+            </PageSection>
+          }
+          right={
+            <PageSection
+              title="Business Details"
+              description="What customers see when they land on your public profile."
+              actions={<Button loading={saving} onClick={save}>Save Changes</Button>}
+            >
+              <div className="space-y-4">
+                <Input label="Company Name" value={form.company_name} onChange={set('company_name')} placeholder="e.g. Voltline Electricals" />
+                <Textarea label="Description" rows={4} value={form.description} onChange={set('description')}
+                  placeholder="A short pitch — your specialities, years of experience, and what sets you apart." />
+                <FieldGrid columns={2}>
+                  <Input label="Email" type="email" value={form.email_id} onChange={set('email_id')} placeholder="you@company.com" />
+                  <Input label="Mobile" value={`+91 ${user?.mobile || ''}`} disabled />
+                  <Select label="State" value={form.state_id} onChange={set('state_id')}
+                    options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
+                  <Select label="City" value={form.city_id} onChange={set('city_id')}
+                    options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
+                </FieldGrid>
+              </div>
+            </PageSection>
+          }
+        />
       )}
 
       {tab === 'services' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">{services.length} service{services.length !== 1 ? 's' : ''} listed</p>
-            <Link href="/vendor/services/add" className="flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-navy/90 transition">
-              <Plus className="w-4 h-4" /> Add Service
-            </Link>
-          </div>
+        <div className="space-y-5">
+          <StatGrid
+            columns={3}
+            items={[
+              { label: 'Total services', value: services.length,   icon: Wrench,     accent: 'navy' },
+              { label: 'Active',         value: activeCount,        icon: ToggleRight, accent: 'orange' },
+              { label: 'Inactive',       value: inactiveCount,      icon: ToggleLeft,  accent: 'plain' },
+            ]}
+          />
 
-          {svcLoading ? <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">Loading…</div>
-          : services.length === 0 ? (
-            <EmptyState icon={Wrench} title="No services listed yet"
-              description="Add your first service to start receiving enquiries"
-              action={<Link href="/vendor/services/add" className="flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl"><Plus className="w-4 h-4" /> Add Service</Link>} />
-          ) : (
-            <div className="space-y-3">
-              {services.map((s: any) => {
-                const sid = s.id || s.service_id
-                const active = s.status === 'active'
-                return (
-                  <div key={sid} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-xl bg-gray-100 overflow-hidden shrink-0">
-                      {s.images?.[0]
-                        ? <img src={s.images[0]} alt={s.title} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center"><Wrench className="w-6 h-6 text-gray-400" /></div>
-                      }
+          <PageSection
+            title="Service catalogue"
+            description="Toggle a service off to pause new enquiries without deleting it."
+            actions={
+              <Link href="/vendor/services/add"
+                className="inline-flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-navy/90 transition">
+                <Plus className="w-4 h-4" /> Add Service
+              </Link>
+            }
+          >
+            {svcLoading ? <div className="py-10 text-center text-gray-400 text-sm">Loading services…</div>
+            : services.length === 0 ? (
+              <EmptyState icon={Wrench} title="No services listed yet"
+                description="Add your first service to start receiving enquiries"
+                action={
+                  <Link href="/vendor/services/add"
+                    className="inline-flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl">
+                    <Plus className="w-4 h-4" /> Add Service
+                  </Link>
+                } />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {services.map((s: any) => {
+                  const sid = s.id || s.service_id
+                  const active = s.status === 'active'
+                  return (
+                    <div key={sid} className="border border-gray-100 rounded-2xl p-4 hover:border-orange/30 hover:shadow-sm transition flex flex-col">
+                      <div className="flex items-start gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden shrink-0">
+                          {s.images?.[0]
+                            ? <img src={s.images[0]} alt={s.title} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center"><Wrench className="w-5 h-5 text-gray-400" /></div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-navy text-sm truncate">{s.title || s.service_title}</p>
+                          <p className="text-xs text-gray-500 truncate">{s.category_name || 'Service'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
+                        <StatusBadge status={s.status} />
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => toggleStatus(sid, s.status)}
+                            className="text-gray-400 hover:text-navy transition p-1" aria-label="Toggle status">
+                            {active ? <ToggleRight className="w-6 h-6 text-orange" /> : <ToggleLeft className="w-6 h-6" />}
+                          </button>
+                          <Link href={`/vendor/services/${sid}`}
+                            className="text-xs font-semibold text-navy hover:text-orange transition inline-flex items-center gap-1">
+                            Edit <ChevronRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-navy text-sm truncate">{s.title || s.service_title}</p>
-                      <p className="text-xs text-gray-500">{s.category_name || 'Service'}</p>
-                      <StatusBadge status={s.status} />
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <button onClick={() => toggleStatus(sid, s.status)} className="text-gray-400 hover:text-navy transition">
-                        {active ? <ToggleRight className="w-6 h-6 text-orange" /> : <ToggleLeft className="w-6 h-6" />}
-                      </button>
-                      <Link href={`/vendor/services/${sid}`} className="text-gray-400 hover:text-navy transition">
-                        <ChevronRight className="w-5 h-5" />
-                      </Link>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+                  )
+                })}
+              </div>
+            )}
+          </PageSection>
         </div>
       )}
     </div>

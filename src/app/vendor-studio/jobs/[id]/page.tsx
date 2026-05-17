@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useLiveJob } from '@/hooks/useVendorStudio'
 import { Button, StatusBadge, PageLoader } from '@/components/ui'
+import { PageHero, PageSection, TwoColumn, StatGrid } from '@/components/shared/PageLayout'
 import { formatCurrency } from '@/lib/utils'
-import { ChevronLeft, FileText, Package, Wallet, ChevronRight } from 'lucide-react'
+import { FileText, Package, Wallet, ChevronRight, Briefcase, CheckCircle2, Clock, IndianRupee } from 'lucide-react'
 
 export default function VendorJobDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -18,81 +19,113 @@ export default function VendorJobDetailPage() {
   const progress = Math.round((job.paid / job.total) * 100)
   const unpaidMilestones = job.milestones.filter(m => m.status === 'PENDING' || m.status === 'IN_PROGRESS')
   const unpaidMaterials  = job.materials.filter(m => m.status !== 'PAID')
+  const doneMilestones   = job.milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID').length
 
   return (
-    <div className="space-y-5 pb-10">
-      <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
-        <ChevronLeft className="w-4 h-4" /> Back to Jobs
-      </button>
-
-      {/* Header */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <div className="flex items-start justify-between gap-3">
+    <div className="space-y-6 pb-10">
+      <PageHero
+        title={job.customer_name}
+        subtitle={job.service_title}
+        backHref="/vendor-studio/jobs"
+        backLabel="Back to Jobs"
+        actions={
+          <>
+            <StatusBadge status={job.plan_status} />
+            {unpaidMilestones.length + unpaidMaterials.length > 0 && (
+              <Button onClick={() => router.push(`/vendor-studio/jobs/${id}/ask-payment`)}>
+                <Wallet className="w-4 h-4" /> Request Payment
+              </Button>
+            )}
+          </>
+        }
+        meta={
           <div>
-            <h1 className="text-xl font-bold text-navy">{job.customer_name}</h1>
-            <p className="text-sm text-gray-500">{job.service_title}</p>
-          </div>
-          <StatusBadge status={job.plan_status} />
-        </div>
-        <div className="mt-4 pt-4 border-t border-gray-100">
-          <div className="flex items-center justify-between text-sm mb-1.5">
-            <span className="text-gray-500">Payment Progress</span>
-            <span className="font-bold text-navy">{formatCurrency(job.paid)} / {formatCurrency(job.total)}</span>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-full bg-orange transition-all" style={{ width: `${progress}%` }} />
-          </div>
-          <p className="text-xs text-gray-400 mt-1">{progress}% paid · {formatCurrency(job.pending)} pending</p>
-        </div>
-      </div>
-
-      {/* Quick actions */}
-      <div className="grid grid-cols-3 gap-3">
-        <Link href={`/vendor-studio/jobs/${id}/plan`}
-          className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col items-center gap-2 hover:border-orange/30 hover:shadow-sm transition">
-          <FileText className="w-5 h-5 text-orange" />
-          <span className="text-xs font-semibold text-navy">Plan</span>
-        </Link>
-        <Link href={`/vendor-studio/jobs/${id}/materials`}
-          className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col items-center gap-2 hover:border-orange/30 hover:shadow-sm transition">
-          <Package className="w-5 h-5 text-orange" />
-          <span className="text-xs font-semibold text-navy">Materials</span>
-        </Link>
-        <Link href={`/vendor-studio/jobs/${id}/ask-payment`}
-          className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col items-center gap-2 hover:border-orange/30 hover:shadow-sm transition">
-          <Wallet className="w-5 h-5 text-orange" />
-          <span className="text-xs font-semibold text-navy">Ask Payment</span>
-        </Link>
-      </div>
-
-      {/* Milestones quick view */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-bold text-navy">Milestones ({job.milestones.length})</h2>
-          <Link href={`/vendor-studio/jobs/${id}/plan`} className="text-xs text-orange font-semibold flex items-center gap-1">
-            Manage <ChevronRight className="w-3 h-3" />
-          </Link>
-        </div>
-        <div className="space-y-2">
-          {job.milestones.slice(0, 4).map(m => (
-            <div key={m.id} className="flex items-center justify-between text-sm py-1.5">
-              <span className="text-navy truncate">{m.title}</span>
-              <span className="text-gray-500 ml-3 shrink-0">{m.percentage}%</span>
+            <div className="flex items-center justify-between text-sm mb-1.5">
+              <span className="text-gray-500">Payment progress</span>
+              <span className="font-bold text-navy">{formatCurrency(job.paid)} / {formatCurrency(job.total)}</span>
             </div>
-          ))}
-        </div>
-      </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-orange transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">{progress}% paid · {formatCurrency(job.pending)} pending</p>
+          </div>
+        }
+      />
 
-      {unpaidMilestones.length + unpaidMaterials.length > 0 && (
-        <div className="bg-orange/5 border border-orange/30 rounded-2xl p-5 text-center">
-          <p className="text-sm font-semibold text-navy">
-            {unpaidMilestones.length} milestone{unpaidMilestones.length !== 1 ? 's' : ''} and {unpaidMaterials.length} material item{unpaidMaterials.length !== 1 ? 's' : ''} unpaid
-          </p>
-          <Button className="mt-3" onClick={() => router.push(`/vendor-studio/jobs/${id}/ask-payment`)}>
-            Request Payment
-          </Button>
-        </div>
-      )}
+      <StatGrid
+        columns={4}
+        items={[
+          { label: 'Total value',       value: formatCurrency(job.total),   icon: IndianRupee, accent: 'navy' },
+          { label: 'Paid so far',       value: formatCurrency(job.paid),    icon: CheckCircle2, accent: 'green' },
+          { label: 'Pending payment',   value: formatCurrency(job.pending), icon: Clock, accent: 'orange' },
+          { label: 'Milestones done',   value: `${doneMilestones} / ${job.milestones.length}`, icon: Briefcase, accent: 'plain' },
+        ]}
+      />
+
+      <TwoColumn
+        leftWidth="lg:w-[300px]"
+        left={
+          <PageSection title="Quick actions" description="Jump to a workspace for this job.">
+            <div className="space-y-2">
+              <ActionLink href={`/vendor-studio/jobs/${id}/plan`}      icon={FileText} title="Plan & milestones" subtitle={`${job.milestones.length} milestone${job.milestones.length !== 1 ? 's' : ''}`} />
+              <ActionLink href={`/vendor-studio/jobs/${id}/materials`} icon={Package}  title="Materials"          subtitle={`${job.materials.length} item${job.materials.length !== 1 ? 's' : ''}`} />
+              <ActionLink href={`/vendor-studio/jobs/${id}/ask-payment`} icon={Wallet} title="Ask for payment"    subtitle={`${unpaidMilestones.length + unpaidMaterials.length} item${unpaidMilestones.length + unpaidMaterials.length !== 1 ? 's' : ''} unpaid`} />
+            </div>
+          </PageSection>
+        }
+        right={
+          <PageSection
+            title={`Milestones (${job.milestones.length})`}
+            description="Tap a milestone to update progress or post an image."
+            actions={
+              <Link href={`/vendor-studio/jobs/${id}/plan`}
+                className="text-xs text-orange font-semibold inline-flex items-center gap-1 hover:underline">
+                Manage <ChevronRight className="w-3 h-3" />
+              </Link>
+            }
+          >
+            {job.milestones.length === 0 ? (
+              <div className="py-8 text-center text-sm text-gray-400">
+                No milestones yet. <Link href={`/vendor-studio/jobs/${id}/plan`} className="text-orange font-semibold hover:underline">Create the plan →</Link>
+              </div>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {job.milestones.map(m => (
+                  <li key={m.id} className="flex items-center gap-3 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-navy text-sm truncate">{m.title}</p>
+                      <p className="text-xs text-gray-500">
+                        {m.percentage}% · {formatCurrency(m.amount)}
+                      </p>
+                    </div>
+                    <StatusBadge status={m.status} />
+                    <Link href={`/vendor-studio/milestones/${m.id}/update`}
+                      className="text-xs font-semibold text-navy hover:text-orange transition inline-flex items-center gap-1">
+                      Update <ChevronRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </PageSection>
+        }
+      />
     </div>
+  )
+}
+
+function ActionLink({ href, icon: Icon, title, subtitle }: { href: string; icon: any; title: string; subtitle: string }) {
+  return (
+    <Link href={href}
+      className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-orange/40 hover:bg-orange/5 transition group">
+      <div className="w-10 h-10 rounded-xl bg-orange/10 flex items-center justify-center shrink-0 group-hover:bg-orange/20 transition">
+        <Icon className="w-5 h-5 text-orange" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-navy">{title}</p>
+        <p className="text-xs text-gray-500">{subtitle}</p>
+      </div>
+      <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-orange transition" />
+    </Link>
   )
 }

@@ -5,6 +5,7 @@ import { useLiveEnquiries } from '@/hooks/useVendorStudio'
 import { StatusBadge, EmptyState, PageLoader } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight } from 'lucide-react'
+import { PageHero } from '@/components/shared/PageLayout'
 
 type Tab = 'NEW' | 'ACCEPTED' | 'QUOTED' | 'COMPLETED'
 
@@ -15,21 +16,25 @@ export default function VendorEnquiriesListPage() {
 
   return (
     <div className="space-y-5 pb-10">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">Enquiries</h1>
-        <p className="text-sm text-gray-500 mt-1">Manage customer requests</p>
-      </div>
-
-      <div className="flex bg-white border border-gray-100 rounded-2xl p-1 overflow-x-auto">
-        {(['NEW', 'ACCEPTED', 'QUOTED', 'COMPLETED'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`flex-1 min-w-[100px] py-2.5 rounded-xl text-sm font-semibold transition-all ${
-              tab === t ? 'bg-navy text-white' : 'text-gray-500 hover:text-navy'
-            }`}>
-            {t.charAt(0) + t.slice(1).toLowerCase()}
-          </button>
-        ))}
-      </div>
+      <PageHero
+        title="Enquiries"
+        subtitle="Customer requests — accept, quote, or reject."
+        meta={
+          <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 overflow-x-auto">
+            {(['NEW', 'ACCEPTED', 'QUOTED', 'COMPLETED'] as Tab[]).map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`flex-1 min-w-[100px] py-2 rounded-lg text-sm font-semibold transition-all ${
+                  tab === t ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
+                }`}>
+                {t.charAt(0) + t.slice(1).toLowerCase()}
+                {tab === t && enquiries.filter(e => e.status === t).length > 0 && (
+                  <span className="ml-1.5 text-xs opacity-75">({enquiries.filter(e => e.status === t).length})</span>
+                )}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {loading ? <PageLoader /> : filtered.length === 0 ? (
         <EmptyState icon={ClipboardList} title={`No ${tab.toLowerCase()} enquiries`}

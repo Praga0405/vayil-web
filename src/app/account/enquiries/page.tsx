@@ -5,6 +5,7 @@ import { customerApi } from '@/lib/api/client'
 import { PageLoader, EmptyState, StatusBadge } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight, Search } from 'lucide-react'
+import { PageHero } from '@/components/shared/PageLayout'
 
 export default function EnquiriesPage() {
   const [enquiries, setEnquiries] = useState<any[]>([])
@@ -25,10 +26,15 @@ export default function EnquiriesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">My Enquiries</h1>
-        <p className="text-sm text-gray-500 mt-1">Track all your service requests</p>
-      </div>
+      <PageHero
+        title="My Enquiries"
+        subtitle="Track every request you've sent to vendors and the quotes they've sent back."
+        actions={
+          <Link href="/search" className="inline-flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-navy/90 transition">
+            <Search className="w-4 h-4" /> Browse vendors
+          </Link>
+        }
+      />
 
       {/* Filters */}
       <div className="flex gap-2 overflow-x-auto pb-1">

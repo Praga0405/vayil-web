@@ -5,6 +5,7 @@ import { customerApi } from '@/lib/api/client'
 import { PageLoader, EmptyState, StatusBadge } from '@/components/ui'
 import { formatDate } from '@/lib/utils'
 import { Briefcase, ChevronRight } from 'lucide-react'
+import { PageHero } from '@/components/shared/PageLayout'
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<any[]>([])
@@ -22,10 +23,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">My Projects</h1>
-        <p className="text-sm text-gray-500 mt-1">Track active and completed projects</p>
-      </div>
+      <PageHero title="My Projects" subtitle="Active and completed work — track milestones, payments, and sign-off." />
 
       {loading ? <PageLoader /> : projects.length === 0 ? (
         <EmptyState
