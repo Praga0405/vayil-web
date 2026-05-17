@@ -18,13 +18,13 @@ This repo contains both deployable surfaces in one place:
 │   └── stores/auth.ts       # Zustand auth store
 ├── backend/                 ← Node + Express + MySQL backend (deploys to Render)
 │   ├── src/
-│   │   ├── routes/          # auth, customer, vendor, payments, ops, common
+│   │   ├── routes/          # auth, customer, vendor, payments, ops, admin, common
 │   │   ├── middleware/      # auth, idempotency
-│   │   ├── utils/           # razorpay (HMAC verify), http, otp
+│   │   ├── utils/           # razorpay (HMAC verify), adminNotify, http, otp
 │   │   ├── services/        # tax (GST/TDS/platform fee)
 │   │   ├── db.ts            # mysql2 pool + transaction helper
 │   │   └── config.ts
-│   ├── migrations/          # 001 schema, 002 seed tagging, 003 P0 audit (plans/materials/payments)
+│   ├── migrations/          # 001 schema, 002 PRD workflow tables, 003 seed tagging, 004 vendor review queue
 │   ├── scripts/             # migrate, seed, seed-marketplace, smoke
 │   ├── seed-data/           # 40 vendors, 8 customers, demo activity (JSON)
 │   └── Dockerfile
@@ -42,22 +42,26 @@ This repo contains both deployable surfaces in one place:
 ## Architecture at a glance
 
 ```
-┌────────────────────┐         HTTPS         ┌─────────────────────────┐
-│   Next.js (web)    │ ────────────────────▶ │  Express (backend)      │
-│   on Vercel        │   /auth  /customer    │  on Render              │
-│                    │   /vendor /payments   │                         │
-│   src/lib/api      │                       │  src/routes/*           │
-│   src/hooks/*      │   Bearer JWT          │  middleware/auth        │
-│   adapters/*       │   Idempotency-Key     │  middleware/idempotency │
-└────────────────────┘                       └────────┬────────────────┘
-        │                                             │
-        │ Razorpay Checkout SDK                       │ Razorpay server SDK
-        ▼                                             ▼
-   checkout.razorpay.com                       MySQL (Render add-on)
-                                                     │
-                                                     ▼
-                                          payment_intents, escrow_ledger,
-                                          materials, order_plan, ...
+┌────────────────────┐        HTTPS         ┌─────────────────────────┐
+│   Next.js (web)    │ ───────────────────▶ │  Express (backend)      │
+│   on Vercel        │  /auth  /customer    │  on Render              │
+│                    │  /vendor /payments   │                         │
+│   src/lib/api      │  /Admin  /ops        │  src/routes/*           │
+│   src/hooks/*      │  Bearer JWT          │  middleware/auth        │
+│   adapters/*       │  Idempotency-Key     │  middleware/idempotency │
+└────────────────────┘                      └────────┬────────────────┘
+        │                                            │
+        │ Razorpay Checkout SDK                      │ Razorpay server SDK
+        ▼                                            ▼              ┌──────────────────────┐
+   checkout.razorpay.com                       MySQL (add-on)       │ Vayil Admin Panel    │
+                                                     │              │ (React, Vite)        │
+                                                     ▼              │ Praga0405/Vayil-     │
+                                          payment_intents,          │ Admin-Panel-main     │
+                                          escrow_ledger,            └──────────┬───────────┘
+                                          materials, order_plan,               │
+                                          vendor_review_queue,                 │ POST /Admin/*
+                                          signoffs, rework_requests …          ▼
+                                                                       (staff JWT, REST)
 ```
 
 ### Data flow for a payment (canonical)
@@ -316,11 +320,104 @@ src/
 
 ---
 
-## Auth (dev mode)
+## Auth + sign-up (3-stage modal)
 
-Dev-mode `LoginModal` accepts any 10-digit number and creates a local JWT. Real OTP wiring is intentionally deferred — when you supply the auth service, the swap is a 5-line edit inside `LoginModal.tsx`. The canonical methods (`authApi.sendOTP`, `verifyOTP`) are already in place.
+`LoginModal` now drives a three-stage flow inside the same shell — no
+separate sign-up page:
 
-For backend dev, `OTP_BYPASS=true` + `OTP_BYPASS_CODE=123456` makes `POST /auth/otp/verify` accept `123456` for any phone — handy for local end-to-end testing without a SMS provider.
+1. **phone** — 10-digit input + Customer / Vendor tabs
+2. **otp** — 6-digit input with 30 s resend timer + change-number link
+3. **signup** — only shown for first-time mobiles
+   - Customer: name (req), email, city
+   - Vendor: company (req), owner (req), email, city → on submit the
+     vendor is dropped into the admin review queue via
+     `POST /vendor/submit-for-review` and routed to `/vendor-onboarding`
+     to complete KYC + service tags
+
+**Dev mode** (`NEXT_PUBLIC_USE_MOCK_DATA=true` or `NEXT_PUBLIC_API_URL`
+unset): OTP bypassed at `123456`, known mobiles tracked in
+`localStorage` (`vayil_known_mobiles`) so returning users skip signup.
+
+**Live mode**: `authApi.sendOTP` → `verifyOTP` round-trips to the
+backend; on first verify the user row is created automatically (no
+separate registration call). If the returned user has no `name`,
+signup step surfaces and calls `customerApi.saveProfile` or
+`vendorApi.saveProfile`.
+
+For backend dev without an SMS provider, set `OTP_BYPASS=true` +
+`OTP_BYPASS_CODE=123456` and `/auth/otp/verify` will accept `123456`
+for any phone.
+
+---
+
+## Canonical API surface
+
+Production screens import from these five objects only:
+
+| Object | Mounted at | Purpose |
+|---|---|---|
+| `authApi` | `/auth` | OTP send/verify, staff login |
+| `customerApi` | `/customer` | Vendor browse, enquiries, quotes, projects, plan approve/revision, materials list + payment-order, signoff, rework |
+| `vendorApi` | `/vendor` | Dashboard, enquiries (accept/reject/quote), projects, plan CRUD/submit, materials CRUD, milestone updates/complete/payment-request, KYC, submit-for-review |
+| `paymentsApi` | `/payments` | `createOrder`, `verify` (idempotent, HMAC-checked, escrow-ledger-aware) |
+| `commonApi` | `/` | Categories, subcategories, geo, settings, health |
+
+A separate **`/Admin/*`** surface (staff JWT) matches the
+`Praga0405/Vayil-Admin-Panel-main` repo's request shapes verbatim so
+that app can connect without code changes:
+`GetVendorList`, `VendorDetails`, `VendorKycUpdate`, `VendorStatusUpdate`,
+`VendorDelete`, `saveVendor`, `GetReviewQueue`.
+
+Legacy mobile aliases (`POST /vendorInfo`, `POST /ServiceList`, etc.)
+are isolated inside `customerApi` / `vendorApi` under labelled
+"LEGACY MOBILE ALIASES" blocks for the unmigrated `/customer/dashboard`
+pages — scheduled for deletion once consumers are migrated.
+
+---
+
+## Demo mode (offline + mock)
+
+The `IS_DEMO_MODE` constant (`src/lib/demoMode.ts`) is true when:
+- `NEXT_PUBLIC_USE_MOCK_DATA=true`, **or**
+- `NEXT_PUBLIC_API_URL` is unset and `USE_MOCK_DATA` is not explicitly
+  `false`.
+
+When on, **both reads and writes short-circuit**: hooks serve dummy
+data and mutations resolve after a 400 ms simulated delay without
+hitting the backend (Razorpay payment screens also skip checkout
+entirely with a "demo" success toast). The full happy path — sign up,
+send enquiry, accept quote, pay, approve plan, pay materials, sign
+off — is exercisable end-to-end without any backend.
+
+When off, the app is strict: failed reads surface inline error banners
+with a Retry CTA, failed mutations show real error messages — no silent
+fallback (PRD audit P0).
+
+---
+
+## Admin panel integration
+
+The standalone admin SPA (`Praga0405/Vayil-Admin-Panel-main`) hits
+`/Admin/*` against the same backend host. When a new vendor signs up
+via the web (LoginModal vendor step or the `/vendor-onboarding` KYC
+step) the backend:
+
+1. Flips `vendors.status` to `kyc_submitted`
+2. Upserts a row into `vendor_review_queue` (status PENDING)
+3. Optionally POSTs a notification to `ADMIN_PORTAL_NOTIFY_URL` with
+   `Authorization: Bearer ADMIN_PORTAL_NOTIFY_TOKEN`. The payload:
+
+   ```json
+   {
+     "event": "vendor.submitted_for_review",
+     "queue_id": 42,
+     "vendor": { "id": ..., "company_name": ..., "phone": ..., "submitted_at": "..." }
+   }
+   ```
+
+Both env vars are optional. When unset the notification is skipped
+(the queue row is still written so the admin panel can pick it up via
+`POST /Admin/GetReviewQueue`).
 
 ---
 

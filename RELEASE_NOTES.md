@@ -1,5 +1,221 @@
 # Release Notes
 
+## v3.3.0 — Audit P0: canonical quote APIs + migration rename + adapter fix (2026-05-17)
+
+Commits: `6d33e2c3`, `0576c134`.
+
+Closes the latest audit's five remaining P0 items.
+
+### Backend
+
+- **Migration rename** (`git mv`, history preserved):
+  - `003_payments_plans_materials.sql` → **`002_prd_workflow_tables.sql`**
+  - Existing `002_seed_tagging.sql` → `003_seed_tagging.sql`
+
+  All nine PRD workflow tables now live in `002_prd_workflow_tables.sql`
+  (the path the audit script checks): `payment_intents`, `escrow_ledger`,
+  `materials`, `plan_submissions`, `signoffs`, `rework_requests`,
+  `milestone_updates`, `webhook_deliveries`, `idempotency_keys`. The
+  seed-tagging migration runs after — it touches only base tables
+  (vendors, customers, etc.) so order is safe.
+
+- **Canonical customer quote APIs**:
+
+  | Route | Behaviour |
+  |---|---|
+  | `POST /customer/quotes/:quoteId/accept` | Ownership-checked. Transactional: flips this quote to `accepted`, siblings on the same enquiry from `sent` → `rejected`, parent enquiry → `accepted`. |
+  | `POST /customer/quotes/:quoteId/reject` | Ownership-checked. Sets `status='rejected'`; optional `{ reason }` body persisted in `message`. |
+
+### Frontend
+
+- `customerApi.acceptQuote(quoteId)` + `customerApi.rejectQuote(quoteId, reason?)`
+  exported.
+- `src/app/account/enquiries/[id]/page.tsx` drops every
+  `customerApi.updateQuote` call. Local status values now match the
+  backend's lower-case enum (`accepted` / `rejected`).
+- `src/app/account/projects/[id]/page.tsx` — already migrated to
+  `paymentsApi.createOrder` / `verify` in `0576c134`; confirmed clean.
+- **Adapter fix** (`src/lib/adapters/vendor-studio.ts`): new precedence
+  for `plan_status`:
+  ```
+  any milestone customer_status='revision_requested' → REVISION_REQUESTED
+  any milestone customer_status='pending'            → SUBMITTED
+  plan exists, none of the above                     → APPROVED
+  no plan rows                                       → NOT_STARTED
+  ```
+  Previously `revision_requested` collapsed into `APPROVED`.
+
+### Build status
+
+- `npm run build` (frontend): **passes**
+- `cd backend && npm run build`: **passes**
+- `tsc --noEmit` on both halves: 0 errors
+- `npm run migrate` / `npm run smoke` require live MySQL — runs cleanly
+  on Render once provisioned
+
+---
+
+## v3.2.1 — Audit fixes: payment migration + hook order + role-aware dropdown (2026-05-14)
+
+Commit: `0576c134`.
+
+### Vendor "My Enquiries" 404 — root cause + fix
+
+The home page (`src/app/page.tsx`) had its own bespoke avatar dropdown
+that pre-dated `PublicHeader`. It showed customer-only links
+(`/account/enquiries`, `/account/projects`) to vendor users too, so a
+vendor clicking "My Enquiries" hit a customer-only API and 404'd.
+
+Now the home dropdown is role-aware:
+- **Vendor**: Vendor Studio / Enquiries / Jobs / Earnings / Profile
+- **Customer**: My Enquiries / My Projects / Payments / Profile
+
+### Other audit items
+
+- **Quote payment migration** (`src/app/account/enquiries/[id]/page.tsx`):
+  full rewrite. Drops legacy `placeOrder` / `paymentUpdate`. Uses
+  `paymentsApi.createOrder({ purpose: 'quote', enquiry_id, amount,
+  idempotency_key })` → Razorpay → `paymentsApi.verify`. New payment
+  options panel: **Pay Full / Pay Minimum 25% / Custom Amount** with
+  inline validation, GST/platform-fee preview (sourced from
+  `customerApi.getSettings`), escrow trust strip, and proper
+  cancel/failure/retry states.
+- **Project milestone payment migration**
+  (`src/app/account/projects/[id]/page.tsx`): `payMilestone()` now uses
+  `paymentsApi.createOrder` (purpose `'milestone'` when a milestone ID
+  is supplied, else `'quote'` for remaining) and `paymentsApi.verify`
+  with a fresh idempotency key per intent.
+- **Hook-order fixes** (PRD audit P0-1):
+  - `vendor-studio/enquiries/[id]/page.tsx` — `[pending, setPending]`
+    moved above all conditional returns.
+  - `account/projects/[id]/materials/pay/page.tsx` — `[payError,
+    setPayError]` moved above the plan-status gate.
+- **Build blocker fixed**: legacy `/customer/marketplace` used
+  `useSearchParams` without a Suspense boundary, breaking Next 14's
+  static export step. Reduced to a Suspense-wrapped redirect to
+  `/search` (the canonical replacement).
+
+---
+
+## v3.2.0 — Admin panel integration + vendor review queue (2026-05-14)
+
+Commit: `c9d3628d`.
+
+### What was added
+
+When a new vendor completes the signup form (LoginModal vendor stage
+or `/vendor-onboarding` KYC step), the web app now drops them into a
+review queue and (optionally) pings the admin portal. The existing
+`Praga0405/Vayil-Admin-Panel-main` repo can connect to this backend
+without code changes — its REST shape is matched verbatim.
+
+### Backend
+
+- **`migrations/004_vendor_review_queue.sql`**:
+  - `vendor_review_queue` table: `vendor_id`, `status` (PENDING /
+    APPROVED / REJECTED), `source`, `submitted_at`, `reviewed_at`,
+    `reviewed_by`, `reviewer_note`, notify delivery audit columns.
+  - `vendors` ADD COLUMN: `profile_image`, `address`, `pincode`
+    (idempotent).
+- **`POST /vendor/submit-for-review`** (vendor-authed): flips
+  `vendors.status='kyc_submitted'`, upserts the PENDING queue row,
+  fires the async webhook.
+- **`utils/adminNotify.ts`**: POSTs `{ event, queue_id, vendor }` to
+  `ADMIN_PORTAL_NOTIFY_URL` with `Authorization: Bearer
+  ADMIN_PORTAL_NOTIFY_TOKEN`. Records delivery result on the queue
+  row. No-op when env unset → `notify_status='skipped'`.
+- **`routes/admin.ts`** (new) — mounted at `/Admin` AND `/admin`:
+
+  | Route | Used by admin panel for |
+  |---|---|
+  | `POST /Admin/GetVendorList` | Vendors list (status + search, paginated) |
+  | `POST /Admin/VendorDetails` | Vendor detail + services + queue history |
+  | `POST /Admin/VendorKycUpdate` | Approve / reject KYC (transactional) |
+  | `POST /Admin/VendorStatusUpdate` | Active / inactive toggle |
+  | `POST /Admin/VendorDelete` | Soft delete |
+  | `POST /Admin/saveVendor` | Edit mutable vendor fields |
+  | `POST /Admin/GetReviewQueue` | Pending review list |
+
+  All staff-JWT-gated (same secret/middleware as `/ops`).
+
+### Frontend
+
+- `vendorApi.submitForReview(note?)` added.
+- LoginModal vendor signup calls `submitForReview` after `saveProfile`.
+- `/vendor-onboarding` KYC step also calls it (so vendors who take the
+  long route end up in the same queue).
+
+### Config
+
+- `backend/.env.example` and `render.yaml`: `ADMIN_PORTAL_NOTIFY_URL`
+  and `ADMIN_PORTAL_NOTIFY_TOKEN` documented.
+
+---
+
+## v3.1.0 — Remaining-gaps PRD + 3-stage sign-up in LoginModal (2026-05-13)
+
+Commits: `f76cc920`, `4d9466ec`.
+
+### LoginModal — 3-stage flow (no separate sign-up page)
+
+Replaced the single-stage dev login with three stages, all inside the
+same modal shell:
+
+1. **phone** — 10-digit input + Customer/Vendor tabs
+2. **otp** — 6-digit input with 30 s resend timer + change-number link
+3. **signup** *(only for first-time mobiles)* — profile completion:
+   - Customer: name (req), email, city
+   - Vendor: company (req), owner (req), email, city → first-time
+     vendors routed to `/vendor-onboarding`
+
+Demo mode bypasses OTP (any value, hint shows `123456`), tracks known
+mobiles in `localStorage` so returning users skip signup. Live mode
+calls `authApi.sendOTP` → `verifyOTP`; backend creates the user row on
+first verify, and if the row has no `name` the signup step surfaces
+and calls `customerApi.saveProfile` / `vendorApi.saveProfile`.
+
+### Demo mode now covers mutations + payments
+
+`src/lib/demoMode.ts` exposes `IS_DEMO_MODE` + `demoOrLive(realCall)`.
+Wrapped every state-mutating call so the full happy path is
+exercisable end-to-end without a backend:
+
+- EnquiryModal submit, quote accept/reject, plan approve/revision
+- Vendor accept/reject enquiry, send quote, plan create+submit,
+  materials add, milestone payment request, milestone update + upload
+- Customer signoff + rework
+- Quote payment + materials payment (skip Razorpay entirely in demo,
+  toast success)
+
+When the flag is off (production), every mutation hits the real
+backend with idempotency keys and surfaces real errors with retry —
+no silent fallback.
+
+### Remaining-gaps PRD items
+
+- **Hook-order fixes** in `/vendor-studio/jobs/[id]/{plan,materials,
+  ask-payment}` — all `useState` declarations moved above the first
+  conditional return.
+- **NEW `/account/projects/[id]/materials`** customer page — calls
+  `customerApi.listMaterials`, shows the **locked state** when the
+  backend reports `locked=true`, multi-select unpaid rows with live
+  GST preview, hands off to `/materials/pay` with the selection
+  pre-loaded via `sessionStorage`.
+- **Signoff modal upgrade**: title and CTA now make the escrow release
+  explicit ("Sign off & release funds") with a trust strip.
+- **Vendor material edit**: `Draft` type carries optional `id`; save
+  routes existing rows to `vendorApi.updateMaterial`, new rows to
+  `addMaterial`. No more duplicate inserts.
+
+### Schema validation
+
+All nine PRD-required tables confirmed present in migration 003 (later
+renamed to 002 in v3.3): `payment_intents`, `escrow_ledger`,
+`webhook_deliveries`, `materials`, `plan_submissions`, `signoffs`,
+`rework_requests`, `milestone_updates`, `idempotency_keys`.
+
+---
+
 ## v3.0.0 — P0 Audit Pass: complete backend + frontend hardening (2026-05-13)
 
 End-to-end production wiring for every flow the PRD lists as a P0
