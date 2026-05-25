@@ -291,8 +291,9 @@ src/
 │   ├── customer/                         # Legacy customer portal — now redirects
 │   └── vendor/                           # Legacy vendor portal — now redirects
 ├── components/
-│   ├── shared/                           # PublicHeader, AccountLayout,
-│   │                                       VendorStudioLayout, LoginModal …
+│   ├── shared/                           # PublicHeader, PublicFooter,
+│   │                                       AccountLayout, VendorStudioLayout,
+│   │                                       LoginModal …
 │   └── ui/                               # Button, Input, Modal, StatusBadge …
 ├── hooks/
 │   ├── useLiveVendor.ts                  # /search and vendor profile data + error state
@@ -316,6 +317,7 @@ src/
 - **Marketplace-first auth.** `LoginModal` never navigates internally — closes in place and the page they were on re-renders with their new auth state. Standalone `/customer/login` and `/vendor/login` redirect to `/` on success.
 - **Role-aware UI.** `useUserAuth()` exposes `user.type` (`customer` | `vendor`). `PublicHeader` switches nav items, dropdown contents, and the "Vendor Studio" badge accordingly.
 - **Shared header.** `PublicHeader` is rendered by `AccountLayout` and `VendorStudioLayout`. The home page (`/`) keeps its bespoke header to match the Figma hero.
+- **Shared footer.** `PublicFooter` is rendered by every surface. The home page uses the full variant (`<PublicFooter />` — app-download band + addresses + brand strip); `AccountLayout` and `VendorStudioLayout` use `<PublicFooter compact />` (brand strip only — no marketing band inside the workspace). Sign-out is exclusively in the avatar dropdown of `PublicHeader`; page heroes never duplicate it.
 - **REST-only API client.** New screens import from `customerApi` / `vendorApi` / `paymentsApi` / `authApi`. Legacy mobile aliases (`POST /vendorInfo`, etc.) remain inside each object under a clearly-labelled `LEGACY MOBILE ALIASES` block, isolated for the unmigrated `/customer/dashboard` pages and scheduled for deletion.
 - **Adapters.** Backend response → existing UI-friendly type (`DummyVendor`, `MockJob`, `MockEnquiry`). Lets the rich JSX stay untouched while the data source migrates.
 - **Fallback policy.**

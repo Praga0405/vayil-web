@@ -1,5 +1,80 @@
 # Release Notes
 
+## v3.5.0 — Unified footer + sign-out cleanup (2026-05-25)
+
+Commits: `582de28f` (sign-out + layout edits) and the follow-up that
+ships the new `PublicFooter` component itself.
+
+Eliminates three sources of layout drift between the marketing home
+page, the customer `/account/*` workspace, and the `/vendor-studio/*`
+workspace — they now all share one footer component and one sign-out
+control.
+
+### New shared component
+
+- **`src/components/shared/PublicFooter.tsx`** — single source of truth
+  for the marketplace footer with two modes:
+  - `<PublicFooter />` — full footer (app-download band + Canada / US /
+    India address blocks + brand strip). Used on the public home page.
+  - `<PublicFooter compact />` — brand strip only (logo, copyright,
+    socials, Terms / Privacy / Cookies). Used inside the post-login
+    workspaces where the user is already in their account and doesn't
+    need the marketing promo.
+
+  Self-contained: brand-correct compact App Store + Google Play badges
+  are colocated inside the file, so consumers don't have to wire their
+  own.
+
+### Layout changes
+
+- **`AccountLayout.tsx`** — dropped the mobile bottom-tab nav
+  (`<nav className="lg:hidden fixed bottom-0 ...">`) in favour of
+  mounting `<PublicFooter compact />`. Bottom tabs were causing
+  confusion against the avatar dropdown in `PublicHeader` (which is
+  the canonical place to switch between Enquiries / Projects /
+  Notifications / Profile). Also fixes a missing-import bug:
+  `LayoutGrid` was used in the "Browse Services" link but wasn't in
+  the lucide import list.
+- **`VendorStudioLayout.tsx`** — same treatment: dropped the
+  mobile bottom-tab nav (vendor users have the same dropdown), added
+  the `PublicFooter` import (it was referenced by name in the file
+  but the actual import line was missing), and mounted
+  `<PublicFooter compact />`. `pb-24 lg:pb-0` padding on `<main>`
+  removed since the tab bar that needed it is gone.
+- **Home page** (`src/app/page.tsx`) — replaced the 66-line inline
+  `<footer>` block with `<PublicFooter />`. Removed the now-unused
+  `Youtube`, `Linkedin`, `Facebook`, `Instagram`, `Star` lucide
+  imports.
+
+### Duplicate sign-out removal
+
+The avatar dropdown in `PublicHeader` already exposes "Sign out" on
+every page. Two `PageHero` blocks were duplicating that control with
+a red danger button:
+
+- **`/account/profile`** — removed `actions={<Button variant="danger" …>}`
+  from the page hero. Cleaned up the now-dead `logout()` function,
+  `clearAuth` destructure, and `LogOut` import.
+- **`/vendor-studio/listing`** — same removal. Also cleaned up dead
+  `useRouter` import + `router` variable (only the deleted `logout`
+  function used them) and `clearAuth` / `LogOut` imports.
+
+### Files changed
+
+| File | Δ |
+|---|---|
+| `src/components/shared/PublicFooter.tsx` | new |
+| `src/components/shared/AccountLayout.tsx` | +footer, −mobile tabs, +LayoutGrid import |
+| `src/components/shared/VendorStudioLayout.tsx` | +footer, −mobile tabs, +PublicFooter import |
+| `src/app/page.tsx` | inline footer → `<PublicFooter />`; trimmed unused lucide imports |
+| `src/app/account/profile/page.tsx` | dropped duplicate Sign-out + dead refs |
+| `src/app/vendor-studio/listing/page.tsx` | dropped duplicate Sign-out + dead refs |
+
+Net: **+1 new component**, **5 files cleaned**, **−129 / +14 lines**
+in the cleanup commit.
+
+---
+
 ## v3.4.0 — Audit P0: webhook routing, payment hardening, escrow guards (2026-05-17)
 
 Commit: `28aadfb9`.
