@@ -65,26 +65,51 @@ Business logic lives **once**, in `backend/src/services/*`. Both the canonical w
 ## Architecture at a glance
 
 ```
-┌────────────────────┐        HTTPS         ┌─────────────────────────┐
-│   Next.js (web)    │ ───────────────────▶ │  Express (backend)      │
-│   on Vercel        │  /auth  /customer    │  on Render              │
-│                    │  /vendor /payments   │                         │
-│   src/lib/api      │  /Admin  /ops        │  src/routes/*           │
-│   src/hooks/*      │  Bearer JWT          │  middleware/auth        │
-│   adapters/*       │  Idempotency-Key     │  middleware/idempotency │
-└────────────────────┘                      └────────┬────────────────┘
-        │                                            │
-        │ Razorpay Checkout SDK                      │ Razorpay server SDK
-        ▼                                            ▼              ┌──────────────────────┐
-   checkout.razorpay.com                       MySQL (add-on)       │ Vayil Admin Panel    │
-                                                     │              │ (React, Vite)        │
-                                                     ▼              │ Praga0405/Vayil-     │
-                                          payment_intents,          │ Admin-Panel-main     │
-                                          escrow_ledger,            └──────────┬───────────┘
-                                          materials, order_plan,               │
-                                          vendor_review_queue,                 │ POST /Admin/*
-                                          signoffs, rework_requests …          ▼
-                                                                       (staff JWT, REST)
+                  Next.js (Vercel)                                  ┌──────────────────────┐
+   ┌──────────────────────────────────────┐                         │ Vayil Admin Panel    │
+   │  Customer web    Vendor web studio   │                         │ (React, Vite)        │
+   │  /account/*      /vendor-studio/*    │                         │ Praga0405/Vayil-     │
+   └──────────┬───────────────┬───────────┘                         │ Admin-Panel-main     │
+              │ Bearer JWT    │ Bearer JWT                          └──────────┬───────────┘
+              │ JSON          │ JSON                                           │ staff JWT
+              ▼               ▼                                                ▼ JSON
+   ┌──────────────────────────────────────────────────────────────────────────────┐
+   │             Express + TypeScript + multer + helmet (Render)                   │
+   │                                                                              │
+   │   /payments/webhooks ── raw body, mounted FIRST (Razorpay HMAC)              │
+   │   /auth /customers /vendors /payments /ops /Admin /admin   ── JSON only      │
+   │   /customer /vendor /<bare-endpoint>                       ── multipart      │
+   │                                                              + JSON fallback  │
+   │   ──────────────────────────────────────────────────────────────             │
+   │       routes/  (canonical + legacyCustomer + legacyVendor)                   │
+   │       ↓                                                                       │
+   │       services/  ← single source of truth for every domain                   │
+   │            auth · customer · vendor · enquiry · quote · project ·            │
+   │            payment · material · notification · review · bank ·               │
+   │            payout · tax                                                       │
+   │       ↓                                                                       │
+   │       db.ts  (mysql2 pool + transaction helper)                              │
+   └────────────────────────────────┬─────────────────────────────────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              ▼                     ▼                     ▼
+       MySQL (Render)        Razorpay server SDK      FCM (future)
+       payment_intents       Orders.create
+       escrow_ledger         signature verify
+       materials, plans      webhook delivery
+       vendor_wallet,
+       notifications,
+       customer_cart,
+       customer_reviews,
+       bank_details,
+       payout_requests …
+                ▲
+                │ HTTPS (multipart/form-data via Dio.FormData.fromMap)
+                │ Authorization: Bearer <jwt>  +  X-Source: mobile-app
+                │
+   ┌────────────┴───────────────────────────────────────────────┐
+   │   Flutter — Vayil-customer-App-main    Vayil-vendor-App-main │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 ### Data flow for a payment (canonical)
@@ -104,6 +129,191 @@ Business logic lives **once**, in `backend/src/services/*`. Both the canonical w
 7. Razorpay webhook **`POST /payments/webhooks/razorpay`** (raw body, HMAC-verified, lives on a separate router mounted before `express.json()`) is the server-to-server safety net for `payment.captured` / `payment.failed` if the browser leaves before `verify`.
 
 Idempotency: every state-mutating POST that originates from the customer/vendor surfaces accepts an `Idempotency-Key` header. The first call runs the handler and caches the response in `idempotency_keys`; replays return the cached response without re-running side effects.
+
+---
+
+## Mobile + Web on one backend (v4.0.0+)
+
+The existing Vayil customer and vendor **Flutter apps** call the same
+Render-hosted Express server the web does. They speak a different
+dialect — older endpoint names, multipart bodies, response keys mirrored
+at the root — but every request lands in the same service layer that
+the web uses, so there is exactly one place to fix every bug, ship
+every feature, and audit every payment.
+
+### Three transport layers, one service layer
+
+```
+                          ┌──────────────────────────────────┐
+   /payments/webhooks  ─► │ paymentsWebhookRouter (raw body) │ HMAC verify
+                          └──────────────────────────────────┘
+                          ┌──────────────────────────────────┐
+   /auth /customers       │ canonical routers (JSON only)    │
+   /vendors /payments  ─► │   src/routes/{auth,customer,     │ ─┐
+   /ops  /Admin /admin    │   vendor,payments,ops,admin}.ts  │  │
+                          └──────────────────────────────────┘  │
+                          ┌──────────────────────────────────┐  │   call into
+   /customer/*         ─► │ legacyCustomerRouter             │ ─┼──►  src/services/*
+                          │   multipart + JSON via multer    │  │
+                          └──────────────────────────────────┘  │
+                          ┌──────────────────────────────────┐  │
+   /vendor/*           ─► │ legacyVendorRouter               │ ─┘
+   /<bare endpoint>       │   multipart + JSON via multer    │
+                          └──────────────────────────────────┘
+```
+
+The legacy routers are **thin shims** — no SQL, no business logic. They
+extract payload keys with the helper `pickId(body, 'enquiry_id', 'enquiryId', 'id')`,
+coerce types with `num(v)` (Dio sends every multipart field as a string),
+call a service function, and respond via `send(res, …)` which
+returns `{ success, message, data, ...top-level mirrors }`.
+
+### Service layer reference
+
+Each file is one bounded domain. Mobile shims and (future-refactored)
+canonical routes both call the same functions, so the same auth,
+ownership checks, escrow rules, and notification writes apply
+regardless of client.
+
+| File | Key functions |
+|---|---|
+| `services/authService.ts` | `requestOtp(phone, userType)`, `verifyOtpAndIssueToken({phone,otp,userType,name?})` |
+| `services/customerService.ts` | `getCustomer`, `updateCustomer`, `listVendors`, `getVendorWithListings`, `addToCart`, `getCart`, `removeCartItem`, `clearCart` |
+| `services/vendorService.ts` | `getVendor`, `updateVendor`, `onboardingStep`, `listListings`, `createListing`, `updateListing`, `setListingStatus`, `addServiceTag`, `getVendorWallet` |
+| `services/enquiryService.ts` | `createEnquiry`, `listCustomerEnquiries`, `listVendorEnquiries`, `getEnquiryForCustomer`, `vendorAcceptEnquiry`, `vendorRejectEnquiry` |
+| `services/quoteService.ts` | `sendQuote`, `listQuotes`, `acceptQuote`, `rejectQuote` |
+| `services/projectService.ts` | `createPlan`, `updatePlan`, `submitPlan`, `setPlanStatusByCustomer`, `postMilestoneUpdate`, `completeMilestone`, `requestMilestonePayment`, `signoffOrder` |
+| `services/paymentService.ts` | `resolveExpectedAmount`, `createPaymentIntent`, `verifyAndHold`, `getOrderPaymentSummary`, re-exports `releaseEscrow` |
+| `services/materialService.ts` | `listMaterials`, `addMaterial`, `updateMaterial`, `markMaterialsAwaitingPayment`, `isCustomerMaterialsLocked` |
+| `services/notificationService.ts` | `notify({recipient_type,recipient_id,type,title,body?})`, `list`, `markRead`, `markAllRead` |
+| `services/reviewService.ts` | `addReview` (recomputes `vendors.rating`), `listVendorReviews` |
+| `services/bankService.ts` | `addBankDetails`, `listBankDetails`, `editBankDetails`, `requestEditBankDetails` |
+| `services/payoutService.ts` | `requestPayout`, `getVendorTransactions`, `getRevenueChart` |
+| `services/tax.ts` | `calculateTax({baseAmount, …})` — GST + platform fee + TDS + vendor net payout (unchanged from v3.x) |
+
+### Adding a new feature (the pattern)
+
+```ts
+// 1. Add a function to the relevant service file.
+//    backend/src/services/enquiryService.ts
+export async function archiveEnquiry(enquiryId, customerId) {
+  await assertEnquiryBelongs(enquiryId, customerId);
+  await exec(`UPDATE enquiries SET status = 'archived' WHERE enquiry_id = :id`, { id: enquiryId });
+  return { enquiry_id: Number(enquiryId), status: 'archived' };
+}
+
+// 2. Expose it from the canonical web route (JSON).
+//    backend/src/routes/customer.ts
+customerRouter.post('/enquiries/:id/archive', async (req, res, next) => {
+  try { ok(res, await enquiryService.archiveEnquiry(req.params.id, req.user!.id)); }
+  catch (err) { next(err); }
+});
+
+// 3. Expose it from the legacy mobile route (multipart) — only if the
+//    mobile app needs it.
+//    backend/src/routes/legacyCustomer.ts
+legacyCustomerRouter.post('/archiveEnquiry', async (req, res, next) => {
+  try {
+    const id = pickId(req.body, 'enquiry_id', 'enquiryId');
+    if (!id) throw new ApiError(400, 'enquiry_id required');
+    send(res, { message: 'Archived', data: await enquiryService.archiveEnquiry(id, req.user!.id) });
+  } catch (err) { next(err); }
+});
+```
+
+The logic exists exactly once. Tests, ownership checks, transactions
+all live in the service. Web and mobile shims are stylesheets over the
+same data flow.
+
+### Token compatibility matrix
+
+`requireAuth([…allowed])` extracts the JWT from any of:
+
+| Source | Used by |
+|---|---|
+| `Authorization: Bearer <jwt>` | Web axios interceptor + current Flutter Dio interceptor |
+| `x-access-token: <jwt>` | Legacy mobile alt header (some older builds) |
+| body `token` / `access_token` | Some Flutter screens still embed the token in form fields |
+| query `?token=…` | Rare — legacy GET endpoints |
+
+`softAuth()` (new in v4.0.0) sets `req.user` if a valid token is
+present but never rejects — used by mobile catalogue-browse endpoints
+that fire pre-login.
+
+### Multipart vs JSON
+
+| Mount | Body parser |
+|---|---|
+| `/payments/webhooks/razorpay` | **None** — Razorpay raw body for HMAC |
+| Canonical routers (`/auth`, `/customers`, `/vendors`, `/payments`, `/ops`, `/Admin`, `/admin`) | `express.json()` + `urlencoded()` |
+| Legacy routers (`/customer`, `/vendor`, bare `/<endpoint>`) | `legacyMultipart` middleware: multer parses `multipart/form-data`, JSON falls through |
+
+`legacyMultipart` uses `multer().none()` (text fields only). Handlers
+that actually accept files (`upload_files`) install `upload.any()`
+themselves; multer's `LIMIT_UNEXPECTED_FILE` error from the outer
+middleware is caught and the inner handler runs.
+
+### Mobile payment flow
+
+The mobile `placeOrder` + `payment_update` pair routes onto the same
+`payment_intents` + `escrow_ledger` pipeline the web uses:
+
+```
+placeOrder (mobile multipart)  ─►  paymentService.createPaymentIntent
+                                      ├── resolveExpectedAmount  (re-derives total;
+                                      │     refuses client-supplied lies)
+                                      ├── ownership + state preconditions
+                                      ├── INSERT payment_intents (status='initiated')
+                                      └── Razorpay Orders.create
+                                          → returns { razorpay_order_id, intent_id, amount }
+
+                          (Razorpay Checkout opens in WebView / native modal)
+
+payment_update (mobile)        ─►  paymentService.verifyAndHold
+                                      ├── HMAC-verify razorpay_signature
+                                      │     (crypto.timingSafeEqual)
+                                      ├── UPDATE payment_intents status='escrow_held'
+                                      ├── INSERT escrow_ledger direction='hold'
+                                      ├── if purpose='quote' → materialise orders row
+                                      └── if purpose='materials' → flip rows to PAID
+
+finalStep (mobile)             ─►  projectService.signoffOrder
+                                      ├── INSERT signoffs
+                                      ├── orders.status = 'completed'
+                                      └── for each held intent → releaseEscrow
+                                            ├── INSERT escrow_ledger direction='release'
+                                            └── credit vendor_wallet
+                                                (ensure row exists via ON DUPLICATE KEY)
+```
+
+**The old "credit `vendor_wallet` directly from `placeOrder`" behaviour
+is gone.** Funds only enter the wallet via `releaseEscrow`, which is
+triggered by sign-off (today) and milestone completion (future patch).
+
+### Mobile API contract
+
+The full per-endpoint contract — payload keys, response shape, screen
+file references — lives in [`docs/mobile-api-inventory.md`](./docs/mobile-api-inventory.md).
+That doc is generated from a direct scan of the unpacked Flutter
+source and is the authoritative reference when adding or modifying a
+legacy route.
+
+### Mobile-supporting tables (migration 006)
+
+| Table | Purpose |
+|---|---|
+| `customer_cart` | Customer-side cart (mobile-only feature, web hasn't surfaced it yet) |
+| `customer_reviews` | One-per-completed-job; auto-recomputes `vendors.rating` |
+| `notifications` | Shared inbox (`recipient_type` ENUM: `customer`/`vendor`/`staff`) |
+| `bank_details` | Vendor payout accounts with an `edit_requested_at` review workflow |
+| `payout_requests` | Wallet → bank payout lifecycle (`requested`/`approved`/`rejected`/`paid`/`failed`) |
+
+Plus column additions on `enquiries` (budget, lat/lng, preferred_date,
+accept/reject timestamps), `vendors` (profile_image, address, pincode,
+about, owner_name, experience_years, fcm_token), `customers`
+(profile_image, pincode, fcm_token), `vendor_services` (subcategory_id,
+thumbnail, tag_ids), and `quotation` (gst_amount, platform_fee,
+advance_amount).
 
 ---
 
@@ -254,7 +464,25 @@ Hot reload is on for both. Edits to `src/` reflect immediately; backend uses `ts
 | `npm run seed:marketplace`           | 40 vendors + 8 customers + 4 enquiries + 2 quotes + 1 in-progress order with 5 milestones — all tagged `seed_source='vayil-demo-v1'` |
 | `npm run seed:marketplace:vendors`   | Same minus the demo activity (recommended for production launch)   |
 | `npm run unseed:marketplace`         | Deletes every row tagged `vayil-demo-v1`                           |
-| `npm run smoke`                      | Hits a handful of endpoints to confirm wiring                      |
+| `npm run smoke`                      | Original wire-check against a running backend                      |
+| `npm run smoke:web`                  | Canonical JSON path: `/auth/otp/{send,verify}` → `/customers/me` → `/customers/vendors` → `/customers/enquiries`. Exits 0 on full success. |
+| `npm run smoke:mobile`               | Mobile multipart path: customer (register → OTP → profile → enquiry → cart) **and** vendor (register → OTP → step1 → listings → enquiries → balance → notifications). Mirrors what Flutter's Dio sends. |
+
+### Migrations
+
+| File | What it adds |
+|---|---|
+| `001_complete_schema.sql` | Base tables: `customers`, `vendors`, `enquiries`, `quotation`, `orders`, `order_plan`, `payment_log`, `vendor_wallet`, `vendor_transactions`, `disputes`, `staff`, `roles`, `settings`, `otp_codes`, `service_categories`/`_subcategories`/`_tags`, `vendor_services` |
+| `002_prd_workflow_tables.sql` | PRD §10 workflow: `payment_intents`, `escrow_ledger`, `materials`, `plan_submissions`, `signoffs`, `rework_requests`, `milestone_updates`, `webhook_deliveries`, `idempotency_keys` + ALTER on `order_plan` and `enquiries` |
+| `003_seed_tagging.sql` | `seed_source VARCHAR(40)` column on base tables for `unseed:marketplace` |
+| `004_vendor_review_queue.sql` | `vendor_review_queue` + admin notify columns |
+| `005_orders_enquiry_unique.sql` | `UNIQUE KEY uniq_orders_enquiry (enquiry_id)` on `orders` |
+| `006_mobile_compatibility_tables.sql` | `customer_cart`, `customer_reviews`, `notifications`, `bank_details`, `payout_requests` + metadata columns on `enquiries`, `vendors`, `customers`, `vendor_services`, `quotation` |
+
+The runner (`scripts/migrate.ts`) splits on `;\n`, runs every statement
+in order, and swallows MySQL errno **1060** (duplicate column),
+**1061** (duplicate key), **1091** (drop non-existent) so re-runs are
+safe.
 
 ---
 
