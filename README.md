@@ -19,15 +19,24 @@ This repo contains both deployable surfaces in one place:
 ├── backend/                 ← Node + Express + MySQL backend (deploys to Render)
 │   ├── src/
 │   │   ├── routes/          # auth, customer, vendor, payments, ops, admin, common
-│   │   ├── middleware/      # auth, idempotency
+│   │   │                    # + legacyCustomer, legacyVendor (mobile shims)
+│   │   ├── middleware/      # auth (Bearer + x-access-token + body token), idempotency
 │   │   ├── utils/           # razorpay (HMAC verify), adminNotify, http, otp
-│   │   ├── services/        # tax (GST/TDS/platform fee)
+│   │   ├── services/        # auth, customer, vendor, enquiry, quote, project,
+│   │   │                    # payment, material, notification, review, bank,
+│   │   │                    # payout, tax — shared by web + mobile
 │   │   ├── db.ts            # mysql2 pool + transaction helper
 │   │   └── config.ts
-│   ├── migrations/          # 001 schema, 002 PRD workflow tables, 003 seed tagging, 004 vendor review queue, 005 orders enquiry unique
-│   ├── scripts/             # migrate, seed, seed-marketplace, smoke
+│   ├── migrations/          # 001 schema, 002 PRD workflow, 003 seed tagging,
+│   │                        # 004 vendor review queue, 005 orders enquiry unique,
+│   │                        # 006 mobile compatibility (cart, reviews,
+│   │                        # notifications, bank, payouts + metadata columns)
+│   ├── scripts/             # migrate, seed, seed-marketplace,
+│   │                        # smoke, smoke-web, smoke-mobile
 │   ├── seed-data/           # 40 vendors, 8 customers, demo activity (JSON)
 │   └── Dockerfile
+├── docs/                    ← Internal contracts + audits
+│   └── mobile-api-inventory.md   # Flutter app endpoint inventory + payloads
 ├── render.yaml              # Render Blueprint for the backend service
 ├── .vercelignore            # Keeps backend/ out of the Vercel build
 ├── RELEASE_NOTES.md         # Versioned changelog
@@ -36,6 +45,20 @@ This repo contains both deployable surfaces in one place:
 
 **Frontend stack:** Next.js 14 (App Router), TypeScript, Tailwind CSS, Zustand, Razorpay (client SDK loaded on demand), axios.
 **Backend stack:** Node 20 + Express 4 + TypeScript, MySQL2 (pool + transactions), JWT (separate user/staff secrets), Razorpay (server SDK, HMAC signature verification), multer, helmet, express-rate-limit, zod.
+
+### One backend, four clients
+
+The same Express server (and the same MySQL database, payment pipeline, auth, and notification stack) serves **all** Vayil surfaces:
+
+| Surface | Routes it uses |
+|---|---|
+| Customer web (this repo's `/account/*` + `/`) | Canonical `/auth/*`, `/customers/*`, `/payments/*` |
+| Vendor web studio (this repo's `/vendor-studio/*`) | Canonical `/auth/*`, `/vendors/*`, `/payments/*` |
+| Admin panel (`Praga0405/Vayil-Admin-Panel-main`) | `/Admin/*` (mounted at both casings) |
+| **Customer Flutter app** | Legacy `/customer/*` (multipart/form-data, shimmed) |
+| **Vendor Flutter app** | Legacy `/vendor/*` + bare `/<endpoint>` (multipart/form-data, shimmed) |
+
+Business logic lives **once**, in `backend/src/services/*`. Both the canonical web routes and the legacy mobile shims call into the same service functions, so the same auth, ownership checks, payment validation, escrow holds, and notification writes apply regardless of client. See `docs/mobile-api-inventory.md` for the full mobile contract.
 
 ---
 

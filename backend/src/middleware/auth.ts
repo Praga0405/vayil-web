@@ -8,10 +8,32 @@ export function signToken(payload: AuthUser, staff = false) {
   return jwt.sign(payload, staff ? config.staffJwtSecret : config.jwtSecret, { expiresIn: config.jwtExpiresIn as any });
 }
 
+/**
+ * Extract a JWT from the request. Mobile apps may send the token in
+ * several places — accept all of them so the same middleware works for
+ * the web canonical routes AND the legacy mobile shims:
+ *
+ *   • Authorization: Bearer <token>         (web + new mobile)
+ *   • x-access-token: <token>                (legacy mobile alt header)
+ *   • body.token / body.access_token         (Dio FormData with token field)
+ *   • query.token                            (rare — legacy GET endpoints)
+ */
+export function extractToken(req: AuthRequest): string | undefined {
+  const auth = req.headers.authorization || '';
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  const xat = req.headers['x-access-token'];
+  if (typeof xat === 'string' && xat) return xat.trim();
+  const body: any = req.body || {};
+  if (typeof body.token === 'string' && body.token) return body.token.trim();
+  if (typeof body.access_token === 'string' && body.access_token) return body.access_token.trim();
+  const q: any = req.query || {};
+  if (typeof q.token === 'string' && q.token) return q.token.trim();
+  return undefined;
+}
+
 export function requireAuth(allowed?: UserType[]) {
   return (req: AuthRequest, _res: Response, next: NextFunction) => {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : undefined;
+    const token = extractToken(req);
     if (!token) return next(new ApiError(401, 'Missing bearer token'));
     try {
       let decoded: any;
@@ -34,6 +56,25 @@ export function requireAuth(allowed?: UserType[]) {
 export function requireRole(role: string) {
   return (req: AuthRequest, _res: Response, next: NextFunction) => {
     if (!req.user?.roles?.includes(role)) return next(new ApiError(403, `Missing role: ${role}`));
+    next();
+  };
+}
+
+/**
+ * Soft auth — sets req.user if a valid token is present, but never fails
+ * the request. Useful for legacy endpoints that the mobile app sometimes
+ * calls before login (e.g. /customer/ServiceList browsing).
+ */
+export function softAuth() {
+  return (req: AuthRequest, _res: Response, next: NextFunction) => {
+    const token = extractToken(req);
+    if (!token) return next();
+    try {
+      let decoded: any;
+      try { decoded = jwt.verify(token, config.jwtSecret); }
+      catch { decoded = jwt.verify(token, config.staffJwtSecret); }
+      req.user = decoded as AuthUser;
+    } catch { /* ignore invalid token in soft mode */ }
     next();
   };
 }

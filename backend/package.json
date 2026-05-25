@@ -13,7 +13,9 @@
     "seed:marketplace": "tsx scripts/seed-marketplace.ts",
     "seed:marketplace:vendors": "tsx scripts/seed-marketplace.ts --vendors-only",
     "unseed:marketplace": "tsx scripts/seed-marketplace.ts --purge",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "smoke:web": "tsx scripts/smoke-web.ts",
+    "smoke:mobile": "tsx scripts/smoke-mobile.ts"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -22,6 +24,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "form-data": "^4.0.5",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",

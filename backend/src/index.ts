@@ -2,6 +2,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import { config } from './config';
 import { ApiError, fail } from './utils/http';
 import { authRouter } from './routes/auth';
@@ -11,16 +12,16 @@ import { opsRouter } from './routes/ops';
 import { commonRouter } from './routes/common';
 import { paymentsRouter, paymentsWebhookRouter } from './routes/payments';
 import { adminRouter } from './routes/admin';
+import { legacyCustomerRouter } from './routes/legacyCustomer';
+import { legacyVendorRouter } from './routes/legacyVendor';
 
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins, credentials: true }));
 
-// Webhooks MUST receive the raw body for signature verification, so mount
-// the dedicated webhook router BEFORE the global JSON parser. The webhook
-// router only defines POST /razorpay so the final URL is exactly
-// /payments/webhooks/razorpay (and the legacy /webhooks/razorpay alias).
+// Webhooks MUST receive the raw body for signature verification — mount
+// the dedicated webhook router BEFORE any body parser.
 app.use('/payments/webhooks', paymentsWebhookRouter);
 app.use('/webhooks',          paymentsWebhookRouter);
 
@@ -28,24 +29,53 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 240 }));
 
+/**
+ * Legacy mobile shim — the Flutter apps post every request as
+ * multipart/form-data (Dio.FormData.fromMap). express.json() returns
+ * an empty body for those, so we layer a multer instance specifically
+ * in front of the legacy routers.
+ *
+ * The instance does NOT consume file uploads here (handlers that need
+ * files apply their own `upload.any()` middleware). It only fills
+ * req.body from the multipart text fields when no file is present.
+ */
+const legacyForm = multer().none();
+function legacyMultipart(req: Request, res: Response, next: NextFunction) {
+  const ct = req.headers['content-type'] || '';
+  if (typeof ct === 'string' && ct.startsWith('multipart/form-data')) {
+    // multer.none() rejects file fields. Routes that explicitly need
+    // file uploads (upload_files) install upload.any() themselves —
+    // by routing them BEFORE this middleware via the legacyVendorRouter /
+    // legacyCustomerRouter instances we avoid the conflict.
+    return legacyForm(req, res, (err) => {
+      if (err && (err as any).code === 'LIMIT_UNEXPECTED_FILE') return next(); // handler will run its own multer
+      return next(err);
+    });
+  }
+  next();
+}
+
+/* ─── Canonical routes — JSON only ────────────────────────────── */
 app.use('/', commonRouter);
 app.use('/auth', authRouter);
 app.use('/customers', customerRouter);
 app.use('/vendors', vendorRouter);
 app.use('/ops', opsRouter);
-// /payments only carries create-order + verify — webhook is on the
-// separate router mounted above with raw-body parsing.
 app.use('/payments', paymentsRouter);
 
-// Admin panel — Vayil-Admin-Panel-main posts to these paths verbatim.
-// Mount under both casings since Express paths are case-sensitive.
 app.use('/Admin', adminRouter);
 app.use('/admin', adminRouter);
 
-// Legacy aliases for the existing mobile/admin codebase.
+/* ─── Legacy mobile shims — accept multipart + JSON ────────────
+ *  Mount AFTER canonical so canonical wins on overlapping paths.
+ *  Mobile uses /customer/<name> and bare /<name> for vendor calls
+ *  (e.g. /step1, /AskPyament), so we mount the vendor router at both. */
+app.use('/customer', legacyMultipart, legacyCustomerRouter);
+app.use('/vendor',   legacyMultipart, legacyVendorRouter);
+app.use('/',         legacyMultipart, legacyVendorRouter);
+
+/* ─── Compatibility aliases (auth router already handled these) ─ */
 app.use('/', authRouter);
-app.use('/customer', customerRouter);
-app.use('/vendor', vendorRouter);
 
 app.use((_req, _res, next) => next(new ApiError(404, 'Route not found')));
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -1,5 +1,143 @@
 # Release Notes
 
+## v4.0.0 — Unified backend: mobile + web on one foundation (2026-05-25)
+
+One deployable backend now serves the existing Vayil customer **and**
+vendor Flutter apps alongside the new web portal and vendor studio, all
+sharing the same database, payment pipeline (`payment_intents` +
+`escrow_ledger`), auth, and notification stack. No second backend, no
+duplicated business logic.
+
+### What changed
+
+- **New migration `backend/migrations/006_mobile_compatibility_tables.sql`**
+  adds the tables the Flutter apps depend on (`customer_cart`,
+  `customer_reviews`, `notifications`, `bank_details`, `payout_requests`)
+  plus the missing metadata columns on `enquiries`, `vendors`,
+  `customers`, `vendor_services`, and `quotation`. Numbered 006 (not 003
+  as originally specified) because 003 is taken by `003_seed_tagging.sql`
+  and renumbering live migrations is unsafe.
+
+- **New service layer at `backend/src/services/`** — one source of truth
+  for every domain operation, callable from both canonical web routes
+  and the legacy mobile shims:
+
+  | File | Responsibility |
+  |---|---|
+  | `authService.ts` | OTP send / verify, account upsert, token signing |
+  | `customerService.ts` | Profile + vendor browse + cart |
+  | `vendorService.ts` | Profile, onboarding steps, listings, tags, wallet |
+  | `enquiryService.ts` | Create / list / detail / accept / reject |
+  | `quoteService.ts` | Send / list / accept / reject (canonical 100% gate) |
+  | `projectService.ts` | Order, plan CRUD, milestone updates / completion |
+  | `paymentService.ts` | `payment_intents` + escrow pipeline (re-exports `releaseEscrow`) |
+  | `materialService.ts` | Materials CRUD + customer-side lock check |
+  | `notificationService.ts` | In-app inbox (shared customer + vendor) |
+  | `reviewService.ts` | Customer reviews + vendor rating recompute |
+  | `bankService.ts` | Bank details add / edit / request-edit workflow |
+  | `payoutService.ts` | Wallet → bank payout, revenue chart, txn history |
+
+- **New legacy route files**
+  - `backend/src/routes/legacyCustomer.ts` — every `POST /customer/*`
+    endpoint the Flutter app calls (register, OTP, profile, browse,
+    enquiries, quotes, placeOrder, payment_update, finalStep, cart,
+    reviews, notifications, upload).
+  - `backend/src/routes/legacyVendor.ts` — every `POST /vendor/*` and
+    bare `POST /*` endpoint (register, OTP, step1..step4, listings,
+    enquiry accept/reject, quotation, plan CRUD, materials, AskPyament,
+    bank details, payouts, notifications, reviews).
+
+  Both files are thin shims: they extract the legacy payload keys
+  (`mobile_number` / `mobile` / `phone` are all accepted; same for
+  `vendor_id` / `vendorId`), call into the shared services, and respond
+  with the `{ success, message, data, ...top-level }` shape the
+  mobile apps already parse.
+
+- **Auth middleware (`backend/src/middleware/auth.ts`) accepts three
+  token sources** so the same `requireAuth([…])` works for every
+  client:
+  - `Authorization: Bearer <jwt>` (web + current mobile)
+  - `x-access-token: <jwt>` (legacy alt header)
+  - body / query `token` or `access_token` (legacy mobile fields)
+
+  Plus a new `softAuth()` middleware for endpoints the mobile app
+  sometimes hits pre-login (catalogue browse, ping).
+
+- **Multipart parsing for legacy routes only.** Flutter's Dio sends
+  every POST as `multipart/form-data`. `index.ts` installs a
+  `legacyMultipart` middleware in front of `/customer`, `/vendor`, and
+  the bare `/` vendor mount; the canonical `/customers`, `/vendors`,
+  `/payments`, `/admin` routes remain JSON-only.
+
+- **Payment unification.** The mobile `placeOrder` + `payment_update`
+  pair now flows through the canonical
+  `paymentService.createPaymentIntent` →
+  `paymentService.verifyAndHold` pipeline:
+  - Server **re-derives** the chargeable amount on every order — the
+    client cannot underpay.
+  - Razorpay signature is HMAC-verified with `timingSafeEqual`.
+  - Funds enter `escrow_ledger` as a `hold` row tied to the intent;
+    nothing lands in `vendor_wallet` until `releaseEscrow` runs on
+    milestone completion or `finalStep` (signoff).
+  - Idempotency is honoured via `Idempotency-Key` header or the
+    `idempotency_key` body field.
+
+- **Smoke tests** — two new scripts:
+  - `npm run smoke:web` — hits the canonical `/auth/*` +
+    `/customers/*` routes the new web app uses.
+  - `npm run smoke:mobile` — posts multipart/form-data against
+    `/customer/*` and `/vendor/*` exactly the way Flutter does. Covers
+    register → OTP verify → profile → enquiry → cart on the customer
+    side, and register → step1 → listings → enquiry inbox → balance →
+    notifications on the vendor side.
+
+- **`docs/mobile-api-inventory.md`** — full endpoint inventory + payload
+  shapes + token + transport notes, generated from a direct scan of the
+  unpacked Flutter source. This is the contract document the legacy
+  shims implement.
+
+### Build verification
+
+```
+✓ backend  npm run build              (tsc, 0 errors)
+✓ backend  tsc --noEmit               (0 errors)
+✓ frontend npm run build              (Next.js production build)
+✓ frontend npm run lint               (0 errors, pre-existing warnings only)
+⊘ backend  npm run migrate            (needs live MySQL — runs on Render)
+⊘ backend  npm run seed:marketplace   (needs live MySQL)
+⊘ backend  npm run smoke              (needs running server)
+⊘ backend  npm run smoke:web          (needs running server)
+⊘ backend  npm run smoke:mobile       (needs running server)
+```
+
+The four `⊘` items require either MySQL or a running backend; they are
+ready to execute against Render once deployed.
+
+### Acceptance criteria coverage
+
+| Criterion | Status |
+|---|---|
+| Existing mobile apps can call their old endpoints without code changes | ✅ Every endpoint in the spec mounted under `/customer/*` + `/vendor/*` |
+| New web app continues to use canonical APIs | ✅ Canonical routes unchanged |
+| Mobile + web share DB, payment, auth, notification, project, enquiry, quote, plan, material, review logic | ✅ All via the new service layer |
+| Razorpay flow goes through one `payment_intents` + `escrow_ledger` model | ✅ `placeOrder` + `payment_update` route through `paymentService` |
+| No duplicate business logic between mobile and web | ✅ Routes are shims; logic lives in services |
+| Future features added once in services, exposed to both clients | ✅ Pattern set; add a service function + two thin route lines |
+
+### Files
+
+| Type | Path |
+|---|---|
+| Migration | `backend/migrations/006_mobile_compatibility_tables.sql` |
+| Auth | `backend/src/middleware/auth.ts` (multi-source token + `softAuth`) |
+| Services | `backend/src/services/{auth,customer,vendor,enquiry,quote,project,payment,material,notification,review,bank,payout}Service.ts` |
+| Legacy routes | `backend/src/routes/legacy{Customer,Vendor}.ts` |
+| Wiring | `backend/src/index.ts` (multipart middleware + mount order) |
+| Smoke | `backend/scripts/smoke-{web,mobile}.ts` |
+| Docs | `docs/mobile-api-inventory.md` |
+
+---
+
 ## v3.5.0 — Unified footer + sign-out cleanup (2026-05-25)
 
 Commits: `582de28f` (sign-out + layout edits) and the follow-up that
