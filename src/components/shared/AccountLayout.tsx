@@ -3,9 +3,9 @@ import React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import PublicHeader from '@/components/shared/PublicHeader'
+import PublicFooter from '@/components/shared/PublicFooter'
 import {
-  ClipboardList, Briefcase, Bell, CreditCard, User, ChevronRight,
-  LayoutGrid,
+  ClipboardList, Briefcase, Bell, CreditCard, User, ChevronRight, LayoutGrid,
 } from 'lucide-react'
 
 const NAV = [
@@ -56,32 +56,12 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
         </aside>
 
         {/* Page content */}
-        <main className="flex-1 min-w-0 pb-24 lg:pb-0">
+        <main className="flex-1 min-w-0">
           {children}
         </main>
       </div>
 
-      {/* Mobile bottom tab bar */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-40 flex items-center">
-        {[
-          { href: '/search',               label: 'Browse',     icon: LayoutGrid },
-          { href: '/account/enquiries',    label: 'Enquiries',  icon: ClipboardList },
-          { href: '/account/projects',     label: 'Projects',   icon: Briefcase },
-          { href: '/account/notifications',label: 'Alerts',     icon: Bell },
-          { href: '/account/profile',      label: 'Profile',    icon: User },
-        ].map(({ href, label, icon: Icon }) => {
-          const active = path === href || path.startsWith(href + '/')
-          return (
-            <Link key={href} href={href}
-              className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold transition ${
-                active ? 'text-orange' : 'text-gray-400 hover:text-navy'
-              }`}>
-              <Icon className={`w-5 h-5 ${active ? 'text-orange' : ''}`} />
-              {label}
-            </Link>
-          )
-        })}
-      </nav>
+      <PublicFooter compact />
     </div>
   )
 }

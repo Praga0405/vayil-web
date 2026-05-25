@@ -1,19 +1,17 @@
 'use client'
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
 import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, StatGrid, FieldGrid } from '@/components/shared/PageLayout'
-import { LogOut, Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight } from 'lucide-react'
+import { Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Tab = 'profile' | 'services'
 
 export default function VendorListingPage() {
-  const router = useRouter()
-  const { user, setAuth, clearAuth, token } = useUserAuth()
+  const { user, setAuth, token } = useUserAuth()
   const [tab, setTab] = useState<Tab>('profile')
 
   /* ── Profile state ── */
@@ -91,7 +89,6 @@ export default function VendorListingPage() {
     } catch { toast.error('Failed to update status') }
   }
 
-  const logout = () => { clearAuth(); router.push('/') }
   const activeCount   = services.filter((s: any) => s.status === 'active').length
   const inactiveCount = services.length - activeCount
 
@@ -100,11 +97,6 @@ export default function VendorListingPage() {
       <PageHero
         title="My Listing"
         subtitle="Manage your business profile and the services you offer"
-        actions={
-          <Button variant="danger" onClick={logout}>
-            <LogOut className="w-4 h-4" /> Sign out
-          </Button>
-        }
         meta={
           <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 max-w-md">
             {(['profile', 'services'] as Tab[]).map(t => (

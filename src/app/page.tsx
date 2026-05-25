@@ -5,13 +5,13 @@ import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import VayilLogo from '@/components/shared/VayilLogo'
 import LoginModal from '@/components/shared/LoginModal'
+import PublicFooter from '@/components/shared/PublicFooter'
 import { Avatar, StatusBadge } from '@/components/ui'
 import { customerApi } from '@/lib/api/client'
 import { formatRelative } from '@/lib/utils'
 import {
   Search, ChevronDown, ArrowUpRight, Plus, LogOut,
-  Youtube, Linkedin, Facebook, Instagram,
-  ClipboardList, Briefcase, ChevronRight, Star,
+  ClipboardList, Briefcase, ChevronRight,
 } from 'lucide-react'
 
 /* ─── Data ─────────────────────────────────────────────────── */
@@ -767,72 +767,7 @@ export default function HomePage() {
       </section>
 
       {/* ── 14. Footer ── */}
-      <footer className="bg-[#183954]">
-        {/* App download section */}
-        <div className="max-w-[1440px] mx-auto px-[112px] py-16">
-          <div className="grid grid-cols-2 gap-16 pb-12 border-b border-white/10">
-            <div>
-              <h3 className="text-3xl font-bold text-white mb-4">Are you a professional?</h3>
-              <p className="text-white/60 text-sm mb-6">Download Professional App</p>
-              <AppBadges dark />
-            </div>
-            <div>
-              <h3 className="text-3xl font-bold text-white mb-4">Do you need service?</h3>
-              <p className="text-white/60 text-sm mb-6">Login and book</p>
-              <AppBadges dark />
-            </div>
-          </div>
-
-          {/* Address section */}
-          <div className="grid grid-cols-4 gap-8 py-12 border-b border-white/10">
-            <div>
-              <h4 className="text-2xl font-bold text-white leading-tight">
-                Serve.<br />Transparent.<br />Innovate.
-              </h4>
-            </div>
-            <div>
-              <p className="text-white font-semibold mb-3">Canada</p>
-              <p className="text-white/60 text-sm leading-relaxed">
-                2433 29St SW Calgary, Alberta T3E2K3, Canada
-              </p>
-              <p className="text-white/60 text-sm mt-2">Contact: +1 4034000849</p>
-            </div>
-            <div>
-              <p className="text-white font-semibold mb-3">United States</p>
-              <p className="text-white/60 text-sm leading-relaxed">
-                12410 Alameda Trace CIR, Austin, TX 78727-6335 United States
-              </p>
-              <p className="text-white/60 text-sm mt-2">Contact: +1 4034000849</p>
-            </div>
-            <div>
-              <p className="text-white font-semibold mb-3">India</p>
-              <p className="text-white/60 text-sm leading-relaxed">
-                203, 2nd Floor, "B" Wing, Nyati Tech Park, Wadgaon Sheri, Pune, 411014, India
-              </p>
-              <p className="text-white/60 text-sm mt-2">Contact: +91 7767815999</p>
-            </div>
-          </div>
-
-          {/* Bottom bar */}
-          <div className="pt-8 flex items-center justify-between">
-            <p className="text-white/50 text-sm">© 2026 Vayil. All rights reserved.</p>
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-4">
-                {[Youtube, Linkedin, Facebook, Instagram].map((Icon, i) => (
-                  <a key={i} href="#" className="w-6 h-6 text-white/50 hover:text-white transition">
-                    <Icon className="w-5 h-5" />
-                  </a>
-                ))}
-              </div>
-              <div className="flex items-center gap-4 text-sm text-white/50">
-                <a href="#" className="hover:text-white transition">Terms</a>
-                <a href="#" className="hover:text-white transition">Privacy</a>
-                <a href="#" className="hover:text-white transition">Cookies</a>
-              </div>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <PublicFooter />
 
       {/* ── Login Modal ── */}
       {/* Marketplace flow: on success we just close — the page re-renders

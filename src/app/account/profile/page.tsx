@@ -5,12 +5,12 @@ import { useUserAuth } from '@/stores/auth'
 import { customerApi, commonApi } from '@/lib/api/client'
 import { Button, Input, Select, Avatar } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
-import { LogOut, Camera } from 'lucide-react'
+import { Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { user, setAuth, clearAuth, token } = useUserAuth()
+  const { user, setAuth, token } = useUserAuth()
   const [hydrated, setHydrated] = useState(false)
   useEffect(() => { setHydrated(true) }, [])
 
@@ -68,8 +68,6 @@ export default function ProfilePage() {
     }
   }
 
-  const logout = () => { clearAuth(); router.push('/') }
-
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
     if (k === 'state_id') {
@@ -86,11 +84,6 @@ export default function ProfilePage() {
       <PageHero
         title="My Profile"
         subtitle="Manage your account details, contact info, and saved address."
-        actions={
-          <Button variant="danger" onClick={logout}>
-            <LogOut className="w-4 h-4" /> Sign out
-          </Button>
-        }
       />
 
       <TwoColumn

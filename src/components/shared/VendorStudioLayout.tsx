@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import PublicHeader from './PublicHeader'
+import PublicFooter from './PublicFooter'
 import {
   Wrench, CreditCard, ShieldCheck, ClipboardList, LayoutGrid, LayoutDashboard, Briefcase,
 } from 'lucide-react'
@@ -61,28 +62,12 @@ export default function VendorStudioLayout({ children }: { children: React.React
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 min-w-0 pb-24 lg:pb-0">
+        <main className="flex-1 min-w-0">
           {children}
         </main>
       </div>
 
-      {/* Mobile bottom tabs */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-40 safe-area-bottom">
-        <div className="flex">
-          {NAV.slice(0, 4).map(({ href, icon: Icon, label }) => {
-            const active = pathname === href || pathname.startsWith(href + '/')
-            return (
-              <Link key={href} href={href}
-                className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors ${
-                  active ? 'text-orange' : 'text-gray-400 hover:text-navy'
-                }`}>
-                <Icon className="w-5 h-5" />
-                {label}
-              </Link>
-            )
-          })}
-        </div>
-      </nav>
+      <PublicFooter compact />
     </div>
   )
 }
