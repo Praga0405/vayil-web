@@ -88,9 +88,11 @@ export function adaptJob(
   }))
   // Prefer the server-rolled escrow totals (added with v4.x) so the
   // vendor sees the customer's advance as "Paid (in escrow)" rather than
-  // ₹0 until each milestone individually completes.
-  const escrowHeld     = Number(extra?.escrow?.held ?? 0);
-  const escrowReleased = Number(extra?.escrow?.released ?? 0);
+  // ₹0 until each milestone individually completes. The list endpoint
+  // returns the rollup fields directly on the order row; the detail
+  // endpoint wraps them in `extra.escrow`. Accept both shapes.
+  const escrowHeld     = Number(extra?.escrow?.held     ?? (order as any).escrow_held     ?? 0);
+  const escrowReleased = Number(extra?.escrow?.released ?? (order as any).escrow_released ?? 0);
   const escrowTotal    = escrowHeld + escrowReleased;
   const paid = escrowTotal > 0
     ? escrowTotal
@@ -101,11 +103,16 @@ export function adaptJob(
   //   any milestone with pending             → SUBMITTED
   //   plan exists and all approved           → APPROVED
   //   otherwise                              → NOT_STARTED
+  //
+  // When the row was loaded from the LIST endpoint there's no plan[]
+  // available, but the server pre-computed `plan_status_rollup` — use
+  // it directly.
   const planStatus: MockJob['plan_status'] =
-    plan.some(p => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
-    : plan.some(p => p.customer_status === 'pending')           ? 'SUBMITTED'
-    : plan.length > 0                                            ? 'APPROVED'
-    :                                                              'NOT_STARTED'
+    (order as any).plan_status_rollup as any
+    || (plan.some(p => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
+       : plan.some(p => p.customer_status === 'pending')           ? 'SUBMITTED'
+       : plan.length > 0                                            ? 'APPROVED'
+       :                                                              'NOT_STARTED')
   return {
     id:           order.order_id,
     order_id:     order.order_id,

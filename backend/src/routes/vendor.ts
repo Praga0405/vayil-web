@@ -101,7 +101,51 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
 });
 
 vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
-  try { ok(res, { projects: await query<any>('SELECT * FROM orders WHERE vendor_id = :id ORDER BY order_id DESC', { id: req.user!.id }) }); } catch (err) { next(err); }
+  try {
+    // JOIN customer name + roll up plan status + escrow totals so the
+    // vendor's "Ongoing Jobs" cards show real values (not "Customer #X
+    // · ₹0 paid · NOT STARTED"). Same shape the detail endpoint now
+    // returns so adaptJob behaves identically in both contexts.
+    const projects = await query<any>(
+      `SELECT o.*,
+              c.name AS customer_name,
+              c.profile_image AS customer_profile_image,
+              COALESCE(esc.escrow_total, 0) AS escrow_total,
+              COALESCE(esc.escrow_held,   0) AS escrow_held,
+              COALESCE(esc.escrow_released, 0) AS escrow_released,
+              CASE
+                WHEN plan.has_revision    > 0 THEN 'REVISION_REQUESTED'
+                WHEN plan.all_approved    > 0 AND plan.pending_count = 0 THEN 'APPROVED'
+                WHEN plan.pending_count   > 0 THEN 'SUBMITTED'
+                WHEN plan.total_count     > 0 THEN 'APPROVED'
+                ELSE 'NOT_STARTED'
+              END AS plan_status_rollup
+         FROM orders o
+         LEFT JOIN customers c ON c.customer_id = o.customer_id
+         LEFT JOIN (
+           SELECT order_id,
+                  SUM(amount) AS escrow_total,
+                  SUM(CASE WHEN status = 'escrow_held'   THEN amount ELSE 0 END) AS escrow_held,
+                  SUM(CASE WHEN status = 'released'      THEN amount ELSE 0 END) AS escrow_released
+             FROM payment_intents
+            WHERE status IN ('escrow_held','released')
+            GROUP BY order_id
+         ) esc ON esc.order_id = o.order_id
+         LEFT JOIN (
+           SELECT order_id,
+                  COUNT(*) AS total_count,
+                  SUM(CASE WHEN customer_status = 'pending'             THEN 1 ELSE 0 END) AS pending_count,
+                  SUM(CASE WHEN customer_status = 'approved'            THEN 1 ELSE 0 END) AS all_approved,
+                  SUM(CASE WHEN customer_status = 'revision_requested'  THEN 1 ELSE 0 END) AS has_revision
+             FROM order_plan
+            GROUP BY order_id
+         ) plan ON plan.order_id = o.order_id
+        WHERE o.vendor_id = :id
+        ORDER BY o.order_id DESC`,
+      { id: req.user!.id },
+    );
+    ok(res, { projects });
+  } catch (err) { next(err); }
 });
 
 vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
