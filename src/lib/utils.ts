@@ -15,13 +15,17 @@ export function formatCurrency(amount: number, compact = false): string {
   }).format(amount)
 }
 
-export function formatDate(date: string | Date, fmt = 'dd MMM yyyy'): string {
+export function formatDate(date: string | Date | null | undefined, fmt = 'dd MMM yyyy'): string {
+  if (!date) return '—'
   const d = typeof date === 'string' ? new Date(date) : date
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-export function formatRelative(date: string | Date): string {
+export function formatRelative(date: string | Date | null | undefined): string {
+  if (!date) return '—'
   const d = typeof date === 'string' ? new Date(date) : date
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '—'
   const now = new Date()
   const diff = now.getTime() - d.getTime()
   const mins = Math.floor(diff / 60000)

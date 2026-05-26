@@ -46,14 +46,23 @@ function makeClient(baseURL: string, tokenFn: () => string | null): AxiosInstanc
   return client
 }
 
-// One axios instance per logical surface. They all hit the same host but
-// the base path differs for nicer call sites.
-export const authClient     = makeClient(`${BASE}/auth`,     getToken)
-export const customerClient = makeClient(`${BASE}/customer`, getToken)
-export const vendorClient   = makeClient(`${BASE}/vendor`,   getToken)
-export const paymentsClient = makeClient(`${BASE}/payments`, getToken)
-export const commonClient   = makeClient(BASE,               getToken)
-export const opsClient      = makeClient(`${BASE}/ops`,      getOpsToken)
+// One axios instance per logical surface. All hit the same host. The
+// base paths use the **canonical plural** mounts (`/customers`,
+// `/vendors`) — `/customer` and `/vendor` are now exclusively reserved
+// for the legacy mobile shim routers introduced in v4.0.0.
+export const authClient     = makeClient(`${BASE}/auth`,      getToken)
+export const customerClient = makeClient(`${BASE}/customers`, getToken)
+export const vendorClient   = makeClient(`${BASE}/vendors`,   getToken)
+export const paymentsClient = makeClient(`${BASE}/payments`,  getToken)
+export const commonClient   = makeClient(BASE,                getToken)
+export const opsClient      = makeClient(`${BASE}/ops`,       getOpsToken)
+
+// Singular-path clients reserved for the LEGACY MOBILE ALIASES blocks
+// below. They map onto the legacyCustomer.ts / legacyVendor.ts route
+// files in the backend, which speak the older mobile contract
+// (multipart, /sendEnquiry-style names, success+data+token responses).
+export const customerLegacyClient = makeClient(`${BASE}/customer`, getToken)
+export const vendorLegacyClient   = makeClient(`${BASE}/vendor`,   getToken)
 
 /* ── Idempotency helper ────────────────────────────────────────── */
 const newIdempotencyKey = () =>
@@ -153,30 +162,30 @@ export const customerApi = {
   loginOTP:          (mobile: string)             => commonClient.post('/customer/logincustomerWithOTP', { mobile_number: mobile }),
   verifyLogin:       (mobile: string, otp: string) => commonClient.post('/customer/verifyLogincustomerOTP', { mobile_number: mobile, otp }),
   resendOTP:         (mobile: string)             => commonClient.post('/customer/resendcustomerOTP', { mobile_number: mobile }),
-  getServices:       (params?: Record<string, unknown>) => customerClient.post('/ServiceList', params ?? {}),
-  getServiceInfo:    (service_id: number) => customerClient.post('/ServiceInfo', { service_id }),
-  getVendorInfo:     (vendor_id: number) => customerClient.post('/vendorInfo', { vendor_id }),
-  getEnquiries:      ()                              => customerClient.post('/enquiryList', {}),
-  sendEnquiry:       (data: Record<string, unknown>) => customerClient.post('/sendEnquiry', data),
-  getQuoteLegacy:    (enquiry_id: number)            => customerClient.post('/QuotationList', { enquiry_id }),
-  updateQuote:       (data: Record<string, unknown>) => customerClient.post('/updateQuotation', data),
+  getServices:       (params?: Record<string, unknown>) => customerLegacyClient.post('/ServiceList', params ?? {}),
+  getServiceInfo:    (service_id: number) => customerLegacyClient.post('/ServiceInfo', { service_id }),
+  getVendorInfo:     (vendor_id: number) => customerLegacyClient.post('/vendorInfo', { vendor_id }),
+  getEnquiries:      ()                              => customerLegacyClient.post('/enquiryList', {}),
+  sendEnquiry:       (data: Record<string, unknown>) => customerLegacyClient.post('/sendEnquiry', data),
+  getQuoteLegacy:    (enquiry_id: number)            => customerLegacyClient.post('/QuotationList', { enquiry_id }),
+  updateQuote:       (data: Record<string, unknown>) => customerLegacyClient.post('/updateQuotation', data),
   getPlan:           (id: number, by: 'enquiry_id' | 'order_id' = 'enquiry_id') =>
-                       customerClient.post('/getPlan', { [by]: id }),
-  updatePlan:        (data: Record<string, unknown>) => customerClient.post('/CustomerupdatePlan', data),
-  placeOrder:        (data: Record<string, unknown>) => customerClient.post('/placeOrder', data),
-  getOrderDetail:    (order_id: number)              => customerClient.post('/orderDetails', { order_id }),
-  getPaymentDetails: (order_id: number)              => customerClient.post('/getPaymentDetails', { order_id }),
-  getPaymentSummary: (order_id: number)              => customerClient.post('/NeedPaymentSummary', { order_id }),
-  paymentUpdate:     (data: Record<string, unknown>) => customerClient.post('/payment_update', data),
-  finalStep:         (data: Record<string, unknown>) => customerClient.post('/finalStep', data),
-  addReview:         (data: Record<string, unknown>) => customerClient.post('/addReview', data),
+                       customerLegacyClient.post('/getPlan', { [by]: id }),
+  updatePlan:        (data: Record<string, unknown>) => customerLegacyClient.post('/CustomerupdatePlan', data),
+  placeOrder:        (data: Record<string, unknown>) => customerLegacyClient.post('/placeOrder', data),
+  getOrderDetail:    (order_id: number)              => customerLegacyClient.post('/orderDetails', { order_id }),
+  getPaymentDetails: (order_id: number)              => customerLegacyClient.post('/getPaymentDetails', { order_id }),
+  getPaymentSummary: (order_id: number)              => customerLegacyClient.post('/NeedPaymentSummary', { order_id }),
+  paymentUpdate:     (data: Record<string, unknown>) => customerLegacyClient.post('/payment_update', data),
+  finalStep:         (data: Record<string, unknown>) => customerLegacyClient.post('/finalStep', data),
+  addReview:         (data: Record<string, unknown>) => customerLegacyClient.post('/addReview', data),
   listReviews:       (vendor_id: number)             => commonClient.post('/vendorlistReviews', { vendor_id }),
-  getNotifications:  () => customerClient.post('/customerNotificationList', {}),
+  getNotifications:  () => customerLegacyClient.post('/customerNotificationList', {}),
   // Cart (legacy bucket persistence — frontend keeps its own bucketStore now)
-  addToCart:         (data: Record<string, unknown>) => customerClient.post('/addToCart', data),
-  getCart:           ()                              => customerClient.post('/getCart', {}),
-  removeCart:        (cart_id: number)               => customerClient.post('/removeCartItem', { cart_id }),
-  clearCart:         ()                              => customerClient.post('/clearCart', {}),
+  addToCart:         (data: Record<string, unknown>) => customerLegacyClient.post('/addToCart', data),
+  getCart:           ()                              => customerLegacyClient.post('/getCart', {}),
+  removeCart:        (cart_id: number)               => customerLegacyClient.post('/removeCartItem', { cart_id }),
+  clearCart:         ()                              => customerLegacyClient.post('/clearCart', {}),
 }
 
 /* ═════════════════════════════════════════════════════════════════
@@ -248,52 +257,52 @@ export const vendorApi = {
   loginOTP:           (mobile: string)            => commonClient.post('/vendor-login-otp', { mobile_number: mobile }),
   verifyLogin:        (mobile: string, otp: string) => commonClient.post('/vendor-login-verify-otp', { mobile_number: mobile, otp }),
   resendOTP:          (mobile: string)             => commonClient.post('/resendVendorOTP', { mobile_number: mobile }),
-  saveStep1:          (data: Record<string, unknown>) => vendorClient.post('/step1', data),
-  saveServiceTags:    (data: Record<string, unknown>) => vendorClient.post('/serviceTagStep', data),
-  saveStep2:          (data: Record<string, unknown>) => vendorClient.post('/step2', data),
-  saveStep3:          (data: Record<string, unknown>) => vendorClient.post('/step3', data),
-  submitKYC:          (data: Record<string, unknown>) => vendorClient.post('/step4', data),
+  saveStep1:          (data: Record<string, unknown>) => vendorLegacyClient.post('/step1', data),
+  saveServiceTags:    (data: Record<string, unknown>) => vendorLegacyClient.post('/serviceTagStep', data),
+  saveStep2:          (data: Record<string, unknown>) => vendorLegacyClient.post('/step2', data),
+  saveStep3:          (data: Record<string, unknown>) => vendorLegacyClient.post('/step3', data),
+  submitKYC:          (data: Record<string, unknown>) => vendorLegacyClient.post('/step4', data),
   getSettings:        () => commonClient.get('/vendor/vendorGetSettings'),
-  saveServiceListing: (data: Record<string, unknown>) => vendorClient.post('/saveServiceListing', data),
-  updateServiceListing: (data: Record<string, unknown>) => vendorClient.post('/updateServiceListing', data),
-  getMyServices:      ()                              => vendorClient.get('/getVendorServiceList'),
+  saveServiceListing: (data: Record<string, unknown>) => vendorLegacyClient.post('/saveServiceListing', data),
+  updateServiceListing: (data: Record<string, unknown>) => vendorLegacyClient.post('/updateServiceListing', data),
+  getMyServices:      ()                              => vendorLegacyClient.get('/getVendorServiceList'),
   updateServiceStatus:(data: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...data }
     if (data.service_id && !payload.id) payload.id = data.service_id
     if (typeof data.status === 'string' && payload.is_active === undefined) {
       payload.is_active = data.status === 'active' ? 1 : 0
     }
-    return vendorClient.post('/ServiceStatusUpdate', payload)
+    return vendorLegacyClient.post('/ServiceStatusUpdate', payload)
   },
-  getServiceDetail:   (data: Record<string, unknown>) => vendorClient.post('/ServiceDetails', data),
-  addServiceTag:      (data: Record<string, unknown>) => vendorClient.post('/VendorAddServiceTag', data),
-  getEnquiriesLegacy: (data: Record<string, unknown>) => vendorClient.post('/vendorEnuqiryList', data),
-  acceptEnquiryLegacy:(data: Record<string, unknown>) => vendorClient.post('/AcceptEnquiredStatusUpdate', data),
-  rejectEnquiryLegacy:(data: Record<string, unknown>) => vendorClient.post('/vendorRejectEnquiry', data),
-  sendQuote:          (data: Record<string, unknown>) => vendorClient.post('/sendQuotationToCustomer', data),
-  createPlanLegacy:   (data: Record<string, unknown>) => vendorClient.post('/createPlan', data),
-  updatePlanLegacy:   (data: Record<string, unknown>) => vendorClient.post('/updatePlan', data),
-  updatePlanStatus:   (data: Record<string, unknown>) => vendorClient.post('/updatePlanStatus', data),
-  getPlans:           (data: Record<string, unknown>) => vendorClient.post('/vendorgetPlan', data),
-  getPlanDetail:      (data: Record<string, unknown>) => vendorClient.post('/vendorPlanDetails', data),
-  createAcceptPlan:   (data: Record<string, unknown>) => vendorClient.post('/createAcceptPlan', data),
-  addMaterialLegacy:  (data: Record<string, unknown>) => vendorClient.post('/addPlanMaterial', data),
-  editMaterialLegacy: (data: Record<string, unknown>) => vendorClient.post('/editPlanMaterial', data),
-  getMaterials:       (data: Record<string, unknown>) => vendorClient.post('/vendorgetMaterial', data),
-  getMaterialDetail:  (data: Record<string, unknown>) => vendorClient.post('/vendorMaterialDetails', data),
-  getOrderDetail:     (data: Record<string, unknown>) => vendorClient.post('/vendorOrderDetails', data),
-  askPayment:         (data: Record<string, unknown>) => vendorClient.post('/AskPyament', data),
-  getPaymentSummary:  (data: Record<string, unknown>) => vendorClient.post('/vendorPaymentSummary', data),
-  getBalance:         () => vendorClient.post('/vendorBalance', {}),
-  getRevenueChart:    () => vendorClient.get('/getVendorRevenueChart'),
-  getTransactions:    (data: Record<string, unknown>) => vendorClient.post('/vendorTransactionHistory', data),
-  getCurrentMonth:    (data: Record<string, unknown>) => vendorClient.post('/vendorTransHistoryCurMon', data),
-  requestPayout:      (data: Record<string, unknown>) => vendorClient.post('/vendorPayout', data),
-  addBank:            (data: Record<string, unknown>) => vendorClient.post('/AddBankDetails', data),
-  editBank:           (data: Record<string, unknown>) => vendorClient.post('/EditBankDetails', data),
-  getBank:            () => vendorClient.post('/GetBankDetails', {}),
-  editBankReq:        (data: Record<string, unknown>) => vendorClient.post('/EditBankDetailsReq', data),
-  getNotifications:   () => vendorClient.post('/vendorNotificationList', {}),
+  getServiceDetail:   (data: Record<string, unknown>) => vendorLegacyClient.post('/ServiceDetails', data),
+  addServiceTag:      (data: Record<string, unknown>) => vendorLegacyClient.post('/VendorAddServiceTag', data),
+  getEnquiriesLegacy: (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorEnuqiryList', data),
+  acceptEnquiryLegacy:(data: Record<string, unknown>) => vendorLegacyClient.post('/AcceptEnquiredStatusUpdate', data),
+  rejectEnquiryLegacy:(data: Record<string, unknown>) => vendorLegacyClient.post('/vendorRejectEnquiry', data),
+  sendQuote:          (data: Record<string, unknown>) => vendorLegacyClient.post('/sendQuotationToCustomer', data),
+  createPlanLegacy:   (data: Record<string, unknown>) => vendorLegacyClient.post('/createPlan', data),
+  updatePlanLegacy:   (data: Record<string, unknown>) => vendorLegacyClient.post('/updatePlan', data),
+  updatePlanStatus:   (data: Record<string, unknown>) => vendorLegacyClient.post('/updatePlanStatus', data),
+  getPlans:           (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorgetPlan', data),
+  getPlanDetail:      (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorPlanDetails', data),
+  createAcceptPlan:   (data: Record<string, unknown>) => vendorLegacyClient.post('/createAcceptPlan', data),
+  addMaterialLegacy:  (data: Record<string, unknown>) => vendorLegacyClient.post('/addPlanMaterial', data),
+  editMaterialLegacy: (data: Record<string, unknown>) => vendorLegacyClient.post('/editPlanMaterial', data),
+  getMaterials:       (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorgetMaterial', data),
+  getMaterialDetail:  (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorMaterialDetails', data),
+  getOrderDetail:     (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorOrderDetails', data),
+  askPayment:         (data: Record<string, unknown>) => vendorLegacyClient.post('/AskPyament', data),
+  getPaymentSummary:  (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorPaymentSummary', data),
+  getBalance:         () => vendorLegacyClient.post('/vendorBalance', {}),
+  getRevenueChart:    () => vendorLegacyClient.get('/getVendorRevenueChart'),
+  getTransactions:    (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorTransactionHistory', data),
+  getCurrentMonth:    (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorTransHistoryCurMon', data),
+  requestPayout:      (data: Record<string, unknown>) => vendorLegacyClient.post('/vendorPayout', data),
+  addBank:            (data: Record<string, unknown>) => vendorLegacyClient.post('/AddBankDetails', data),
+  editBank:           (data: Record<string, unknown>) => vendorLegacyClient.post('/EditBankDetails', data),
+  getBank:            () => vendorLegacyClient.post('/GetBankDetails', {}),
+  editBankReq:        (data: Record<string, unknown>) => vendorLegacyClient.post('/EditBankDetailsReq', data),
+  getNotifications:   () => vendorLegacyClient.post('/vendorNotificationList', {}),
   getReviews:         (data: Record<string, unknown>) => commonClient.post('/vendorlistReviews', data),
 }
 

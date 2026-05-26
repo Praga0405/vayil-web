@@ -511,6 +511,22 @@ legacyVendorRouter.post('/vendorlistReviews', async (req: AuthRequest, res, next
   } catch (err) { next(err); }
 });
 
+/* ───── Settings (vendor view) ───── */
+async function vendorSettingsHandler(_req: any, res: any, next: any) {
+  try {
+    const row = await one<any>('SELECT * FROM settings LIMIT 1');
+    send(res, {
+      data: {
+        ...row,
+        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
+        currency: 'INR',
+      },
+    });
+  } catch (err) { next(err); }
+}
+legacyVendorRouter.get('/vendorGetSettings', vendorSettingsHandler);
+legacyVendorRouter.post('/vendorGetSettings', vendorSettingsHandler);
+
 /* ───── Upload ───── */
 legacyVendorRouter.post('/upload_files',
   upload.any(),

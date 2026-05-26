@@ -416,3 +416,21 @@ legacyCustomerRouter.post('/upload_files',
 
 /* Soft-auth-only utility — lets the app warm up without a token. */
 legacyCustomerRouter.get('/_ping', softAuth(), (_req, res) => res.json({ ok: true, t: Date.now() }));
+
+/* Settings — read-only, no auth. Web pages (account/profile, payment
+ * sheets) call this on every render; returning the settings row + a
+ * razorpay_key derived from env keeps them happy. */
+async function settingsHandler(_req: any, res: any, next: any) {
+  try {
+    const row = await one<any>('SELECT * FROM settings LIMIT 1');
+    send(res, {
+      data: {
+        ...row,
+        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
+        currency: 'INR',
+      },
+    });
+  } catch (err) { next(err); }
+}
+legacyCustomerRouter.get('/getSettings', settingsHandler);
+legacyCustomerRouter.post('/getSettings', settingsHandler);

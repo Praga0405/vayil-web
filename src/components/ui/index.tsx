@@ -92,10 +92,11 @@ export function Select({ label, error, options, className, ...p }: SelectProps) 
 }
 
 // ── Badge / Status ──────────────────────────────────────────
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status }: { status: string | null | undefined }) {
+  const safe = (status ?? 'unknown').toString()
   return (
-    <span className={cn('badge', getStatusColor(status))}>
-      {status.replace(/_/g, ' ')}
+    <span className={cn('badge', getStatusColor(safe))}>
+      {safe.replace(/_/g, ' ')}
     </span>
   )
 }
