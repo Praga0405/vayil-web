@@ -1,5 +1,110 @@
 # Release Notes
 
+## v4.3.0 — Post-release cleanup: vendor list blocker + 4 polish items (2026-05-26)
+
+Commits: `8a26db3c`, `0bf71738`.
+
+A full functional retest after v4.2 surfaced one true blocker (left
+behind by the v4.2 detail-endpoint rewrite) and four nice-to-have
+polish items. All five fixed in this point release.
+
+### Blocker fix — vendor jobs LIST endpoint (commit `8a26db3c`)
+
+v4.2 fixed the vendor **detail** endpoint (`/vendors/projects/:id`) so
+it JOINs the customer + rolls up escrow + plan status. The matching
+**list** endpoint (`/vendors/projects`) was left as a bare
+`SELECT * FROM orders`, so the "Ongoing Jobs" page rendered every
+card with stale data:
+
+| Field    | Before                          | After                          |
+| -------- | ------------------------------- | ------------------------------ |
+| Customer | "Customer #28"                  | "E2E Cust"                     |
+| Progress | "₹0 of ₹4,766 · 0% paid"       | "₹6,037 of ₹6,037 · 100% paid" |
+| Status   | "NOT STARTED"                   | "APPROVED"                     |
+
+This is a true blocker because `/vendor-studio/jobs` is the vendor's
+primary post-dashboard landing page — if it shows wrong data the
+vendor has no way to triage active work without clicking each job
+individually.
+
+Fix: same shape as the detail endpoint. The list now JOINs:
+
+- `customers` (for `customer_name` + `customer_profile_image`)
+- a subquery over `payment_intents` grouped by `order_id`
+  (for `escrow_total` / `escrow_held` / `escrow_released`)
+- a subquery over `order_plan` grouped by `order_id`
+  (for `plan_status_rollup` ∈ `REVISION_REQUESTED` / `APPROVED` /
+  `SUBMITTED` / `NOT_STARTED`)
+
+`adaptJob` in `src/lib/adapters/vendor-studio.ts` updated to accept
+the new fields directly on the order row (list endpoint) and fall
+back to the `extra.escrow` / `plan[]` shapes (detail endpoint). Both
+code paths now go through one function.
+
+### Polish items (commit `0bf71738`)
+
+| ID  | What                                       | Before                                          | After                                                                                              |
+| --- | ------------------------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| N1  | Earnings transaction sign + colour          | `-₹1,271 -₹4,766` red with down-arrow           | `+₹1,271 +₹4,766` green with up-arrow + "Escrow release · milestone_complete · Order #8" labels    |
+| N2  | Jobs card progress > 100%                   | "₹6,037 of ₹4,766 · 127% paid"                  | "₹6,037 of ₹6,037 · 100% paid"                                                                     |
+| N3  | Vendor enquiries Completed tab always empty | Signoff only flipped `orders.status`            | Signoff now also flips `enquiries.status='completed'` inside the same transaction                  |
+| N4  | Phone reuse across customer ↔ vendor        | Both roles silently created with the same phone | HTTP 409 with a clear "already registered as a {role}, sign in with that role" error               |
+
+**N1 implementation** — backend `/vendors/earnings` +
+`payoutService.getVendorTransactions` label every escrow release as
+`type: 'CREDIT'` with a human-readable description. The earnings UI
+already had the right conditional (`t.type === 'CREDIT'`) but had
+been receiving `type='milestone_complete'` (the raw reason column),
+so the green/red branch always took the red path.
+
+**N2 implementation** — `orders.amount` is the original quote total and
+excludes any materials paid separately. `adaptJob` now uses
+`total = max(orders.amount, escrow_held + released)` as the
+effective project total, so the progress bar caps at 100% regardless
+of how many escrow buckets sit on top of the original quote.
+
+**N3 implementation** — both `projectService.signoffOrder` and the
+canonical `routes/customer.ts` inline signoff handler (kept as a
+second copy for the moment) now run
+`UPDATE enquiries JOIN orders ... SET status='completed'` inside the
+same signoff transaction. Vendor's Enquiries → Completed tab now
+populates as expected.
+
+**N4 implementation** — `authService.verifyOtpAndIssueToken` checks the
+opposite-role table for the phone before INSERTing a new account row.
+If a collision exists it throws `ApiError(409, '...')` with a clear
+sentence that names the existing role. Refactored
+`/auth/otp/verify` (`routes/auth.ts`) to delegate to
+`authService.verifyOtpAndIssueToken` instead of duplicating the
+upsert logic so canonical and legacy paths share one code path and
+both pick up the new check.
+
+### Build verification
+
+```
+✓ frontend  npx tsc --noEmit       0 errors
+✓ backend   npx tsc --noEmit       0 errors
+✓ npm run smoke:web                6/6 endpoints pass
+✓ npm run smoke:mobile             19/19 endpoints pass
+```
+
+### Live verification
+
+All four polish fixes verified in the running browser against the
+local MySQL + Express stack. The post-flow vendor dashboard for
+order #8 now reads:
+
+- **Ongoing Jobs card**: "E2E Cust · Home Service · ₹6,037 of ₹6,037
+  · 100% paid · APPROVED" with a full orange progress bar
+- **Earnings This Month**: two green credits (`+₹1,271`, `+₹4,766`)
+  with up-arrow icons and "Escrow release · milestone_complete ·
+  Order #8" descriptions
+- **Listing → Reviews tab**: 1 review, customer "E2E Cust", 5 stars
+- Attempting to register the customer phone as a vendor returns
+  HTTP 409 with the cross-role error message
+
+---
+
 ## v4.2.0 — Web-portal layout pass + 10 bug fixes (2026-05-26)
 
 Commit: `494beb02`.
