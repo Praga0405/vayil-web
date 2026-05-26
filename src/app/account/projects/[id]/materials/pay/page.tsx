@@ -1,13 +1,39 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useLiveJob } from '@/hooks/useVendorStudio'
 import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
 import { IS_DEMO_MODE } from '@/lib/demoMode'
+
+// Customer-side projection of project + materials so we don't depend
+// on the vendor-only useLiveJob hook (was triggering 403s).
+function useCustomerJob(id: string) {
+  const [job, setJob] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    if (!id) return
+    Promise.all([customerApi.getProjectDetail(id), customerApi.listMaterials(id)])
+      .then(([pr, mr]: any) => {
+        const project = pr.data?.project ?? null
+        const plan    = Array.isArray(pr.data?.plan) ? pr.data.plan : []
+        const planStatus = plan[0]?.customer_status === 'approved' ? 'APPROVED'
+                         : plan[0]?.customer_status === 'revision_requested' ? 'REVISION_REQUESTED'
+                         : plan.length ? 'SUBMITTED' : 'NOT_STARTED'
+        const materials = (mr.data?.materials ?? []).map((m: any) => ({
+          id: m.material_id, name: m.name, quantity: Number(m.quantity), unit: m.unit,
+          rate: Number(m.rate), total: Number(m.total), amount: Number(m.total),
+          status: String(m.status).toUpperCase(),
+        }))
+        setJob({ id: project?.order_id, plan_status: planStatus, materials })
+      })
+      .catch(() => setJob(null))
+      .finally(() => setLoading(false))
+  }, [id])
+  return { job, loading }
+}
 
 declare global { interface Window { Razorpay: any } }
 
@@ -26,7 +52,7 @@ async function loadRazorpay(): Promise<void> {
 export default function MaterialsPaymentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { data: job, loading } = useLiveJob(id)
+  const { job, loading } = useCustomerJob(id)
   // All hooks declared up-front — never after any conditional return,
   // including the plan-status gate below (PRD audit P0-1).
   const [selected, setSelected] = useState<number[]>(() => {
@@ -62,10 +88,10 @@ export default function MaterialsPaymentPage() {
     )
   }
 
-  const unpaid = job.materials.filter(m => m.status !== 'PAID')
+  const unpaid: any[] = job.materials.filter((m: any) => m.status !== 'PAID')
   const toggle = (mid: number) => setSelected(s => s.includes(mid) ? s.filter(x => x !== mid) : [...s, mid])
-  const items   = unpaid.filter(m => selected.includes(m.id))
-  const subtotal = items.reduce((s, m) => s + m.total, 0)
+  const items   = unpaid.filter((m: any) => selected.includes(m.id))
+  const subtotal = items.reduce((s: any, m: any) => s + m.total, 0)
   const fees     = calculateFees(subtotal, 5, 18, 0)
 
   const pay = async () => {
@@ -87,7 +113,7 @@ export default function MaterialsPaymentPage() {
         amount:          fees.total,
         purpose:         'materials',
         order_id:        Number(id),
-        material_ids:    items.map(m => m.id),
+        material_ids:    items.map((m: any) => m.id),
         idempotency_key: idempotencyKey,
       })
       const orderData = orderRes?.data?.data || orderRes?.data || {}
@@ -137,7 +163,7 @@ export default function MaterialsPaymentPage() {
       <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2">
         {unpaid.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-6">All materials are paid.</p>
-        ) : unpaid.map(m => {
+        ) : unpaid.map((m: any) => {
           const on = selected.includes(m.id)
           return (
             <button key={m.id} onClick={() => toggle(m.id)}

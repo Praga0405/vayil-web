@@ -1,7 +1,6 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useLiveJob } from '@/hooks/useVendorStudio'
 import { Button, Textarea, StatusBadge, PageLoader } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, CheckCircle, XCircle, FileText } from 'lucide-react'
@@ -9,13 +8,51 @@ import toast from 'react-hot-toast'
 import { customerApi } from '@/lib/api/client'
 import { demoOrLive } from '@/lib/demoMode'
 
+// Customer-side projection of the plan data: the canonical
+// /customers/projects/:id returns `{ project, plan: [row, row, ...] }`
+// where each plan row has plan_id / title / amount / percentage / days /
+// customer_status / vendor_status. We coerce into the shape the JSX
+// already uses (`job.milestones`).
+function adaptProject(payload: any) {
+  const project   = payload?.project ?? null
+  const planRows  = Array.isArray(payload?.plan) ? payload.plan : []
+  return {
+    id: project?.order_id ?? null,
+    title: project?.title ?? `Project #${project?.order_id ?? ''}`,
+    plan_status: planRows[0]?.customer_status === 'approved' ? 'APPROVED'
+                : planRows[0]?.customer_status === 'revision_requested' ? 'REVISION_REQUESTED'
+                : planRows.length ? 'SUBMITTED' : 'NOT_STARTED',
+    milestones: planRows.map((p: any) => ({
+      id: p.plan_id,
+      title: p.title,
+      description: p.description,
+      amount: Number(p.amount ?? 0),
+      days: Number(p.days ?? 0),
+      percentage: Number(p.percentage ?? 0),
+      status: (p.vendor_status || 'PENDING').toUpperCase(),
+      customer_status: p.customer_status,
+    })),
+  }
+}
+
 export default function CustomerPlanApprovalPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { data: job, loading, error } = useLiveJob(id)
-  const [reason, setReason] = useState('')
+  const [job, setJob]         = useState<ReturnType<typeof adaptProject> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState<string | null>(null)
+  const [reason, setReason]   = useState('')
   const [showReject, setShowReject] = useState(false)
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null)
+
+  useEffect(() => {
+    if (!id) return
+    setLoading(true); setError(null)
+    customerApi.getProjectDetail(id)
+      .then(r => { setJob(adaptProject(r.data)); })
+      .catch(e => setError(e?.response?.data?.message || 'Plan not found'))
+      .finally(() => setLoading(false))
+  }, [id])
 
   if (loading) return <PageLoader />
   if (!job)    return <div className="text-center py-20 text-gray-500">{error || 'Plan not found'}</div>
@@ -62,7 +99,7 @@ export default function CustomerPlanApprovalPage() {
       <div className="bg-white border border-gray-100 rounded-2xl p-5">
         <h2 className="text-base font-bold text-navy mb-4">Milestones</h2>
         <div className="space-y-3">
-          {job.milestones.map((m, i) => (
+          {job.milestones.map((m: any, i: number) => (
             <div key={m.id} className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
               <div className="w-7 h-7 rounded-full bg-orange/10 text-orange flex items-center justify-center text-xs font-bold shrink-0">
                 {i + 1}

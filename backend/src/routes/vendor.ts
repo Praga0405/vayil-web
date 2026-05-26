@@ -55,8 +55,26 @@ vendorRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
 
 vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) => {
   try {
-    const body = z.object({ amount: z.number(), message: z.string().optional(), estimatedDays: z.number().optional(), validUntil: z.string().optional() }).parse(req.body);
-    const result = await exec(`INSERT INTO quotation (enquiry_id, vendor_id, amount, message, estimated_days, valid_until, status, created_at) VALUES (:enquiryId, :vendorId, :amount, :message, :estimatedDays, :validUntil, 'sent', NOW())`, { ...body, enquiryId: req.params.id, vendorId: req.user!.id });
+    const body = z.object({
+      amount: z.number(),
+      message: z.string().optional(),
+      estimatedDays: z.number().optional(),
+      validUntil: z.string().optional(),
+    }).parse(req.body);
+    // Coerce undefined → null so mysql2 named-placeholders don't blow up.
+    const result = await exec(
+      `INSERT INTO quotation
+         (enquiry_id, vendor_id, amount, message, estimated_days, valid_until, status, created_at)
+       VALUES (:enquiryId, :vendorId, :amount, :message, :estimatedDays, :validUntil, 'sent', NOW())`,
+      {
+        enquiryId:     req.params.id,
+        vendorId:      req.user!.id,
+        amount:        body.amount,
+        message:       body.message       ?? null,
+        estimatedDays: body.estimatedDays ?? null,
+        validUntil:    body.validUntil    ?? null,
+      },
+    );
     await exec(`UPDATE enquiries SET status = 'quoted' WHERE enquiry_id = :id`, { id: req.params.id });
     ok(res, { quote: await one<any>('SELECT * FROM quotation WHERE quotation_id = :id', { id: result.insertId }) }, 201);
   } catch (err) { next(err); }
