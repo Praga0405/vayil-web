@@ -207,5 +207,15 @@ export async function signoffOrder(orderId: number | string, customerId: number 
       [orderId],
     );
   });
+  // Release every held payment_intent on this order — same behaviour as
+  // the canonical /customers/projects/:id/signoff route. Without this
+  // step the legacy /customer/finalStep path completes the project but
+  // never credits the vendor's wallet.
+  const { releaseEscrow } = await import('../routes/payments');
+  const intents = await query<any>(
+    `SELECT intent_id FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
+    { id: orderId },
+  );
+  for (const i of intents) await releaseEscrow(i.intent_id);
   return { order_id: Number(orderId), status: 'completed' };
 }

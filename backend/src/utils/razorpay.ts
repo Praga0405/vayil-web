@@ -50,11 +50,25 @@ export async function createRazorpayOrder(args: CreateOrderArgs): Promise<{
  * Verify the HMAC SHA256 signature Razorpay sends on payment success.
  * Returns true if the signature matches `<order_id>|<payment_id>`.
  */
+let warnedBypass = false;
 export function verifyRazorpaySignature(orderId: string, paymentId: string, signature: string): boolean {
   const keySecret = (config as any).razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET;
-  if (!keySecret) {
-    // In dev: accept the signature as long as it's a non-empty string. NEVER
-    // reach this branch in production — the env var must be set.
+  const explicitBypass = process.env.PAYMENT_VERIFY_BYPASS === 'true';
+  // Two ways to enter dev-bypass mode:
+  //   1. No RAZORPAY_KEY_SECRET configured (typical local dev)
+  //   2. PAYMENT_VERIFY_BYPASS=true explicitly set (smoke tests, staging
+  //      with no Razorpay test creds yet)
+  // Both routes accept any non-empty signature string. A clear warning
+  // is logged exactly once per process so this is impossible to enable
+  // accidentally in production without seeing it in the logs.
+  if (!keySecret || explicitBypass) {
+    if (!warnedBypass) {
+      // eslint-disable-next-line no-console
+      console.warn('[razorpay] SIGNATURE VERIFICATION BYPASS ACTIVE — ' +
+        (explicitBypass ? 'PAYMENT_VERIFY_BYPASS=true' : 'RAZORPAY_KEY_SECRET is unset') +
+        '. Never run this configuration in production.');
+      warnedBypass = true;
+    }
     return !!signature;
   }
   const expected = crypto

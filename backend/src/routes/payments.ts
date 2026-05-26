@@ -284,6 +284,18 @@ paymentsRouter.post('/verify',
               [intent.amount, intent.enquiry_id],
             );
           }
+          // Backfill payment_intents.order_id + escrow_ledger.order_id
+          // so releaseEscrow on signoff finds this intent (was leaving
+          // both NULL on quote payments → vendor wallet never credited).
+          const [orderRow]: any = await conn.query(
+            `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
+            [intent.enquiry_id],
+          );
+          const newOrderId = Array.isArray(orderRow) ? orderRow[0]?.order_id : null;
+          if (newOrderId) {
+            await conn.query(`UPDATE payment_intents SET order_id = ? WHERE intent_id = ?`, [newOrderId, intent.intent_id]);
+            await conn.query(`UPDATE escrow_ledger SET order_id = ? WHERE intent_id = ? AND order_id IS NULL`, [newOrderId, intent.intent_id]);
+          }
         }
         // Materials → flip rows to PAID.
         if (intent.purpose === 'materials' && intent.material_ids) {

@@ -399,16 +399,10 @@ legacyCustomerRouter.post('/upload_files',
   upload.any(),
   async (req: AuthRequest, res, next) => {
     try {
+      const { uploadFiles } = await import('../utils/uploads');
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
-      const urls = files.map((f) => ({
-        field: f.fieldname,
-        filename: f.originalname,
-        size: f.size,
-        mimetype: f.mimetype,
-        // For prod, replace with S3/Cloudinary upload; this stub keeps the
-        // round-trip working without an external dep.
-        url: `data:${f.mimetype};base64,${f.buffer.toString('base64').slice(0, 32)}…`,
-      }));
+      const urls = await uploadFiles(files as any, { prefix: `customer-${req.user!.id}` });
+      // Mobile parses both `data` (array) and root-level `urls` for back-compat.
       send(res, { message: 'Uploaded', data: urls, urls });
     } catch (err) { next(err); }
   },

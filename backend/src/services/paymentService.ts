@@ -210,6 +210,18 @@ export async function verifyAndHold(b: VerifyInput) {
           [intent.amount, intent.enquiry_id],
         );
       }
+      // Backfill payment_intents.order_id + escrow_ledger.order_id so
+      // releaseEscrow can find this intent later (was previously left
+      // NULL → finalStep never credited the vendor wallet).
+      const [orderRow]: any = await conn.query(
+        `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
+        [intent.enquiry_id],
+      );
+      const newOrderId = Array.isArray(orderRow) ? orderRow[0]?.order_id : null;
+      if (newOrderId) {
+        await conn.query(`UPDATE payment_intents SET order_id = ? WHERE intent_id = ?`, [newOrderId, intent.intent_id]);
+        await conn.query(`UPDATE escrow_ledger SET order_id = ? WHERE intent_id = ? AND order_id IS NULL`, [newOrderId, intent.intent_id]);
+      }
     }
     if (intent.purpose === 'materials' && intent.material_ids) {
       const ids = JSON.parse(intent.material_ids);

@@ -48,15 +48,25 @@ export async function updateMaterial(orderId: number | string, materialId: numbe
     { id: materialId, oid: orderId },
   );
   if (!cur) throw new ApiError(404, 'Material not found');
-  const merged = { ...cur, ...m } as any;
-  const total = Number((Number(merged.quantity) * Number(merged.rate)).toFixed(2));
+  // Strip undefined keys from `m` before merging so we don't blow away
+  // current values when the caller omitted a field. (mysql2 also rejects
+  // bound undefined; this protects both paths.)
+  const patch: any = {};
+  for (const [k, v] of Object.entries(m)) if (v !== undefined) patch[k] = v;
+  const merged = { ...cur, ...patch } as any;
+  const total = Number((Number(merged.quantity ?? 1) * Number(merged.rate ?? 0)).toFixed(2));
   await exec(
     `UPDATE materials SET name = :name, quantity = :qty, unit = :unit, rate = :rate,
                            total = :total, status = :status
        WHERE material_id = :id`,
     {
-      id: materialId, name: merged.name, qty: merged.quantity, unit: merged.unit,
-      rate: merged.rate, total, status: merged.status,
+      id: materialId,
+      name:   merged.name   ?? null,
+      qty:    Number(merged.quantity ?? 1),
+      unit:   merged.unit   ?? 'pc',
+      rate:   Number(merged.rate ?? 0),
+      total,
+      status: merged.status ?? 'UNPAID',
     },
   );
   return getMaterial(materialId);
