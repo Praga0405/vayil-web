@@ -58,8 +58,14 @@ export async function getVendorTransactions(vendorId: number | string, opts: { c
     where.push("YEAR(created_at) = YEAR(NOW()) AND MONTH(created_at) = MONTH(NOW())");
   }
   const rows = await query<any>(
-    `SELECT entry_id AS id, intent_id, order_id, vendor_id, amount,
-            reason       AS type,
+    `SELECT entry_id     AS id,
+            intent_id, order_id, vendor_id, amount,
+            'CREDIT'     AS type,
+            reason       AS reason,
+            CONCAT('Escrow release · ',
+              COALESCE(NULLIF(reason, ''), 'milestone'),
+              COALESCE(CONCAT(' · Order #', order_id), '')
+            ) AS description,
             'released'   AS status,
             created_at
        FROM escrow_ledger

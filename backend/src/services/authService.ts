@@ -33,6 +33,23 @@ export async function verifyOtpAndIssueToken(opts: {
     { phone },
   );
   if (!user) {
+    // Phone uniqueness across roles: refuse to create a vendor account
+    // for a phone already registered as a customer (and vice versa).
+    // A returning user must use the role they originally signed up
+    // with. Existing users (already in the same `table`) are fine —
+    // they just sign back in.
+    const otherTable = userType === 'customer' ? 'vendors'   : 'customers';
+    const otherRole  = userType === 'customer' ? 'vendor'    : 'customer';
+    const collision  = await one<any>(
+      `SELECT 1 AS hit FROM ${otherTable}
+        WHERE phone = :phone OR mobile = :phone LIMIT 1`,
+      { phone },
+    );
+    if (collision) {
+      throw new ApiError(409,
+        `This phone is already registered as a ${otherRole}. Sign in with that role instead, or use a different phone for the new ${userType} account.`,
+      );
+    }
     const result: any = await exec(
       `INSERT INTO ${table} (name, phone, mobile, status, created_at)
        VALUES (:name, :phone, :phone, :status, NOW())`,

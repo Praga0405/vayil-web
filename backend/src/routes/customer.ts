@@ -306,6 +306,13 @@ customerRouter.post('/projects/:id/signoff', async (req: AuthRequest, res, next)
         `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
         [req.params.id],
       );
+      // Flip the parent enquiry so the vendor's Enquiries → Completed
+      // tab populates (matches projectService.signoffOrder).
+      await conn.query(
+        `UPDATE enquiries e JOIN orders o ON o.enquiry_id = e.enquiry_id
+            SET e.status = 'completed' WHERE o.order_id = ?`,
+        [req.params.id],
+      );
     });
 
     // Release any held escrow for this order.

@@ -196,6 +196,16 @@ export async function signoffOrder(orderId: number | string, customerId: number 
       [orderId, customerId, rating ?? null, comment ?? null],
     );
     await conn.query(`UPDATE orders SET status = 'completed' WHERE order_id = ?`, [orderId]);
+    // Also flip the parent enquiry so the vendor's Enquiries → Completed
+    // tab populates. Without this the enquiry sits at 'accepted'/'quoted'
+    // forever and the Completed tab is always empty even after signoff.
+    await conn.query(
+      `UPDATE enquiries e
+          JOIN orders o ON o.enquiry_id = e.enquiry_id
+          SET e.status = 'completed'
+        WHERE o.order_id = ?`,
+      [orderId],
+    );
   });
   return { order_id: Number(orderId), status: 'completed' };
 }

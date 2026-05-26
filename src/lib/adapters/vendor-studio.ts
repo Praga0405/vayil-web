@@ -75,12 +75,18 @@ export function adaptJob(
   plan: BackendOrderPlan[] = [],
   extra?: { escrow?: { held?: number; released?: number; total?: number } } | null,
 ): MockJob {
-  const total = Number(order.amount ?? 0)
+  // `order.amount` is the original quote total — does NOT include any
+  // materials the customer paid for separately. To stop the vendor card
+  // showing "127% paid" once materials clear, use the larger of
+  // (originally-agreed amount, total in escrow). This still flags a
+  // pre-payment that exceeds the quote (rare, paid into escrow ahead
+  // of time) as 100% rather than negative-remaining.
+  const baseTotal = Number(order.amount ?? 0)
   const milestones: MockMilestone[] = plan.map(p => ({
     id:          p.plan_id,
     title:       p.title ?? 'Milestone',
     days:        0,
-    percentage:  total > 0 ? Math.round((Number(p.amount ?? 0) / total) * 100) : 0,
+    percentage:  baseTotal > 0 ? Math.round((Number(p.amount ?? 0) / baseTotal) * 100) : 0,
     amount:      Number(p.amount ?? 0),
     mandatory:   true,
     status:      statusToMilestone(p.vendor_status, p.customer_status),
@@ -98,6 +104,10 @@ export function adaptJob(
     ? escrowTotal
     : milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID')
                          .reduce((s, m) => s + m.amount, 0)
+  // Effective project total = max(originally-agreed, paid). Stops the
+  // progress bar exceeding 100% once materials are paid into escrow on
+  // top of the base quote.
+  const total = Math.max(baseTotal, paid)
   // Plan-status mapping precedence (most-urgent first):
   //   any milestone with revision_requested → REVISION_REQUESTED
   //   any milestone with pending             → SUBMITTED

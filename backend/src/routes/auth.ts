@@ -24,20 +24,14 @@ const verifyOtpSchema = z.object({ phone: z.string().min(8), otp: z.string().min
 authRouter.post('/otp/verify', async (req, res, next) => {
   try {
     const body = verifyOtpSchema.parse(req.body);
-    await verifyOtp(body.phone, `${body.userType}_login`, body.otp);
-    const table = body.userType === 'customer' ? 'customers' : 'vendors';
-    const idCol = body.userType === 'customer' ? 'customer_id' : 'vendor_id';
-    const name = body.name || (body.userType === 'customer' ? 'Customer' : 'Vendor');
-    let user = await one<any>(`SELECT * FROM ${table} WHERE phone = :phone OR mobile = :phone LIMIT 1`, { phone: body.phone });
-    if (!user) {
-      const result = await exec(
-        `INSERT INTO ${table} (name, phone, mobile, status, created_at) VALUES (:name, :phone, :phone, :status, NOW())`,
-        { name, phone: body.phone, status: body.userType === 'vendor' ? 'pending' : 'active' }
-      );
-      user = await one<any>(`SELECT * FROM ${table} WHERE ${idCol} = :id`, { id: result.insertId });
-    }
-    const token = signToken({ id: user[idCol], userType: body.userType });
-    ok(res, { token, userType: body.userType, user });
+    // Delegate to authService so the cross-role phone-uniqueness check
+    // (v4.3) applies here too. Keeps the canonical web path and the
+    // legacy mobile shim path on the same code path.
+    const { verifyOtpAndIssueToken } = await import('../services/authService');
+    const out = await verifyOtpAndIssueToken({
+      phone: body.phone, otp: body.otp, userType: body.userType, name: body.name,
+    });
+    ok(res, { token: out.token, userType: out.userType, user: out.user });
   } catch (err) { next(err); }
 });
 
