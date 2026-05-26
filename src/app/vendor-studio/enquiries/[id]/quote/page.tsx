@@ -43,13 +43,13 @@ export default function SendQuotePage() {
   }
 
   return (
-    <div className="space-y-5 pb-10 max-w-xl">
+    <div className="max-w-3xl mx-auto space-y-6 pb-10">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
         <ChevronLeft className="w-4 h-4" /> Back
       </button>
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-xl font-bold text-navy">Send Quote</h1>
+      <div className="bg-white border border-gray-100 rounded-2xl p-6">
+        <h1 className="text-2xl font-bold text-navy">Send Quote</h1>
         <p className="text-sm text-gray-500 mt-1">For <span className="font-semibold">{enquiry.customer_name}</span> — {enquiry.service_title}</p>
       </div>
 

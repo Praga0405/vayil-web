@@ -1,14 +1,16 @@
 'use client'
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
+import axios from 'axios'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
 import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, StatGrid, FieldGrid } from '@/components/shared/PageLayout'
-import { Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight } from 'lucide-react'
+import { Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight, Star } from 'lucide-react'
+import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-type Tab = 'profile' | 'services'
+type Tab = 'profile' | 'services' | 'reviews'
 
 export default function VendorListingPage() {
   const { user, setAuth, token } = useUserAuth()
@@ -23,6 +25,23 @@ export default function VendorListingPage() {
   /* ── Services state ── */
   const [services, setServices] = useState<any[]>([])
   const [svcLoading, setSvcLoading] = useState(false)
+
+  /* ── Reviews state (mobile + web parity) ── */
+  const [reviews, setReviews]       = useState<any[]>([])
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const loadReviews = () => {
+    if (!token) return
+    setReviewsLoading(true)
+    // Hits the legacy mobile shim /vendor/vendorlistReviews — same data
+    // the Flutter app reads. Falls back to empty list on any error.
+    const base = process.env.NEXT_PUBLIC_API_URL || ''
+    axios.post(`${base}/vendor/vendorlistReviews`, new URLSearchParams({_:'1'}),
+               { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => setReviews(Array.isArray(r.data?.data) ? r.data.data : []))
+      .catch(() => setReviews([]))
+      .finally(() => setReviewsLoading(false))
+  }
+  useEffect(() => { if (tab === 'reviews') loadReviews() }, [tab, token])
 
   useEffect(() => {
     if (!token) return
@@ -98,13 +117,15 @@ export default function VendorListingPage() {
         title="My Listing"
         subtitle="Manage your business profile and the services you offer"
         meta={
-          <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 max-w-md">
-            {(['profile', 'services'] as Tab[]).map(t => (
+          <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 max-w-2xl">
+            {(['profile', 'services', 'reviews'] as Tab[]).map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
                   tab === t ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
                 }`}>
-                {t === 'profile' ? 'Business Profile' : `My Services${services.length ? ` (${services.length})` : ''}`}
+                {t === 'profile'  ? 'Business Profile'
+                 : t === 'services' ? `My Services${services.length ? ` (${services.length})` : ''}`
+                 :                    `Reviews${reviews.length ? ` (${reviews.length})` : ''}`}
               </button>
             ))}
           </div>
@@ -238,6 +259,42 @@ export default function VendorListingPage() {
                   )
                 })}
               </div>
+            )}
+          </PageSection>
+        </div>
+      )}
+
+      {tab === 'reviews' && (
+        <div className="space-y-6">
+          <PageSection title="Customer reviews"
+                       description="Verified reviews from completed jobs. Your overall rating is computed from these.">
+            {reviewsLoading ? (
+              <PageLoader />
+            ) : reviews.length === 0 ? (
+              <EmptyState icon={Star} title="No reviews yet"
+                          description="Once customers sign off completed projects and leave a review, they'll show up here." />
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {reviews.map((r: any) => (
+                  <li key={r.review_id} className="py-4 flex items-start gap-4">
+                    <Avatar name={r.customer_name} src={r.customer_image} size={12} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-semibold text-navy">{r.customer_name || `Customer #${r.customer_id}`}</p>
+                        <div className="flex">
+                          {[1,2,3,4,5].map(n => (
+                            <Star key={n}
+                                  className={`w-4 h-4 ${n <= Number(r.rating ?? 0) ? 'fill-orange text-orange' : 'text-gray-300'}`} />
+                          ))}
+                        </div>
+                        <span className="text-xs text-gray-400 ml-auto">{formatDate(r.created_at)}</span>
+                      </div>
+                      {r.title && <p className="font-semibold text-sm text-navy">{r.title}</p>}
+                      {r.comment && <p className="text-sm text-gray-600 mt-1 leading-relaxed">{r.comment}</p>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </PageSection>
         </div>

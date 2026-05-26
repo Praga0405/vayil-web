@@ -47,8 +47,28 @@ vendorRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
 
 vendorRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
   try {
-    const enquiry = await one<any>('SELECT * FROM enquiries WHERE enquiry_id = :id AND vendor_id = :vendorId', { id: req.params.id, vendorId: req.user!.id });
-    const quotes = await query<any>('SELECT * FROM quotation WHERE enquiry_id = :id AND vendor_id = :vendorId', { id: req.params.id, vendorId: req.user!.id });
+    // Join the customer so the vendor sees a real name (not "Customer #11").
+    // Phone is revealed once the vendor has accepted the enquiry — before
+    // that we mask it to discourage off-platform contact.
+    const enquiry = await one<any>(
+      `SELECT e.*,
+              c.name      AS customer_name,
+              c.email     AS customer_email,
+              c.city      AS customer_city,
+              c.profile_image AS customer_profile_image,
+              CASE WHEN e.status IN ('accepted','quoted','active','completed')
+                   THEN COALESCE(c.phone, c.mobile)
+                   ELSE NULL
+              END         AS customer_phone
+         FROM enquiries e
+         LEFT JOIN customers c ON c.customer_id = e.customer_id
+        WHERE e.enquiry_id = :id AND e.vendor_id = :vendorId`,
+      { id: req.params.id, vendorId: req.user!.id },
+    );
+    const quotes = await query<any>(
+      'SELECT * FROM quotation WHERE enquiry_id = :id AND vendor_id = :vendorId',
+      { id: req.params.id, vendorId: req.user!.id },
+    );
     ok(res, { enquiry, quotes });
   } catch (err) { next(err); }
 });
@@ -86,9 +106,32 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
 
 vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
   try {
-    const project = await one<any>('SELECT * FROM orders WHERE order_id = :id AND vendor_id = :vendorId', { id: req.params.id, vendorId: req.user!.id });
-    const plan = await query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: req.params.id });
-    ok(res, { project, plan });
+    const project = await one<any>(
+      `SELECT o.*, c.name AS customer_name, c.profile_image AS customer_profile_image
+         FROM orders o
+         LEFT JOIN customers c ON c.customer_id = o.customer_id
+        WHERE o.order_id = :id AND o.vendor_id = :vendorId`,
+      { id: req.params.id, vendorId: req.user!.id },
+    );
+    const plan = await query<any>(
+      'SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC',
+      { id: req.params.id },
+    );
+    // Roll up payment_intents so the vendor's dashboard shows
+    // "Paid in escrow" rather than ₹0 until milestones complete.
+    const intents = await query<any>(
+      `SELECT amount, status, purpose FROM payment_intents
+        WHERE order_id = :id AND status IN ('escrow_held','released')`,
+      { id: req.params.id },
+    );
+    const escrow_held    = intents.filter((i: any) => i.status === 'escrow_held')
+                                  .reduce((s: number, i: any) => s + Number(i.amount), 0);
+    const escrow_released = intents.filter((i: any) => i.status === 'released')
+                                  .reduce((s: number, i: any) => s + Number(i.amount), 0);
+    ok(res, {
+      project, plan,
+      escrow: { held: escrow_held, released: escrow_released, total: escrow_held + escrow_released },
+    });
   } catch (err) { next(err); }
 });
 
@@ -103,7 +146,26 @@ vendorRouter.post('/kyc', async (req: AuthRequest, res, next) => {
 vendorRouter.get('/earnings', async (req: AuthRequest, res, next) => {
   try {
     const wallet = await one<any>('SELECT * FROM vendor_wallet WHERE vendor_id = :id', { id: req.user!.id });
-    const transactions = await query<any>('SELECT * FROM vendor_transactions WHERE vendor_id = :id ORDER BY id DESC LIMIT 50', { id: req.user!.id });
+    // Source transactions from the canonical escrow_ledger (released
+    // rows) so the customer sign-off → wallet credit is visible
+    // immediately. Falls back to the legacy vendor_transactions table
+    // for older vendors who pre-date v4.0.
+    const ledgerTxns = await query<any>(
+      `SELECT entry_id AS id, intent_id, order_id, vendor_id, amount,
+              reason       AS type,
+              'released'   AS status,
+              created_at
+         FROM escrow_ledger
+        WHERE vendor_id = :id AND direction = 'release'
+        ORDER BY entry_id DESC LIMIT 50`,
+      { id: req.user!.id },
+    );
+    const transactions = ledgerTxns.length
+      ? ledgerTxns
+      : await query<any>(
+          'SELECT * FROM vendor_transactions WHERE vendor_id = :id ORDER BY id DESC LIMIT 50',
+          { id: req.user!.id },
+        );
     ok(res, { wallet, transactions });
   } catch (err) { next(err); }
 });

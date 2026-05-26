@@ -156,9 +156,10 @@ export function useLiveJob(id: string | number | undefined): State<MockJob | nul
         if (cancelled) return
         const project = projRes?.data?.data?.project ?? projRes?.data?.project
         const plan    = projRes?.data?.data?.plan ?? projRes?.data?.plan ?? []
+        const escrow  = projRes?.data?.data?.escrow ?? projRes?.data?.escrow ?? null
         const materials = matRes?.data?.data?.materials ?? matRes?.data?.materials ?? []
         if (!project) throw new Error('Project not found')
-        const job = adaptJob(project, plan)
+        const job = adaptJob(project, plan, { escrow })
         // Map materials (backend shape) to MockMaterial.
         job.materials = (Array.isArray(materials) ? materials : []).map((m: any) => ({
           id: m.material_id, name: m.name,

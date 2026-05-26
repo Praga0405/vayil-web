@@ -56,8 +56,8 @@ export default function VendorJobDetailPage() {
         columns={4}
         items={[
           { label: 'Total value',       value: formatCurrency(job.total),   icon: IndianRupee, accent: 'navy' },
-          { label: 'Paid so far',       value: formatCurrency(job.paid),    icon: CheckCircle2, accent: 'green' },
-          { label: 'Pending payment',   value: formatCurrency(job.pending), icon: Clock, accent: 'orange' },
+          { label: 'Paid (in escrow)',  value: formatCurrency(job.paid),    icon: CheckCircle2, accent: 'green' },
+          { label: 'Awaiting payment',  value: formatCurrency(job.pending), icon: Clock, accent: 'orange' },
           { label: 'Milestones done',   value: `${doneMilestones} / ${job.milestones.length}`, icon: Briefcase, accent: 'plain' },
         ]}
       />

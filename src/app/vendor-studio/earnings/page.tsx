@@ -15,7 +15,7 @@ export default function VendorStudioEarningsPage() {
   const maxChart = 1
 
   return (
-    <div className="space-y-5 pb-10">
+    <div className="max-w-5xl mx-auto space-y-5 pb-10">
       <div className="bg-white border border-gray-100 rounded-2xl p-5">
         <h1 className="text-2xl font-bold text-navy">Earnings</h1>
         <p className="text-sm text-gray-500 mt-1">Track your income and payouts</p>

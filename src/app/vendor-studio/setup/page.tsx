@@ -83,9 +83,9 @@ export default function VendorStudioSetupPage() {
   const kycStatus = profile?.kyc_status || profile?.vendor_status
 
   return (
-    <div className="space-y-5 pb-10 max-w-xl">
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-2xl font-bold text-navy">KYC & Bank Setup</h1>
+    <div className="max-w-3xl mx-auto space-y-6 pb-10">
+      <div className="bg-white border border-gray-100 rounded-2xl p-6">
+        <h1 className="text-2xl font-bold text-navy">KYC &amp; Bank Setup</h1>
         <p className="text-sm text-gray-500 mt-1">Complete verification to receive payments</p>
       </div>
 

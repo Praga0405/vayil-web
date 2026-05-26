@@ -50,16 +50,35 @@ export async function listPayouts(vendorId: number | string, limit = 50) {
 }
 
 export async function getVendorTransactions(vendorId: number | string, opts: { currentMonth?: boolean; limit?: number } = {}) {
-  const where = ['vendor_id = :id'];
+  // Canonical source is escrow_ledger (post-v4). vendor_transactions is
+  // a legacy table that older mobile flows used to write into; reading
+  // from the ledger means signoff-driven releases show up immediately.
+  const where = ['vendor_id = :id', "direction = 'release'"];
   if (opts.currentMonth) {
     where.push("YEAR(created_at) = YEAR(NOW()) AND MONTH(created_at) = MONTH(NOW())");
   }
-  return query<any>(
-    `SELECT * FROM vendor_transactions
+  const rows = await query<any>(
+    `SELECT entry_id AS id, intent_id, order_id, vendor_id, amount,
+            reason       AS type,
+            'released'   AS status,
+            created_at
+       FROM escrow_ledger
       WHERE ${where.join(' AND ')}
-      ORDER BY id DESC LIMIT :limit`,
+      ORDER BY entry_id DESC
+      LIMIT :limit`,
     { id: vendorId, limit: opts.limit ?? 100 },
   );
+  // Fall back to the legacy vendor_transactions table if the new ledger
+  // is empty — keeps backwards compat for vendors who pre-date v4.0.
+  if (rows.length > 0) return rows;
+  const legacy = await query<any>(
+    `SELECT * FROM vendor_transactions
+       WHERE vendor_id = :id
+        ${opts.currentMonth ? "AND YEAR(created_at) = YEAR(NOW()) AND MONTH(created_at) = MONTH(NOW())" : ''}
+       ORDER BY id DESC LIMIT :limit`,
+    { id: vendorId, limit: opts.limit ?? 100 },
+  );
+  return legacy;
 }
 
 export async function getRevenueChart(vendorId: number | string, months = 6) {

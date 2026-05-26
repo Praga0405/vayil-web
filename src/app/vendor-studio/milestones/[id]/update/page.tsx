@@ -49,13 +49,13 @@ export default function MilestoneUpdatePage() {
   }
 
   return (
-    <div className="space-y-5 pb-10 max-w-md">
+    <div className="max-w-3xl mx-auto space-y-6 pb-10">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
         <ChevronLeft className="w-4 h-4" /> Back
       </button>
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-xl font-bold text-navy">Post milestone update</h1>
+      <div className="bg-white border border-gray-100 rounded-2xl p-6">
+        <h1 className="text-2xl font-bold text-navy">Post milestone update</h1>
         <p className="text-sm text-gray-500 mt-1">Share progress with photos and a short comment so the customer sees what&apos;s happening.</p>
       </div>
 

@@ -21,7 +21,7 @@ export default function VendorDashboardPage() {
   const pending       = ongoing.reduce((s, j) => s + j.pending, 0)
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="max-w-5xl mx-auto space-y-6 pb-10">
       <PageHero
         title={`Hi, ${user?.name?.split(' ')[0] || 'Vendor'} 👋`}
         subtitle="Here's what's happening today across your enquiries and jobs."

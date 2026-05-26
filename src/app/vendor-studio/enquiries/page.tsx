@@ -15,7 +15,7 @@ export default function VendorEnquiriesListPage() {
   const filtered = enquiries.filter(e => e.status === tab)
 
   return (
-    <div className="space-y-5 pb-10">
+    <div className="max-w-5xl mx-auto space-y-5 pb-10">
       <PageHero
         title="Enquiries"
         subtitle="Customer requests — accept, quote, or reject."

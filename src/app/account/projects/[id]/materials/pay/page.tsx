@@ -150,67 +150,78 @@ export default function MaterialsPaymentPage() {
   }
 
   return (
-    <div className="space-y-5 pb-10 max-w-md">
+    <div className="max-w-5xl mx-auto space-y-6 pb-10">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
         <ChevronLeft className="w-4 h-4" /> Back to Project
       </button>
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <h1 className="text-xl font-bold text-navy">Pay for Materials</h1>
-        <p className="text-sm text-gray-500 mt-1">Select items the vendor needs you to fund now.</p>
+      <div className="bg-white border border-gray-100 rounded-2xl p-6">
+        <h1 className="text-2xl font-bold text-navy">Pay for Materials</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Select the items the vendor needs you to fund now. Held in escrow until each item is procured.
+        </p>
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2">
-        {unpaid.length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-6">All materials are paid.</p>
-        ) : unpaid.map((m: any) => {
-          const on = selected.includes(m.id)
-          return (
-            <button key={m.id} onClick={() => toggle(m.id)}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
-                on ? 'border-orange bg-orange/5' : 'border-gray-200 hover:border-gray-300'
-              }`}>
-              <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${on ? 'bg-orange border-orange' : 'border-gray-300'}`}>
-                {on && <span className="text-white text-xs">✓</span>}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-navy">{m.name}</p>
-                <p className="text-xs text-gray-500">{m.quantity} {m.unit} × {formatCurrency(m.rate)}</p>
-              </div>
-              <StatusBadge status={m.status} />
-              <span className="text-sm font-bold text-navy ml-2">{formatCurrency(m.total)}</span>
-            </button>
-          )
-        })}
+      {/* Two-column workspace: list on the left, payment summary sticky on the right. */}
+      <div className="grid lg:grid-cols-[1fr,340px] gap-6 items-start">
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2">
+          {unpaid.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-6">All materials are paid.</p>
+          ) : unpaid.map((m: any) => {
+            const on = selected.includes(m.id)
+            return (
+              <button key={m.id} type="button" onClick={() => toggle(m.id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
+                  on ? 'border-orange bg-orange/5' : 'border-gray-200 hover:border-gray-300'
+                }`}>
+                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${on ? 'bg-orange border-orange' : 'border-gray-300'}`}>
+                  {on && <span className="text-white text-xs leading-none">✓</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-navy truncate">{m.name}</p>
+                  <p className="text-xs text-gray-500">{m.quantity} {m.unit} × {formatCurrency(m.rate)}</p>
+                </div>
+                <StatusBadge status={m.status} />
+                <span className="text-sm font-bold text-navy ml-2 shrink-0">{formatCurrency(m.total)}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="space-y-4 lg:sticky lg:top-24">
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2 text-sm">
+            <h3 className="font-bold text-navy mb-1">Payment summary</h3>
+            <Row label="Subtotal"            value={formatCurrency(fees.base)} />
+            <Row label="Platform Fee (5%)"   value={formatCurrency(fees.platformFee)} />
+            <Row label="GST (18%)"           value={formatCurrency(fees.gst)} />
+            <div className="h-px bg-gray-100 my-2" />
+            <Row label="Total Payable"       value={formatCurrency(fees.total)} bold />
+          </div>
+
+          <div className="bg-navy/5 border border-navy/10 rounded-2xl p-4 flex gap-3">
+            <Lock className="w-4 h-4 text-navy shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-navy">Funds held in escrow</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Released to the vendor as each material is procured and verified.
+              </p>
+            </div>
+          </div>
+
+          {payError && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-700">
+              {payError}
+            </div>
+          )}
+
+          <Button full loading={submitting} onClick={pay} disabled={items.length === 0}>
+            <CreditCard className="w-4 h-4" />
+            {payError ? 'Retry payment'
+              : items.length === 0 ? 'Select items to pay'
+              : `Pay ${formatCurrency(fees.total)}`}
+          </Button>
+        </div>
       </div>
-
-      {items.length > 0 && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2 text-sm">
-          <Row label="Subtotal"            value={formatCurrency(fees.base)} />
-          <Row label="Platform Fee (5%)"   value={formatCurrency(fees.platformFee)} />
-          <Row label="GST (18%)"           value={formatCurrency(fees.gst)} />
-          <div className="h-px bg-gray-100 my-2" />
-          <Row label="Total Payable"       value={formatCurrency(fees.total)} bold />
-        </div>
-      )}
-
-      <div className="bg-navy/5 border border-navy/10 rounded-2xl p-4 flex gap-3">
-        <Lock className="w-4 h-4 text-navy shrink-0 mt-0.5" />
-        <div>
-          <p className="text-sm font-semibold text-navy">Funds held in escrow</p>
-          <p className="text-xs text-gray-500 mt-0.5">Released to the vendor as each material is procured and verified.</p>
-        </div>
-      </div>
-
-      {payError && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-700">
-          {payError}
-        </div>
-      )}
-
-      <Button full loading={submitting} onClick={pay} disabled={items.length === 0}>
-        <CreditCard className="w-4 h-4" /> {payError ? 'Retry payment' : `Pay ${fees.total > 0 ? formatCurrency(fees.total) : ''}`}
-      </Button>
     </div>
   )
 }

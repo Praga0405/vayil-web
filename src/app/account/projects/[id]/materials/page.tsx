@@ -97,7 +97,7 @@ export default function CustomerMaterialsPage() {
   if (state.loading) return <PageLoader />
 
   return (
-    <div className="space-y-5 pb-10">
+    <div className="max-w-5xl mx-auto space-y-5 pb-10">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
         <ChevronLeft className="w-4 h-4" /> Back to Project
       </button>

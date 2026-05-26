@@ -10,7 +10,7 @@ import { PageHero } from '@/components/shared/PageLayout'
 export default function VendorJobsListPage() {
   const { data: jobs, loading } = useLiveJobs()
   return (
-    <div className="space-y-5 pb-10">
+    <div className="max-w-5xl mx-auto space-y-5 pb-10">
       <PageHero
         title="Ongoing Jobs"
         subtitle={`${jobs.length} active project${jobs.length !== 1 ? 's' : ''} — plans, materials, and payment requests.`}

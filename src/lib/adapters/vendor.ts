@@ -122,7 +122,10 @@ export function adaptVendorDetail(
     rating:          rating > 0 ? rating : 4.5,
     review_count:    reviews.length,
     starting_price:  startingPrice,
-    response_time:   'Replies within 1 hour',
+    // Stored without the "Replies" / "Responds" verb prefix so consumers
+    // can compose their own sentence (Responds X, Replies X) without
+    // ending up with "Responds Replies within 1 hour".
+    response_time:   'within 1 hour',
     availability:    'Available this week',
     kyc_verified:    verified,
     top_rated:       rating >= 4.5,

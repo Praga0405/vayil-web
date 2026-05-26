@@ -49,11 +49,14 @@ function statusToMilestone(vendor?: string | null, customer?: string | null): Mo
   return 'PENDING'
 }
 
-export function adaptEnquiry(row: BackendEnquiry): MockEnquiry {
+export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | null }): MockEnquiry {
   return {
     id:               row.enquiry_id,
     customer_name:    row.customer_name ?? `Customer #${row.customer_id}`,
-    customer_mobile:  row.customer_mobile ?? '',
+    // Backend reveals customer_phone only after the vendor accepts the
+    // enquiry; before that it returns null so we show "—" instead of
+    // an empty +91.
+    customer_mobile:  row.customer_phone ?? row.customer_mobile ?? '',
     service_title:    row.category ?? 'Home Service',
     category_name:    row.category ?? 'Service',
     location:         row.location ?? '',
@@ -67,7 +70,11 @@ export function adaptEnquiry(row: BackendEnquiry): MockEnquiry {
   }
 }
 
-export function adaptJob(order: BackendOrder, plan: BackendOrderPlan[] = []): MockJob {
+export function adaptJob(
+  order: BackendOrder,
+  plan: BackendOrderPlan[] = [],
+  extra?: { escrow?: { held?: number; released?: number; total?: number } } | null,
+): MockJob {
   const total = Number(order.amount ?? 0)
   const milestones: MockMilestone[] = plan.map(p => ({
     id:          p.plan_id,
@@ -79,7 +86,15 @@ export function adaptJob(order: BackendOrder, plan: BackendOrderPlan[] = []): Mo
     status:      statusToMilestone(p.vendor_status, p.customer_status),
     updates:     [],
   }))
-  const paid = milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID')
+  // Prefer the server-rolled escrow totals (added with v4.x) so the
+  // vendor sees the customer's advance as "Paid (in escrow)" rather than
+  // ₹0 until each milestone individually completes.
+  const escrowHeld     = Number(extra?.escrow?.held ?? 0);
+  const escrowReleased = Number(extra?.escrow?.released ?? 0);
+  const escrowTotal    = escrowHeld + escrowReleased;
+  const paid = escrowTotal > 0
+    ? escrowTotal
+    : milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID')
                          .reduce((s, m) => s + m.amount, 0)
   // Plan-status mapping precedence (most-urgent first):
   //   any milestone with revision_requested → REVISION_REQUESTED

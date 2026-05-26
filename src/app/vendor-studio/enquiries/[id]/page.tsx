@@ -46,66 +46,82 @@ export default function VendorEnquiryDetailPage() {
     } finally { setPending(null) }
   }
 
+  // Normalise status to lower-case for badge; "unknown" sneaks in when
+  // upstream returns null / undefined. Default to NEW until the live data
+  // returns something explicit.
+  const displayStatus = (localStatus || 'new').toString().toUpperCase()
+  const contactValue  = enquiry.customer_mobile
+    ? `+91 ${enquiry.customer_mobile}`
+    : 'Revealed after you accept'
+
   return (
-    <div className="space-y-5 pb-10">
+    <div className="max-w-5xl mx-auto space-y-6 pb-10">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
         <ChevronLeft className="w-4 h-4" /> Back to Enquiries
       </button>
 
       {/* Header */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-5">
+      <div className="bg-white border border-gray-100 rounded-2xl p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-navy">{enquiry.customer_name}</h1>
+            <h1 className="text-2xl font-bold text-navy">{enquiry.customer_name}</h1>
             <p className="text-sm text-gray-500">{enquiry.service_title} · {enquiry.category_name}</p>
             <p className="text-xs text-gray-400 mt-1">{formatRelative(enquiry.created_at)}</p>
           </div>
-          <StatusBadge status={localStatus} />
+          <StatusBadge status={displayStatus} />
         </div>
       </div>
 
-      {/* Customer + scope */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3">
-        <h2 className="text-base font-bold text-navy">Customer Request</h2>
-        <DetailRow icon={Phone}    label="Contact"       value={`+91 ${enquiry.customer_mobile}`} />
-        <DetailRow icon={MapPin}   label="Location"      value={enquiry.location} />
-        <DetailRow icon={Home}     label="Property Type" value={enquiry.property_type} />
-        <DetailRow icon={Ruler}    label="Scope"         value={enquiry.scope} />
-        <DetailRow icon={Calendar} label="Timeline"      value={enquiry.timeline} />
-        <div className="pt-2 border-t border-gray-100">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Description</p>
-          <p className="text-sm text-navy leading-relaxed">{enquiry.description}</p>
-        </div>
-      </div>
-
-      {/* Actions */}
-      {localStatus === 'NEW' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3">
-          <h2 className="text-base font-bold text-navy">Next Step</h2>
-          <div className="flex gap-3">
-            <Button full onClick={accept} loading={pending === 'accept'}>
-              <CheckCircle className="w-4 h-4" /> Accept Enquiry
-            </Button>
-            <Button variant="outline" onClick={reject} loading={pending === 'reject'}>
-              <XCircle className="w-4 h-4" /> Reject
-            </Button>
+      {/* Two-column workspace: details on the left, action panel on the right. */}
+      <div className="grid lg:grid-cols-[1fr,320px] gap-6 items-start">
+        <div className="bg-white border border-gray-100 rounded-2xl p-6 space-y-4">
+          <h2 className="text-base font-bold text-navy">Customer Request</h2>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <DetailRow icon={Phone}    label="Contact"       value={contactValue} />
+            <DetailRow icon={MapPin}   label="Location"      value={enquiry.location || '—'} />
+            <DetailRow icon={Home}     label="Property Type" value={enquiry.property_type || '—'} />
+            <DetailRow icon={Ruler}    label="Scope"         value={enquiry.scope || '—'} />
+            <DetailRow icon={Calendar} label="Timeline"      value={enquiry.timeline || '—'} />
+          </div>
+          <div className="pt-3 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Description</p>
+            <p className="text-sm text-navy leading-relaxed">{enquiry.description}</p>
           </div>
         </div>
-      )}
 
-      {localStatus === 'ACCEPTED' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5">
-          <Button full onClick={() => router.push(`/vendor-studio/enquiries/${id}/quote`)}>
-            <FileText className="w-4 h-4" /> Create &amp; Send Quote
-          </Button>
+        {/* Side action panel — sticky so it stays visible while scrolling long descriptions. */}
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3 lg:sticky lg:top-24">
+          <h2 className="text-base font-bold text-navy">Next Step</h2>
+          {displayStatus === 'NEW' && (
+            <>
+              <Button full onClick={accept} loading={pending === 'accept'}>
+                <CheckCircle className="w-4 h-4" /> Accept Enquiry
+              </Button>
+              <Button variant="outline" full onClick={reject} loading={pending === 'reject'}>
+                <XCircle className="w-4 h-4" /> Reject
+              </Button>
+              <p className="text-xs text-gray-500 leading-relaxed pt-1">
+                Accepting reveals the customer's phone and unlocks quoting.
+              </p>
+            </>
+          )}
+          {displayStatus === 'ACCEPTED' && (
+            <Button full onClick={() => router.push(`/vendor-studio/enquiries/${id}/quote`)}>
+              <FileText className="w-4 h-4" /> Create &amp; Send Quote
+            </Button>
+          )}
+          {displayStatus === 'QUOTED' && (
+            <p className="text-sm text-gray-500 text-center py-2">
+              Quote sent — waiting for the customer to accept or reject.
+            </p>
+          )}
+          {(displayStatus === 'REJECTED' || displayStatus === 'CANCELLED') && (
+            <p className="text-sm text-gray-500 text-center py-2">
+              This enquiry was {displayStatus.toLowerCase()}.
+            </p>
+          )}
         </div>
-      )}
-
-      {localStatus === 'QUOTED' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 text-center">
-          <p className="text-sm text-gray-500">Quote sent — waiting for customer to accept or reject.</p>
-        </div>
-      )}
+      </div>
     </div>
   )
 }

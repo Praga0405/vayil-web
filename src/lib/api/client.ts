@@ -331,6 +331,12 @@ export const paymentsApi = {
  *  COMMON
  * ═════════════════════════════════════════════════════════════════ */
 export const commonApi = {
+  // Public vendor browse — used by /search and /vendors/[id] when the
+  // viewer isn't necessarily a logged-in customer. Mounted on the
+  // commonRouter in the backend as GET /vendors and GET /vendors/:id(\d+).
+  listVendors:      () => commonClient.get('/vendors'),
+  getVendorDetail:  (vendor_id: string | number) => commonClient.get(`/vendors/${vendor_id}`),
+
   getCategories:    () => commonClient.get('/service-categories'),
   getSubcategories: (catId?: number) => commonClient.get('/service-subcategories',
                       { params: catId ? { category_id: catId } : undefined }),

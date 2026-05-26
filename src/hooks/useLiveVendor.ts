@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { customerApi } from '@/lib/api/client'
+import { commonApi, customerApi } from '@/lib/api/client'
 import { adaptVendorDetail, adaptVendorListRow } from '@/lib/adapters/vendor'
 import { getVendorById, DUMMY_VENDORS, type DummyVendor } from '@/lib/dummyData'
 
@@ -51,7 +51,10 @@ export function useLiveVendor(id: string | undefined): DetailState {
     let cancelled = false
     setState(s => ({ ...s, loading: true, error: null }))
 
-    race(customerApi.getVendorDetail(id))
+    // Public marketplace page — commonApi is unauthenticated so the
+    // page loads for logged-out visitors AND for vendors browsing their
+    // own profile (vendor JWT was 403ing customerApi.getVendorDetail).
+    race(commonApi.getVendorDetail(id))
       .then(res => {
         if (cancelled) return
         const body: any = res.data ?? res
@@ -95,7 +98,8 @@ export function useLiveVendors(): ListState {
     let cancelled = false
     setState(s => ({ ...s, loading: true, error: null }))
 
-    race(customerApi.listVendors())
+    // Public marketplace list — commonApi works for logged-out + any role.
+    race(commonApi.listVendors())
       .then(res => {
         if (cancelled) return
         const body: any = res.data ?? res
