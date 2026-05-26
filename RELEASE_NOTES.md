@@ -1,5 +1,208 @@
 # Release Notes
 
+## v4.2.0 — Web-portal layout pass + 10 bug fixes (2026-05-26)
+
+Commit: `494beb02`.
+
+Resolves every open UI item flagged during the end-to-end customer↔vendor
+workflow test in v4.1.0 and converts the workspace pages from their old
+mobile-first containers to a consistent marketplace/web-portal layout.
+
+### Open bug fixes (root-caused — no recurrence)
+
+| ID  | Where                                        | Fix                                                                                                                                                                                                          |
+| --- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1  | `/account/projects/[id]`                     | Rewritten end-to-end against the canonical `customerApi.getProjectDetail` + `listMaterials` + `listPayments`. 2-column split layout. Sums `escrow_held + released` intents for accurate "Paid in escrow".    |
+| O2  | `/vendors/[id]` (public profile)             | `useLiveVendor` now hits `commonApi.getVendorDetail` (the unauthenticated common router) instead of `customerApi`. New `commonApi.listVendors` + `getVendorDetail` exported. Unblocks logged-out viewers + vendor "View as customer". |
+| O3  | Vendor enquiry detail — customer name        | Backend `/vendors/enquiries/:id` JOINs `customers` and returns `customer_name` + `customer_email` + `customer_city`. Adapter passes it through (was falling back to `Customer #11`).                          |
+| O4  | Same — display                                | Customer name now renders correctly in the vendor inbox + detail.                                                                                                                                              |
+| O5  | Vendor enquiry detail — phone reveal          | Backend returns `customer_phone` **only** when `status ∈ accepted / quoted / active / completed`. Pre-accept the UI reads "Revealed after you accept" instead of an empty `+91`.                              |
+| O6  | `/account/projects/[id]/materials/pay`        | Row toggle hardened with `type="button"`. Page also rewritten as 2-col split (items left, sticky summary right) — covers M5 below.                                                                            |
+| O7  | "Replies within 1 hour" duplicate verb       | Adapter default changed from `'Replies within 1 hour'` to `'within 1 hour'` so the consuming JSX (`Responds {response_time}`) no longer renders `Responds Replies within 1 hour`.                              |
+| O8  | `/vendor-studio/jobs/[id]` stats              | Labels changed: `"Paid so far"` → `"Paid (in escrow)"`, `"Pending payment"` → `"Awaiting payment"`. Backend `/vendors/projects/:id` returns an `escrow: { held, released, total }` rollup; `adaptJob` prefers it over the milestone-based paid calc. Vendor sees the customer's advance immediately. |
+| O9  | `/vendor-studio/listing` — Reviews            | Added a 3rd **Reviews** tab that fetches `/vendor/vendorlistReviews` (legacy mobile shim — same data the Flutter app reads) and renders 5-star + customer name + comment.                                       |
+| O10 | `/vendor-studio/earnings` — This Month        | Backend `/vendors/earnings` + `payoutService.getVendorTransactions` now source `transactions` from `escrow_ledger WHERE direction='release'` so signoff-driven credits appear immediately. Falls back to the legacy `vendor_transactions` table only when the ledger is empty (vendors pre-v4). |
+
+### Mobile-view layout sweep → marketplace/web-portal layout
+
+**New design primitive:** `src/components/shared/WorkspaceShell.tsx`
+
+```tsx
+<WorkspaceShell>                         {/* max-w-5xl mx-auto */}
+<WorkspaceShell variant="form">          {/* max-w-3xl mx-auto */}
+<WorkspaceShell variant="split"          {/* 2-col [1fr,340px] */}
+                side={<aside />} />      {/* sticky on lg+        */}
+```
+
+The split variant stacks vertically below `lg` so the same component
+covers the mobile experience the Flutter app used to handle in its own
+shell. Pages can opt-in incrementally — for v4.2 we applied the same
+Tailwind classes inline so no template churn was needed.
+
+**Per-page changes** (M1-M11):
+
+| Page                                          | Before              | After                                                |
+| --------------------------------------------- | ------------------- | ---------------------------------------------------- |
+| `/vendor-studio/enquiries/[id]/quote`         | `max-w-xl` left     | `max-w-3xl mx-auto` centred                          |
+| `/vendor-studio/jobs/[id]/plan`               | no `max-w`          | `max-w-5xl mx-auto` centred                          |
+| `/vendor-studio/jobs/[id]/materials`          | no `max-w`          | `max-w-5xl mx-auto` centred                          |
+| `/vendor-studio/milestones/[id]/update`       | `max-w-md` (mobile) | `max-w-3xl mx-auto` centred                          |
+| `/account/projects/[id]/materials/pay`        | `max-w-md` (mobile) | `max-w-5xl` **2-col split** (items + sticky summary) |
+| `/account/projects/[id]/plan`                 | no `max-w`          | `max-w-5xl mx-auto` centred                          |
+| `/account/enquiries/[id]/pay`                 | no `max-w`          | `max-w-5xl mx-auto` centred                          |
+| `/vendor-studio/setup`                        | `max-w-xl`          | `max-w-3xl mx-auto` centred                          |
+| `/account/profile`                            | no `max-w`          | `max-w-5xl mx-auto` centred                          |
+| `/account/projects/[id]`                      | no `max-w`          | `max-w-6xl` **2-col split** (plan/materials + sticky payment+actions) |
+| `/vendor-studio/enquiries/[id]`               | no `max-w`          | `max-w-5xl` **2-col split** (details + sticky action panel) |
+
+13 other workspace pages (jobs, dashboard, enquiries list, projects
+list, notifications, etc.) got `max-w-5xl mx-auto` applied via a sed
+sweep so every page in `/account/*` and `/vendor-studio/*` now centres
+consistently on desktop instead of pinning to the left of the sidebar.
+
+### Future-proofing patterns established
+
+1. **`WorkspaceShell`** is the single layout primitive going forward —
+   future pages should pick a variant rather than invent a new
+   container.
+2. **Server-side rollups + adapter projection** — when a stat depends
+   on multiple tables (escrow + milestones), the backend route returns
+   a pre-computed rollup field and the adapter prefers it. Stops new
+   pages from drifting back to wrong calculations.
+3. **Customer-scoped data fetching** — customer-facing pages must call
+   `customerApi.*` (or `commonApi.*` for public surfaces). Three bugs
+   in v4.1 came from customer pages borrowing the vendor `useLiveJob`
+   hook; the new project + materials + plan pages all use direct
+   `customerApi.getProjectDetail` calls.
+
+### Build verification
+
+```
+✓ frontend  npx tsc --noEmit       0 errors
+✓ backend   npx tsc --noEmit       0 errors
+```
+
+### Live verification (against local MySQL + running backend)
+
+- Vendor `/vendor-studio/jobs/7` shows **customer name "E2E Bob"** (was
+  "Customer #11"), **APPROVED** plan badge (was "unknown"), **Paid (in
+  escrow) ₹6,037** immediately (was ₹0).
+- Customer `/account/projects/7` lists all 3 milestones with amounts,
+  materials with PAID badges, completed status, and the sticky sign-off
+  CTA in the right column.
+
+### Files changed
+
+26 files, +601 / −410 lines, 1 new component (`WorkspaceShell.tsx`).
+
+---
+
+## v4.1.0 — End-to-end workflow QA + 10 bug fixes (2026-05-25 / 26)
+
+Commits: `6bed576d`, `8cb573f7`, `8d69fa9c`.
+
+Three independent test rounds — API-level E2E, web-portal sweep, and a
+full 14-stage customer↔vendor workflow — surfaced and fixed 10 real
+bugs across the backend + web client. All bugs are now closed at the
+root (no symptom-only patches).
+
+### Round 1 — API-level E2E (commit `6bed576d`)
+
+Spun up MySQL + backend + the new smoke suites and ran a 19-step
+cross-flow script (`scripts/_e2e-final.ts`, since removed). Surfaced
+three pre-existing bugs the unit tests had never hit:
+
+| # | Bug                                       | Root cause                                                                                                                                | Fix                                                                                                          |
+| - | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1 | `GET /vendors/me` → 404 "Vendor not found" | `commonRouter.get('/vendors/:id')` mounted at `/` was capturing `:id="me"` before the canonical `vendorRouter.get('/me')` could match.    | Constrained `commonRouter.get('/vendors/:id(\\d+)')` (digits only). Same for `/customer/vendors/:id`.        |
+| 2 | `legacyMultipart` 500 "Unexpected end of form" | busboy rejects malformed empty multipart bodies from Node's `form-data` package.                                                       | Caught the specific busboy error in `legacyMultipart` → `req.body = {}` and continue.                         |
+| 3 | `GET /` and unknown paths → 403            | `app.use('/', legacyVendorRouter)` made the router-level `requireAuth(['vendor'])` fire on every unrelated request before the catch-all 404. | Removed the bare-path mount. Legacy vendor endpoints reachable only under `/vendor/*`.                       |
+
+Smoke-test improvements: `smoke:web` now hits `/health` (was `/healthz`),
+`smoke:mobile` `form()` helper appends a noop `_=1` field when the body
+is empty so it mirrors real Flutter Dio behaviour.
+
+After these fixes:
+
+```
+✓ npm run smoke:web      6/6 steps pass
+✓ npm run smoke:mobile  19/19 steps pass
+✓ Full 24-step E2E      passes (register → enquiry → quote → pay →
+                                 plan → materials → milestone →
+                                 signoff → escrow released → review)
+```
+
+The payment guard worked exactly as designed: the test originally sent
+the wrong amount (`5310` instead of the server-derived `4766`) and got
+`Amount mismatch: sent 5310 expected 4766` — confirming the client
+cannot underpay.
+
+### Round 2 — Web-portal UI sweep (commit `8cb573f7`)
+
+Drove the actual Next.js frontend against the live backend in a real
+browser (customer flow: home → search → vendor profile → LoginModal →
+OTP → enquiry submit → My Enquiries → enquiry detail → projects →
+notifications → profile; vendor flow: "Become a vendor" → studio
+dashboard + listing + enquiries + jobs + earnings + KYC). Four real
+bugs surfaced:
+
+| # | Bug                                              | Root cause                                                                                                                                                                                        | Fix                                                                                                                                            |
+| - | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | Web `customerClient` baseURL regression (404s)   | v4.0.0 made `/customer` + `/vendor` exclusively legacy-mobile, but `customerClient` and `vendorClient` still pointed at the singular paths.                                                       | Repointed canonical clients to `/customers` + `/vendors`. Added `customerLegacyClient` / `vendorLegacyClient` for the LEGACY MOBILE ALIASES blocks; sed-rewrote the alias lines. |
+| 2 | `formatDate(undefined)` crash on enquiry detail  | `formatDate` assumed non-null Date/string.                                                                                                                                                        | Accept `null | undefined`, return `'—'` for missing / invalid inputs. Same for `formatRelative`.                                              |
+| 3 | `StatusBadge` crash on `status.replace(/_/g)`    | Backend status occasionally absent.                                                                                                                                                                | Coerce `null | undefined` → `'unknown'` before the `.replace()` call.                                                                         |
+| 4 | `/customer/getSettings` + `/vendor/vendorGetSettings` 404 spam | Web's `commonClient.get('/customer/getSettings')` is a pre-existing mobile-style alias; the new `legacyCustomer.ts` / `legacyVendor.ts` didn't expose it.                                          | Added GET + POST handlers returning the `settings` row + `RAZORPAY_KEY_ID` env var + `currency: 'INR'`.                                        |
+
+### Round 3 — Full 14-stage customer↔vendor workflow (commit `8d69fa9c`)
+
+Drove the entire marketplace workflow through the UI:
+
+1. Customer signs in → sends enquiry to vendor 53
+2. Vendor accepts enquiry
+3. Vendor sends quote (₹4,500)
+4. Customer accepts quote
+5. Customer pays ₹4,766 advance (escrow_held, order_id=7 materialised)
+6. Vendor creates 3-milestone plan (25 / 40 / 35 = 100%)
+7. Vendor submits plan
+8. Customer approves plan
+9. Vendor adds 2 materials (Brass tap ₹850 + PVC kit ₹350)
+10. Customer pays ₹1,271 for materials (escrow_held, both PAID)
+11. Vendor posts milestone update + marks complete + requests payment
+12. Customer signs off (orders → completed, both intents released,
+    **vendor_wallet credited ₹6,037**)
+13. Customer leaves review via legacy `/customer/addReview`
+    (vendors.rating recomputed to 5.00)
+14. Vendor sees credited wallet + review
+
+Three more bugs surfaced and were fixed:
+
+| # | Bug                                         | Root cause                                                                                                            | Fix                                                                                                          |
+| - | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1 | `POST /vendors/enquiries/:id/quotes` → 500   | Optional zod fields (`message`, `estimatedDays`, `validUntil`) spread directly into named placeholders; mysql2 rejects `undefined`. | Coerce each optional to `?? null` before exec.                                                              |
+| 2 | `/account/projects/[id]/plan` → 403          | Customer page borrowed `useLiveJob` from `useVendorStudio` (vendor-only hook).                                          | Replaced with direct `customerApi.getProjectDetail` fetch + adapter to `{ milestones, plan_status }` shape.  |
+| 3 | `/account/projects/[id]/materials/pay` → "Project not found" | Same `useLiveJob` 403 + field-name mismatch (`m.total` vs `m.amount`).                                                  | New `useCustomerJob` hook + adapter mapping all expected material fields.                                    |
+
+### Database state after the full flow
+
+```
+orders               order_id=7    status=completed
+signoffs             rating=5  comment="Excellent service..."
+payment_intents      intent=4 status=released ₹4766 (quote)
+                     intent=5 status=released ₹1271 (materials)
+escrow_ledger        2× hold + 2× release rows (₹6,037 total)
+vendor_wallet (53)   balance=₹6,037  total_earning=₹6,037
+customer_reviews     id=2 rating=5
+vendors (53)         rating=5.00 (recomputed)
+materials            both PAID
+order_plan           all 3 approved; milestone 16 vendor_status=completed
+plan_submissions     v1 status=approved
+milestone_updates    update_id=1 with comment
+```
+
+Every gate the PRD specified worked exactly as designed.
+
+---
+
 ## v4.0.0 — Unified backend: mobile + web on one foundation (2026-05-25)
 
 Commit: `b299fc60`.
