@@ -16,6 +16,11 @@ const api: AxiosInstance = axios.create({ baseURL: BASE, validateStatus: () => t
 function form(obj: Record<string, any>): FormData {
   const fd = new FormData();
   for (const [k, v] of Object.entries(obj)) if (v !== undefined && v !== null) fd.append(k, String(v));
+  // Node's `form-data` package emits a malformed empty body when no
+  // field is appended; busboy rejects with "Unexpected end of form".
+  // Flutter's Dio always sends at least one field in practice, so we
+  // mirror that here with a noop marker the backend ignores.
+  if (Object.keys(obj).length === 0) fd.append('_', '1');
   return fd;
 }
 

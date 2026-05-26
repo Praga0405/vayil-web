@@ -48,7 +48,16 @@ function legacyMultipart(req: Request, res: Response, next: NextFunction) {
     // by routing them BEFORE this middleware via the legacyVendorRouter /
     // legacyCustomerRouter instances we avoid the conflict.
     return legacyForm(req, res, (err) => {
-      if (err && (err as any).code === 'LIMIT_UNEXPECTED_FILE') return next(); // handler will run its own multer
+      if (!err) return next();
+      const code = (err as any).code;
+      const msg  = (err as any).message || '';
+      // Pass through if the handler installs its own multer.
+      if (code === 'LIMIT_UNEXPECTED_FILE') return next();
+      // Empty / truncated bodies (e.g. axios + form-data with no fields)
+      // produce "Unexpected end of form" from busboy. Treat it as an
+      // empty body rather than a 500 — the route's pickId/pickPhone
+      // helpers default to '' anyway.
+      if (msg.includes('Unexpected end of form')) { req.body = {}; return next(); }
       return next(err);
     });
   }
@@ -68,11 +77,14 @@ app.use('/admin', adminRouter);
 
 /* ─── Legacy mobile shims — accept multipart + JSON ────────────
  *  Mount AFTER canonical so canonical wins on overlapping paths.
- *  Mobile uses /customer/<name> and bare /<name> for vendor calls
- *  (e.g. /step1, /AskPyament), so we mount the vendor router at both. */
+ *  Mobile uses /customer/<name> and /vendor/<name>. We deliberately
+ *  do NOT mount legacyVendorRouter at bare `/` — its router-level
+ *  requireAuth would fire on every unrelated request (e.g. /health,
+ *  /favicon.ico) and respond 403 before the catch-all 404 handler.
+ *  If a future mobile build calls bare paths like /step1 without a
+ *  prefix, expose those individually here. */
 app.use('/customer', legacyMultipart, legacyCustomerRouter);
 app.use('/vendor',   legacyMultipart, legacyVendorRouter);
-app.use('/',         legacyMultipart, legacyVendorRouter);
 
 /* ─── Compatibility aliases (auth router already handled these) ─ */
 app.use('/', authRouter);

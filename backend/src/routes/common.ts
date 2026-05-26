@@ -37,9 +37,12 @@ async function publicVendorDetail(req: any, res: any, next: any) {
   } catch (err) { next(err); }
 }
 commonRouter.get('/vendors',           publicVendorList);
-commonRouter.get('/vendors/:id',       publicVendorDetail);
+// :id is constrained to digits so /vendors/me (canonical "current vendor"
+// route defined in vendorRouter) is no longer swallowed by the public
+// detail handler. Found via the v4.0.0 full-flow E2E test.
+commonRouter.get('/vendors/:id(\\d+)', publicVendorDetail);
 commonRouter.get('/customer/vendors',  publicVendorList);
-commonRouter.get('/customer/vendors/:id', publicVendorDetail);
+commonRouter.get('/customer/vendors/:id(\\d+)', publicVendorDetail);
 
 commonRouter.get('/service-categories', async (_req, res, next) => {
   try { ok(res, { categories: await query('SELECT * FROM service_categories WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }

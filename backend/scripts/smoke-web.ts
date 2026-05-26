@@ -47,7 +47,7 @@ async function main() {
   if (!enq.enquiry?.enquiry_id) fail('missing enquiry id', { status: 500, data: enq });
 
   // 6) Health / common.
-  ok('GET /healthz', await api.get('/healthz').catch(() => api.get('/')));
+  ok('GET /health', await api.get('/health'));
 
   console.log('\n✅ web smoke passed');
 }
