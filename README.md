@@ -35,7 +35,12 @@ This repo contains both deployable surfaces in one place:
 │   │                        # smoke, smoke-web, smoke-mobile
 │   ├── seed-data/           # 40 vendors, 8 customers, demo activity (JSON)
 │   └── Dockerfile
-├── docs/                    ← Internal contracts + audits
+├── docs/                    ← Reference + internal contracts
+│   ├── API_CANONICAL.md          # REST surface the web app uses
+│   ├── API_MOBILE_LEGACY.md      # /customer/* + /vendor/* shim contract
+│   ├── PAYMENT_FLOW.md           # Escrow lifecycle + Razorpay protocol
+│   ├── DB_SCHEMA.md              # Per-table column reference
+│   ├── DEPLOYMENT.md             # Render + Vercel + Razorpay + S3/R2/GCS
 │   └── mobile-api-inventory.md   # Flutter app endpoint inventory + payloads
 ├── render.yaml              # Render Blueprint for the backend service
 ├── .vercelignore            # Keeps backend/ out of the Vercel build
@@ -466,7 +471,7 @@ Hot reload is on for both. Edits to `src/` reflect immediately; backend uses `ts
 | `npm run unseed:marketplace`         | Deletes every row tagged `vayil-demo-v1`                           |
 | `npm run smoke`                      | Original wire-check against a running backend                      |
 | `npm run smoke:web`                  | Canonical JSON path: `/auth/otp/{send,verify}` → `/customers/me` → `/customers/vendors` → `/customers/enquiries`. Exits 0 on full success. |
-| `npm run smoke:mobile`               | Mobile multipart path: customer (register → OTP → profile → enquiry → cart) **and** vendor (register → OTP → step1 → listings → enquiries → balance → notifications). Mirrors what Flutter's Dio sends. |
+| `npm run smoke:mobile`               | **Full 14-stage cross-flow** (38 endpoints) — customer register → enquiry → quote accept → placeOrder → payment_update → orderDetails → vendor createPlan → updatePlanStatus → addPlanMaterial → editPlanMaterial → AskPyament → AddBankDetails → finalStep (escrow release) → vendorPayout → addReview → vendorlistReviews. Mirrors what Flutter's Dio sends; requires `PAYMENT_VERIFY_BYPASS=true` on the target backend (smoke only — never prod). |
 
 ### Migrations
 
@@ -474,10 +479,10 @@ Hot reload is on for both. Edits to `src/` reflect immediately; backend uses `ts
 |---|---|
 | `001_complete_schema.sql` | Base tables: `customers`, `vendors`, `enquiries`, `quotation`, `orders`, `order_plan`, `payment_log`, `vendor_wallet`, `vendor_transactions`, `disputes`, `staff`, `roles`, `settings`, `otp_codes`, `service_categories`/`_subcategories`/`_tags`, `vendor_services` |
 | `002_prd_workflow_tables.sql` | PRD §10 workflow: `payment_intents`, `escrow_ledger`, `materials`, `plan_submissions`, `signoffs`, `rework_requests`, `milestone_updates`, `webhook_deliveries`, `idempotency_keys` + ALTER on `order_plan` and `enquiries` |
+| `003_mobile_compatibility_tables.sql` | 5 mobile-parity tables (`customer_cart`, `customer_reviews`, `notifications`, `bank_details`, `payout_requests`) + ~30 metadata columns across `customers`, `vendors`, `vendor_services`, `enquiries`, `quotation` (profile_image, fcm_token, pincode, attachment_urls, location_lat/lng, budget, advance_amount, platform_fee, gst, total, onboarding_metadata, …) |
 | `003_seed_tagging.sql` | `seed_source VARCHAR(40)` column on base tables for `unseed:marketplace` |
 | `004_vendor_review_queue.sql` | `vendor_review_queue` + admin notify columns |
 | `005_orders_enquiry_unique.sql` | `UNIQUE KEY uniq_orders_enquiry (enquiry_id)` on `orders` |
-| `006_mobile_compatibility_tables.sql` | `customer_cart`, `customer_reviews`, `notifications`, `bank_details`, `payout_requests` + metadata columns on `enquiries`, `vendors`, `customers`, `vendor_services`, `quotation` |
 
 The runner (`scripts/migrate.ts`) splits on `;\n`, runs every statement
 in order, and swallows MySQL errno **1060** (duplicate column),
@@ -698,3 +703,9 @@ Both env vars are optional. When unset the notification is skipped
 - [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) — versioned changelog (this file is the user-facing source of truth)
 - [`RELEASE_READINESS.md`](./RELEASE_READINESS.md) — pre-launch checklist (deploy, backups, observability, post-launch hardening)
 - [`backend/README.md`](./backend/README.md) — backend-specific deploy walkthrough (Render, MySQL, seed/unseed)
+- [`docs/API_CANONICAL.md`](./docs/API_CANONICAL.md) — REST surface the web app + admin panel target
+- [`docs/API_MOBILE_LEGACY.md`](./docs/API_MOBILE_LEGACY.md) — `/customer/*` + `/vendor/*` shim contract for the Flutter apps
+- [`docs/PAYMENT_FLOW.md`](./docs/PAYMENT_FLOW.md) — escrow lifecycle, two-call Razorpay protocol, idempotency, env vars
+- [`docs/DB_SCHEMA.md`](./docs/DB_SCHEMA.md) — per-table column reference + migration order
+- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — Render + Vercel + Razorpay webhook + S3/R2/GCS upload setup + prod checklist
+- [`docs/mobile-api-inventory.md`](./docs/mobile-api-inventory.md) — Flutter app endpoint inventory + payload shapes (audit doc)

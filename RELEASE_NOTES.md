@@ -1,5 +1,173 @@
 # Release Notes
 
+## v4.4.0 — Production-readiness pass: migration / uploads / payment hygiene / docs (2026-05-26)
+
+Commit: `a34d31f6`.
+
+Closes the five production gaps flagged during the v4.3 functional
+validation: the missing migration was applied at the user-requested
+path, the upload stub became a real S3/R2/GCS adapter, the payment
+pipeline got both a hardened dev-bypass and three real correctness
+fixes, the mobile smoke suite expanded from 19 to 38 endpoints +
+full end-to-end workflow, and the repo gained a 5-doc reference set.
+
+### 1. Migration `003_mobile_compatibility_tables.sql`
+
+Renamed from the v4.0-era `006_*` placeholder to the canonical 003
+path the original spec requested. Coexists alphabetically with
+`003_seed_tagging.sql` (the runner sorts filenames; the two files
+touch disjoint columns). Fully idempotent — CREATE TABLE IF NOT
+EXISTS + tolerant ALTER TABLE relying on `migrate.ts` swallowing
+errno 1060 / 1061. Now adds the **full column set** spec'd in this
+round (was a subset in v4.0):
+
+**5 mobile-parity tables**
+
+| Table | Purpose |
+|---|---|
+| `customer_cart` | Mobile cart persistence (web doesn't surface this yet) |
+| `customer_reviews` | One-per-completed-job reviews; auto-recompute `vendors.rating` |
+| `notifications` | Shared inbox (`recipient_type` ∈ customer/vendor/staff) |
+| `bank_details` | Vendor payout accounts with `pending_edit` review workflow |
+| `payout_requests` | Wallet → bank payout lifecycle |
+
+**Column additions** (every column nullable + idempotent):
+
+| Table | Columns |
+|---|---|
+| `customers` | `pincode`, `profile_image`, `fcm_token` |
+| `vendors` | `address`, `pincode`, `profile_image`, `about`, `experience_years`, `proof_type`, `proof_number`, `kyc_document_url`, `fcm_token`, `owner_name`, `onboarding_metadata` |
+| `vendor_services` | `subcategory_id`, `thumbnail`, `tag_ids`, `image_urls`, `portfolio_urls`, `metadata` |
+| `enquiries` | `budget`, `location_lat`, `location_lng`, `preferred_date`, `accepted_at`, `rejected_at`, `reject_reason`, `metadata`, `attachment_urls` |
+| `quotation` | `estimated_days`, `valid_until`, `advance_amount`, `attachment_urls`, `subtotal`, `platform_fee`, `gst`, `total`, `gst_amount` |
+
+### 2. Production storage adapter (`backend/src/utils/uploads.ts`)
+
+New `uploadFile` / `uploadFiles` helpers backed by
+`@aws-sdk/client-s3` (added to deps). Both `/customer/upload_files`
+and `/vendor/upload_files` now delegate to the same adapter. Storage
+is S3-compatible — works with:
+
+| Provider | Knobs |
+|---|---|
+| **AWS S3** | `S3_BUCKET` + `S3_REGION` + access key/secret. `S3_ENDPOINT` blank, `S3_FORCE_PATH_STYLE=false` |
+| **Cloudflare R2** | `S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com`, `S3_REGION=auto`, `S3_FORCE_PATH_STYLE=true` |
+| **Google Cloud Storage (S3 interop)** | `S3_ENDPOINT=https://storage.googleapis.com`, HMAC interop key/secret |
+| **Backblaze B2 / Minio / Wasabi** | Set `S3_ENDPOINT` to the provider's S3 host, force path style |
+
+When S3 credentials are absent, the adapter falls back to the
+existing short base64 `data:` URL so local dev keeps working without
+an external storage dep. The legacy response shape
+(`{urls:[{url,filename,size,mimetype}], data:same}`) is preserved
+verbatim — Flutter parsers see no difference.
+
+The full provider matrix + per-env config lives in
+[`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md).
+
+### 3. Payment-verify dev/test bypass
+
+`utils/razorpay.ts` now enters bypass mode under **either**:
+
+- `RAZORPAY_KEY_SECRET` unset (typical local dev), or
+- `PAYMENT_VERIFY_BYPASS=true` explicitly set (smoke tests, staging
+  with no Razorpay test creds yet)
+
+A single-line warning to stderr is emitted on first use per process
+("SIGNATURE VERIFICATION BYPASS ACTIVE — …"). This makes the
+configuration impossible to land in production without seeing it in
+the logs.
+
+### 4. Three real payment-pipeline correctness fixes
+
+While building out the expanded smoke suite, three latent bugs
+surfaced and were fixed at the service layer (so both the canonical
+web routes and the legacy mobile shims pick up the corrections):
+
+| # | Bug | Fix |
+|---|---|---|
+| a | `materialService.updateMaterial` spread the user's partial input directly into the existing row. Any field the caller omitted (e.g. `unit` left undefined on edit) blew away the current value AND mysql2 then rejected the undefined bind, returning 500. | Filter `undefined` out of the patch object before merging + coerce every column to a non-null bind value (sensible defaults: `'pc'` for unit, `'UNPAID'` for status). |
+| b | `paymentService.verifyAndHold` (and the canonical `routes/payments.ts` inline copy) created the `orders` row on a quote payment but forgot to backfill `payment_intents.order_id` and the already-inserted `escrow_ledger.order_id`. Result: `releaseEscrow` during signoff couldn't find any held intents → `vendor_wallet` never credited. | Both call sites now backfill both rows inside the same transaction (`UPDATE payment_intents SET order_id = ?` + `UPDATE escrow_ledger SET order_id = ? WHERE intent_id = ? AND order_id IS NULL`). |
+| c | `projectService.signoffOrder` didn't call `releaseEscrow` at all, so the legacy `/customer/finalStep` path completed the order without releasing escrow. The canonical `/customers/projects/:id/signoff` had the release loop inline; the service didn't. | Added the release loop + `enquiries.status='completed'` flip to `projectService.signoffOrder` (matches the canonical handler so both paths behave identically). |
+
+After these three fixes, the smoke flow `finalStep → vendorPayout`
+succeeds end-to-end — the vendor's wallet shows ₹4,766 immediately
+after the customer signs off, and the payout request goes through.
+
+### 5. `smoke:mobile` expanded to 38 endpoints + full E2E
+
+The mobile smoke now drives the entire 14-stage marketplace workflow
+the Flutter apps will run in production:
+
+```
+Customer auth + browse:
+  register → verifyCustomerOTP → getCustomerInfo → saveCustomerInfo →
+  ServiceList → enquiryList → customerNotificationList →
+  addToCart → getCart → removeCartItem → clearCart
+
+Vendor auth + dashboard:
+  register → verifyVendorOTP → step1 → getVendorServiceList →
+  vendorEnuqiryList → vendorBalance → vendorNotificationList
+
+Cross-flow workflow:
+  C: sendEnquiry
+  V: AcceptEnquiredStatusUpdate
+  V: sendQuotationToCustomer
+  C: QuotationList → updateQuotation(accept)
+  C: placeOrder → payment_update (escrow_held)
+  C: orderDetails
+  V: createPlan → updatePlanStatus
+  V: addPlanMaterial → editPlanMaterial
+  V: AskPyament
+  V: AddBankDetails → GetBankDetails
+  C: finalStep (escrow released → wallet credited)
+  V: vendorPayout
+  C: addReview
+  V: vendorlistReviews (review visible)
+```
+
+Every step asserts `2xx + success:true`. Final result:
+**38 endpoints pass**.
+
+Required env: backend started with `PAYMENT_VERIFY_BYPASS=true`
+(or with `RAZORPAY_KEY_SECRET` unset). The script makes no
+assumptions about real Razorpay creds.
+
+### 6. Five new reference docs
+
+| File | Length | Covers |
+|---|---|---|
+| [`docs/API_CANONICAL.md`](./docs/API_CANONICAL.md) | ~140 lines | Every `/auth/*`, `/customers/*`, `/vendors/*`, `/payments/*`, `/Admin/*` endpoint with body / returns + conventions |
+| [`docs/API_MOBILE_LEGACY.md`](./docs/API_MOBILE_LEGACY.md) | ~145 lines | Every `/customer/*` + `/vendor/*` legacy shim with payload aliases + response shape + token sources |
+| [`docs/PAYMENT_FLOW.md`](./docs/PAYMENT_FLOW.md) | ~140 lines | Escrow lifecycle, two-call protocol, server-derived totals, idempotency, webhook, env vars, smoke coverage |
+| [`docs/DB_SCHEMA.md`](./docs/DB_SCHEMA.md) | ~155 lines | Per-table column reference + migration order + charset + FK convention |
+| [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) | ~165 lines | Render + Vercel + Razorpay webhook + S3/R2/GCS uploads + prod checklist + rollback |
+
+### Build + verification
+
+```
+✓ backend  npm run build                  0 errors
+✓ backend  npm run migrate                runs clean (fully idempotent)
+✓ backend  npm run smoke:web              6/6 endpoints pass
+✓ backend  npm run smoke:mobile           38 endpoints + full E2E pass
+```
+
+### Acceptance criteria check
+
+| User-supplied criterion | Status |
+|---|---|
+| All legacy customer/vendor mobile routes compile and pass smoke | ✅ 38 endpoints + full E2E |
+| All DB tables referenced by services exist after migration | ✅ 5 new tables + ~30 new columns applied |
+| Upload routes return real storage URLs in production mode | ✅ S3/R2/GCS adapter wired; data: URL only on dev with no env |
+| Existing web canonical routes continue to work | ✅ smoke:web 6/6 |
+| Migration uses CREATE TABLE IF NOT EXISTS and tolerant ALTERs | ✅ Inherits errno 1060/1061 swallow from `migrate.ts` |
+
+### Files changed
+
+18 files, **+2,224 / −196 lines**, 6 new files (1 migration, 1
+utility, 5 docs).
+
+---
+
 ## v4.3.0 — Post-release cleanup: vendor list blocker + 4 polish items (2026-05-26)
 
 Commits: `8a26db3c`, `0bf71738`.
