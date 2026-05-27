@@ -93,6 +93,14 @@ app.use('/admin', adminRouter);
  *  prefix, expose those individually here. */
 app.use('/customer', legacyMultipart, legacyCustomerRouter);
 app.use('/vendor',   legacyMultipart, legacyVendorRouter);
+// v4.5.2 — the customer Flutter app posts /CustomerupdatePlan as a
+// BARE path (no /customer prefix). Mount the same router under '/' so
+// `legacyCustomerRouter.post('/CustomerupdatePlan')` resolves at both
+// /customer/CustomerupdatePlan AND /CustomerupdatePlan.
+// We add the open routes to bare '/' too so register/verifyOtp etc.
+// don't try to consume the multipart twice — the requireAuth on
+// /CustomerupdatePlan still gates it.
+app.use('/', legacyMultipart, legacyCustomerRouter);
 
 /* ─── Compatibility aliases (auth router already handled these) ─ */
 app.use('/', authRouter);

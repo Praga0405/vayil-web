@@ -97,6 +97,75 @@ legacyVendorRouter.post('/resendVendorOTP', async (req, res, next) => {
 });
 
 /* ─────────────────────────────────────────────────────────────
+ *  v4.5.2 — open lookup endpoints the vendor mobile app calls
+ *  pre-login. Must be mounted BEFORE the requireAuth middleware
+ *  below or they'll 401.
+ * ───────────────────────────────────────────────────────────── */
+import { query as commonQuery } from '../db';
+
+legacyVendorRouter.get('/getLanguages', async (_req, res, next) => {
+  try {
+    const rows = await commonQuery<any>(
+      `SELECT id, language_name FROM languages WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY language_name`,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+legacyVendorRouter.get('/getTools', async (_req, res, next) => {
+  try {
+    const rows = await commonQuery<any>(
+      `SELECT id, tool_name, tool_slug, description FROM tools_master
+        WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY tool_name`,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+legacyVendorRouter.get('/listStatus', async (_req, res, next) => {
+  try {
+    const rows = await commonQuery<any>(
+      `SELECT id, status_name FROM status_master WHERE COALESCE(is_deleted,0)=0 AND is_active=1 ORDER BY id`,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+legacyVendorRouter.get('/get_states_by_country_id', async (req, res, next) => {
+  try {
+    const cid = Number((req.query as any)?.country_id ?? 101);
+    const rows = await commonQuery<any>(
+      `SELECT id, name, country_id, country_code, state_code FROM states
+        WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
+      { cid } as any,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+legacyVendorRouter.post('/get_city', async (req, res, next) => {
+  try {
+    const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
+    const rows = sid
+      ? await commonQuery<any>(
+          `SELECT city_id, city_name, city_state, city_state_id FROM city
+            WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
+          { sid },
+        )
+      : await commonQuery<any>(
+          `SELECT city_id, city_name, city_state, city_state_id FROM city
+            WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
+        );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+legacyVendorRouter.post('/listProofTypes', async (_req, res, next) => {
+  try {
+    const rows = await commonQuery<any>(
+      `SELECT id, proof_name FROM master_proof_types
+        WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY proof_name`,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+
+/* ─────────────────────────────────────────────────────────────
  *  Authenticated vendor endpoints
  * ───────────────────────────────────────────────────────────── */
 legacyVendorRouter.use(requireAuth(['vendor']));
@@ -381,6 +450,14 @@ legacyVendorRouter.post('/vendorOrderDetails', async (req: AuthRequest, res, nex
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const data = await projectSvc.getProject(orderId);
     send(res, { data });
+  } catch (err) { next(err); }
+});
+
+/** GET /vendor/vendorInfo — vendor self-profile lookup (mobile expects GET). */
+legacyVendorRouter.get('/vendorInfo', async (req: AuthRequest, res, next) => {
+  try {
+    const v = await vendorSvc.getVendor(req.user!.id);
+    send(res, { data: v, vendor_id: v?.vendor_id ?? v?.id });
   } catch (err) { next(err); }
 });
 

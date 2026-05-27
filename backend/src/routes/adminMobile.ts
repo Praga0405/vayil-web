@@ -519,6 +519,29 @@ adminMobileRouter.post('/orderPaymentSummary', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/* ─── v4.5.2: admin-side service listings (vendor_services rows) ─── */
+adminMobileRouter.post('/ServiceList', async (_req, res, next) => {
+  try {
+    send(res, { data: await query(`
+      SELECT vs.*, v.name AS vendor_name, v.company_name
+        FROM vendor_services vs
+        LEFT JOIN vendors v ON v.vendor_id = vs.vendor_id
+       WHERE COALESCE(vs.is_deleted, 0) = 0
+       ORDER BY vs.vendor_service_id DESC LIMIT 200`) });
+  } catch (err) { next(err); }
+});
+adminMobileRouter.post('/ServiceDetails', async (req, res, next) => {
+  try {
+    const sid = req.body?.service_id ?? req.body?.id ?? req.body?.vendor_service_id;
+    if (!sid) throw new ApiError(400, 'service_id required');
+    const svc = await one(`SELECT vs.*, v.name AS vendor_name, v.company_name
+                             FROM vendor_services vs
+                             LEFT JOIN vendors v ON v.vendor_id = vs.vendor_id
+                            WHERE vs.vendor_service_id = :id OR vs.id = :id`, { id: sid });
+    send(res, { data: svc });
+  } catch (err) { next(err); }
+});
+
 adminMobileRouter.post('/PaymentHistory', async (_req, res, next) => {
   try {
     send(res, { data: await query(`

@@ -335,6 +335,13 @@ CREATE TABLE IF NOT EXISTS tools_master (
   is_deleted TINYINT(1) DEFAULT 0,
   UNIQUE KEY (tool_slug)
 );
+INSERT IGNORE INTO tools_master (tool_name, tool_slug) VALUES
+  ('Drill Machine', 'drill-machine'), ('Plumbing Wrench Set', 'plumbing-wrench-set'),
+  ('Pipe Cutter', 'pipe-cutter'), ('Soldering Iron', 'soldering-iron'),
+  ('Tile Cutter', 'tile-cutter'), ('Paint Sprayer', 'paint-sprayer'),
+  ('Welding Machine', 'welding-machine'), ('Ladder', 'ladder'),
+  ('Voltage Tester', 'voltage-tester'), ('Power Saw', 'power-saw'),
+  ('Vacuum Cleaner', 'vacuum-cleaner'), ('Pressure Washer', 'pressure-washer');
 
 CREATE TABLE IF NOT EXISTS languages (
   id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,

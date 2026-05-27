@@ -1,5 +1,102 @@
 # Release Notes
 
+## v4.5.2 — Close out Option A: 100% endpoint coverage + OTP row mirror + smoke:admin (2026-05-27)
+
+Audited commit `dabdefc0` (the v4.5.0 Option A delivery) against the
+mobile team's 146-endpoint Postman collection (`Vayil.json`) and the
+9-phase Option A plan. Found **13 missing endpoints + 3 process gaps**
+and closed them all in this release. Endpoint coverage is now
+**146/146 (100%)** verified by a path-resolving audit script.
+
+### Closed gaps
+
+#### 5 customer endpoints (legacyCustomer.ts)
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET/POST /customer/ServiceCategories` | Bare lookup of `service_categories` (id, name, slug, icon, is_active) |
+| `POST /customer/ServiceSubcategories` | Subcategory lookup, filterable by `category_id` |
+| `POST /customer/sendQuotation` | Customer accept/reject of a vendor's quote (alias for `updateQuotation`) |
+| `POST /customer/getPlan` | Customer reads project plan by `order_id` (ownership-checked) |
+| `POST /customer/CustomerupdatePlan` | Customer approves the plan or requests revision (`action='approve'\|'revision'`). Also mounted at the bare path `/CustomerupdatePlan` since the mobile app sometimes posts it without the `/customer` prefix |
+
+#### 6 vendor lookup endpoints (legacyVendor.ts, open — pre-auth)
+
+The vendor mobile app calls these **before login** to populate
+dropdowns. Previously all 6 returned 401 because the router's
+`requireAuth(['vendor'])` fired before the route match. Now mounted
+**above** the auth middleware:
+
+- `GET /vendor/getLanguages` → 65 rows
+- `GET /vendor/getTools` → 12 rows (seeded by migration update — see below)
+- `GET /vendor/listStatus` → 48 status names from `status_master`
+- `GET /vendor/get_states_by_country_id?country_id=101` → all states for India
+- `POST /vendor/get_city` → cities by `state_id`
+- `POST /vendor/listProofTypes` → 9 KYC proof types from `master_proof_types`
+
+#### 1 vendor self-info endpoint
+
+- `GET /vendor/vendorInfo` → authed vendor's own profile (was missing despite being in the Postman collection)
+
+#### 2 admin endpoints (adminMobile.ts)
+
+- `POST /Admin/ServiceList` → admin lists all vendor_services rows JOIN-ed with vendor name (up to 200)
+- `POST /Admin/ServiceDetails` → admin reads one vendor_service by `service_id`
+
+### Process / parity fixes (Phase 6 + 8 follow-ups)
+
+#### OTP row-column mirror (`utils/otp.ts`)
+
+The original Phase 6 spec promised that `verifyOtpAndIssueToken` would
+write OTP to `vendors.otp` / `customers.otp` columns (in addition to
+the `otp_codes` table). v4.5 added the columns but forgot the writes.
+Fixed: `storeOtp` now ALSO updates the user row with `otp`,
+`otp_expires_at`, `otp_attempts` (incremented), and `last_otp_sent_at`,
+matching the columns the mobile team's direct-query diagnostics expect.
+The `otp_codes` table remains the source of truth for `verifyOtp`.
+
+#### `scripts/smoke-admin.ts` + `npm run smoke:admin`
+
+The original Phase 8 plan promised a `smoke:admin` runner. Previously
+only existed as an ad-hoc `/tmp/smoke_admin.py`. Now shipped as a real
+`backend/scripts/smoke-admin.ts` with a matching `package.json` entry.
+Covers all **50 admin endpoints** (49 from `adminMobile.ts` + the
+`/Admin/loginAdmin` bootstrap), idempotent, exits 0/1.
+
+#### `tools_master` seeded
+
+Migration 004's `tools_master` was empty (`GET /vendor/getTools`
+returned `[]`). Added 12 default rows: Drill Machine, Plumbing Wrench
+Set, Pipe Cutter, Soldering Iron, Tile Cutter, Paint Sprayer, Welding
+Machine, Ladder, Voltage Tester, Power Saw, Vacuum Cleaner, Pressure
+Washer.
+
+### Build verification
+
+```
+✓ backend  npm run build                  0 errors
+✓ backend  npm run migrate                idempotent
+✓ backend  npm run smoke:web              6/6 pass
+✓ backend  npm run smoke:mobile           38/38 pass + full E2E
+✓ backend  npm run smoke:admin            50/50 pass    ← NEW
+✓ Endpoint coverage audit                146/146 (100%) ← was 136/146 (93%)
+```
+
+### Files
+
+| Path | Change |
+|---|---|
+| `backend/src/routes/legacyCustomer.ts` | +5 endpoints |
+| `backend/src/routes/legacyVendor.ts` | +7 endpoints (6 lookups before auth + vendorInfo) |
+| `backend/src/routes/adminMobile.ts` | +2 endpoints (ServiceList + ServiceDetails) |
+| `backend/src/utils/otp.ts` | OTP row-column mirror added to `storeOtp` |
+| `backend/migrations/004_align_mobile_schema.sql` | Seed 12 rows into `tools_master` |
+| `backend/src/index.ts` | Mount `legacyCustomerRouter` at bare `/` too so `/CustomerupdatePlan` resolves without the prefix |
+| `backend/scripts/smoke-admin.ts` | NEW (~125 lines, 50 endpoint assertions) |
+| `backend/package.json` | NEW script: `npm run smoke:admin` |
+
+---
+
 ## v4.5.1 — Functional-test hotfix for 3 admin endpoints (2026-05-27)
 
 Commit: `4eb6868c`.

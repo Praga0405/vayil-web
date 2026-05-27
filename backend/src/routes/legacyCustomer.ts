@@ -428,3 +428,85 @@ async function settingsHandler(_req: any, res: any, next: any) {
 }
 legacyCustomerRouter.get('/getSettings', settingsHandler);
 legacyCustomerRouter.post('/getSettings', settingsHandler);
+
+/* ─────────────────────────────────────────────────────────────
+ *  v4.5.2 — close out Option A gaps: 5 missing customer endpoints
+ *  the Postman collection (Vayil.json) expects but our v4.5 didn't
+ *  mount.
+ * ───────────────────────────────────────────────────────────── */
+
+/** GET/POST /customer/ServiceCategories — bare lookup of categories. */
+const serviceCategoriesHandler = async (_req: AuthRequest, res: any, next: any) => {
+  try {
+    const cats = await query<any>(
+      `SELECT id, category_id, name, slug, icon, icon_url, COALESCE(is_active, status) AS is_active
+         FROM service_categories
+        WHERE COALESCE(is_deleted, 0) = 0
+        ORDER BY name ASC`,
+    );
+    send(res, { data: cats });
+  } catch (err) { next(err); }
+};
+legacyCustomerRouter.get('/ServiceCategories',  serviceCategoriesHandler);
+legacyCustomerRouter.post('/ServiceCategories', serviceCategoriesHandler);
+
+/** POST /customer/ServiceSubcategories — lookup subcats, optionally by parent. */
+legacyCustomerRouter.post('/ServiceSubcategories', async (req: AuthRequest, res, next) => {
+  try {
+    const cid = pickId(req.body, 'category_id', 'categoryId') || null;
+    const rows = cid
+      ? await query<any>(
+          `SELECT id, subcategory_id, category_id, name, slug
+             FROM service_subcategories
+            WHERE category_id = :id AND COALESCE(is_deleted, 0) = 0`,
+          { id: cid },
+        )
+      : await query<any>(
+          `SELECT id, subcategory_id, category_id, name, slug
+             FROM service_subcategories
+            WHERE COALESCE(is_deleted, 0) = 0`,
+        );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+
+/** POST /customer/sendQuotation — customer accepts/rejects vendor's quote.
+ *  Mobile collection calls this the "Update Quote" action; semantically
+ *  identical to our existing /customer/updateQuotation alias. */
+legacyCustomerRouter.post('/sendQuotation', async (req: AuthRequest, res, next) => {
+  try {
+    const quotationId = pickId(req.body, 'quotation_id', 'quotationId', 'id');
+    if (!quotationId) throw new ApiError(400, 'quotation_id required');
+    const action = String(req.body?.action || req.body?.status || 'accept').toLowerCase();
+    const out = (action === 'reject' || action === 'rejected')
+      ? await quoteSvc.rejectQuote(req.user!.id, quotationId, req.body?.reason || req.body?.message)
+      : await quoteSvc.acceptQuote(req.user!.id, quotationId);
+    send(res, { message: `Quote ${out.status}`, data: out });
+  } catch (err) { next(err); }
+});
+
+/** POST /customer/getPlan — customer reads project plan by order_id. */
+legacyCustomerRouter.post('/getPlan', async (req: AuthRequest, res, next) => {
+  try {
+    const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
+    if (!orderId) throw new ApiError(400, 'order_id required');
+    await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
+    const out = await projectSvc.getProject(orderId);
+    send(res, { data: out });
+  } catch (err) { next(err); }
+});
+
+/** POST /customer/CustomerupdatePlan — customer requests plan changes /
+ *  approves the submitted plan. action='approve'|'revision'. */
+legacyCustomerRouter.post('/CustomerupdatePlan', async (req: AuthRequest, res, next) => {
+  try {
+    const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
+    if (!orderId) throw new ApiError(400, 'order_id required');
+    await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
+    const action = String(req.body?.action || 'approve').toLowerCase();
+    const out = (action === 'reject' || action === 'revision' || action === 'request_revision')
+      ? await projectSvc.setPlanStatusByCustomer(orderId, 'reject', req.body?.reason)
+      : await projectSvc.setPlanStatusByCustomer(orderId, 'approve');
+    send(res, { message: `Plan ${out.status}`, data: out });
+  } catch (err) { next(err); }
+});
