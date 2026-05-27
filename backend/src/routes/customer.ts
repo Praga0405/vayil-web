@@ -113,8 +113,24 @@ customerRouter.post('/projects/:id/milestones/:milestoneId/approve', async (req:
 
 customerRouter.get('/payments', async (req: AuthRequest, res, next) => {
   try {
-    const payments = await query<any>('SELECT * FROM payment_log WHERE customer_id = :id ORDER BY id DESC', { id: req.user!.id });
-    ok(res, { payments });
+    // v4.5.3: read from payment_intents (current source of truth) so the
+    // project detail page can compute "Paid (in escrow)". Falls back to
+    // legacy payment_log only if the canonical table has nothing for
+    // this customer (so pre-v4 historical rows still surface).
+    const intents = await query<any>(
+      `SELECT intent_id AS id, customer_id, order_id, enquiry_id, milestone_id,
+              amount, purpose, status, razorpay_order_id, razorpay_payment_id, created_at
+         FROM payment_intents
+        WHERE customer_id = :id
+        ORDER BY intent_id DESC`,
+      { id: req.user!.id },
+    );
+    if (intents.length > 0) return ok(res, { payments: intents });
+    const legacy = await query<any>(
+      `SELECT * FROM payment_log WHERE customer_id = :id ORDER BY id DESC`,
+      { id: req.user!.id },
+    );
+    ok(res, { payments: legacy });
   } catch (err) { next(err); }
 });
 
