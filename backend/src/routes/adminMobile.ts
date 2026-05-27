@@ -261,7 +261,10 @@ adminMobileRouter.post('/delete-categories', async (req, res, next) => {
   try {
     const { ids = [] } = req.body || {};
     if (!ids.length) throw new ApiError(400, 'ids[] required');
-    await exec(`UPDATE service_categories SET is_deleted = 1 WHERE id IN (:ids)`, { ids } as any);
+    // mysql2 named-placeholders don't expand arrays inside IN(); build
+    // a placeholder list and pass positional binds via raw pool.query.
+    const list = ids.map(() => '?').join(',');
+    await exec(`UPDATE service_categories SET is_deleted = 1 WHERE id IN (${list})`, ids);
     send(res, { message: 'Categories deleted' });
   } catch (err) { next(err); }
 });
@@ -304,7 +307,8 @@ adminMobileRouter.post('/delete-subcategories', async (req, res, next) => {
   try {
     const { ids = [] } = req.body || {};
     if (!ids.length) throw new ApiError(400, 'ids[] required');
-    await exec(`UPDATE service_subcategories SET is_deleted = 1 WHERE id IN (:ids)`, { ids } as any);
+    const list = ids.map(() => '?').join(',');
+    await exec(`UPDATE service_subcategories SET is_deleted = 1 WHERE id IN (${list})`, ids);
     send(res, { message: 'Subcategories deleted' });
   } catch (err) { next(err); }
 });
@@ -350,7 +354,8 @@ adminMobileRouter.post('/Deletetags', async (req, res, next) => {
   try {
     const { ids = [] } = req.body || {};
     if (!ids.length) throw new ApiError(400, 'ids[] required');
-    await exec(`UPDATE service_tags SET is_deleted = 1 WHERE id IN (:ids)`, { ids } as any);
+    const list = ids.map(() => '?').join(',');
+    await exec(`UPDATE service_tags SET is_deleted = 1 WHERE id IN (${list})`, ids);
     send(res, { message: 'Tags deleted' });
   } catch (err) { next(err); }
 });
@@ -375,7 +380,10 @@ adminMobileRouter.post('/editProofType', async (req, res, next) => {
     if (!id) throw new ApiError(400, 'id required');
     await exec(`UPDATE master_proof_types SET proof_name = COALESCE(:n, proof_name) WHERE id = :id`, { id, n: proof_name ?? null });
     send(res, { message: 'Proof type updated' });
-  } catch (err) { next(err); }
+  } catch (err: any) {
+    if (err?.errno === 1062) return next(new ApiError(409, 'Proof type with that name already exists'));
+    next(err);
+  }
 });
 adminMobileRouter.post('/ProofStatus', async (req, res, next) => {
   try {

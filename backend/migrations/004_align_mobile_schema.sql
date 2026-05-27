@@ -24,6 +24,7 @@
  * `ph_code`, OTP columns on the row (we use the otp_codes table). */
 ALTER TABLE customers ADD COLUMN id INT NULL UNIQUE;
 ALTER TABLE customers ADD COLUMN ph_code VARCHAR(10) DEFAULT '+91';
+ALTER TABLE customers ADD COLUMN state VARCHAR(45) NULL;
 ALTER TABLE customers ADD COLUMN profile_photo VARCHAR(500) NULL;
 ALTER TABLE customers ADD COLUMN device_id LONGTEXT NULL;
 ALTER TABLE customers ADD COLUMN otp VARCHAR(6) NULL;
