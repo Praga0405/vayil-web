@@ -1,5 +1,87 @@
 # Release Notes
 
+## v4.5.3 — Functional-test hotfix: `/customers/payments` reads `payment_intents` (2026-05-27)
+
+Commit: `fb9f84b7`.
+
+Full re-test of the customer + vendor functional flows after v4.5.2
+surfaced one real UI bug: the customer Project Detail page's
+"Paid (in escrow)" stat always showed **₹0** even after a successful
+`placeOrder` + `payment_update`.
+
+### Root cause
+
+The page calls `customerApi.listPayments()` → `GET /customers/payments`.
+That handler was still reading from the legacy `payment_log` table —
+the v3-era table we stopped writing to in v4.0 when the
+`payment_intents` + `escrow_ledger` pipeline replaced it. Every
+customer therefore got back `[]` and the page summed nothing.
+
+### Fix
+
+`GET /customers/payments` now selects from `payment_intents` (current
+source of truth), returning `intent_id AS id`, `customer_id`,
+`order_id`, `enquiry_id`, `milestone_id`, `amount`, `purpose`,
+`status`, `razorpay_order_id`, `razorpay_payment_id`, `created_at`.
+Falls back to `payment_log` only when the new table has zero rows for
+the customer (so pre-v4 historical data still surfaces).
+
+### Live verification
+
+Before:
+```
+GET /customers/payments → {success:true, payments:[]}
+UI: Paid (in escrow) ₹0  ← wrong
+```
+
+After (customer #60 with intent #20 escrow_held ₹4,766 on order #21):
+```
+GET /customers/payments → {success:true, payments:[{
+  id:20, status:'escrow_held', amount:'4766.00', order_id:21, ...
+}]}
+UI: Paid (in escrow) ₹4,766  ← correct
+```
+
+### Full-test results after the fix
+
+| Surface | Result |
+|---|---|
+| `npm run smoke:web` | ✅ 6/6 |
+| `npm run smoke:mobile` | ✅ 38/38 + 14-stage E2E |
+| `npm run smoke:admin` | ✅ 50/50 |
+| **v4.5.2 new endpoints (12)** | ✅ 12/12 — including bare-path `/CustomerupdatePlan` |
+| UI customer project page | ✅ "Paid (in escrow) ₹4,766" renders correctly |
+| UI vendor jobs page | ✅ "v452 Cust · ₹4,766 / ₹4,766 · 100% paid · APPROVED" |
+| Dual-write mirrors | ✅ reviews 10/10, materials 15/15, cart 0/0, order_step_logs 5 signoffs |
+| `id`-column coverage across 7 tables | ✅ 100% (after backfill re-run) |
+| OTP row-column mirror (existing users) | ✅ otp + otp_expires_at + otp_attempts + last_otp_sent_at populated |
+| **Endpoint audit** | ✅ **146/146 (100%)** |
+
+### Open observations (deferred to v5)
+
+- **First-time signup OTP row-mirror is a no-op** — the user row
+  doesn't exist when `storeOtp` runs (it's created later in
+  `verifyOtpAndIssueToken`). Returning users + every subsequent OTP
+  request work fine. Could be patched by mirroring inside
+  `verifyOtpAndIssueToken` after INSERT — low priority since
+  `otp_codes` remains the source of truth for `verifyOtp`.
+- **`vendor_wallet` is credited the full `intent.amount`** instead of
+  `vendorNetPayout` (`base - platformFee - tds`). Pre-existing v4.0
+  behaviour; the platform's share never moves from customer total
+  to a separate platform account.
+- **`city` table has duplicate-name seed rows** — `INSERT IGNORE`
+  only dedupes by PK. Cosmetic.
+
+### Files
+
+| Path | Change |
+|---|---|
+| `backend/src/routes/customer.ts` | `/payments` handler rewritten (+16 lines) |
+
+Net: 1 file, +18 / −2 lines.
+
+---
+
 ## v4.5.2 — Close out Option A: 100% endpoint coverage + OTP row mirror + smoke:admin (2026-05-27)
 
 Audited commit `dabdefc0` (the v4.5.0 Option A delivery) against the
