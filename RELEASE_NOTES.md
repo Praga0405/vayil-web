@@ -1,5 +1,54 @@
 # Release Notes
 
+## v4.5.1 — Functional-test hotfix for 3 admin endpoints (2026-05-27)
+
+Commit: `4eb6868c`.
+
+Ran a complete functional test against the v4.5 deploy: web smoke
+(6/6), mobile smoke (38/38), full admin endpoint sweep (47 endpoints
+via `/tmp/smoke_admin.py`), schema mirror integrity check, mobile
+id-column read test, UI workflow drive. Three admin-endpoint bugs
+surfaced and were fixed:
+
+| # | Endpoint | Symptom | Root cause | Fix |
+|---|---|---|---|---|
+| 1 | `delete-categories` / `delete-subcategories` / `Deletetags` | 500 "Truncated incorrect INTEGER value: '[2]'" | mysql2 named placeholders don't expand arrays inside `IN()` — `:ids` was literalised as the string `'[2]'` | Build placeholder list dynamically (`ids.map(() => '?').join(',')`) + use positional binds |
+| 2 | `CreateCustomer` | 500 "Unknown column 'state' in field list" | Migration 004 added `state` to vendors but missed customers (mobile reference has it on both) | Added `ALTER TABLE customers ADD COLUMN state VARCHAR(45) NULL` in migration 004 |
+| 3 | `editProofType` | Generic 500 on duplicate `proof_name` | Generic error path instead of clean 409 for the `uniq_proof` UNIQUE-index violation | Catch errno 1062, return 409 with the clear message we already use for `addProofType` + `createAdmin` |
+
+### Full-test results after the fix
+
+| Surface | Result |
+|---|---|
+| `npm run smoke:web` | ✅ 6/6 |
+| `npm run smoke:mobile` | ✅ 38/38 + full E2E |
+| Admin endpoint sweep | ✅ **47/47** |
+| Schema mirror (cart / review / material) | ✅ 0/0, 8/8, 13/13 — exact row-count match |
+| `id`-column backfill across 7 tables | ✅ 358/358 rows (100%) |
+| Signoff audit chain (order_step_logs, vendor_transactions) | ✅ All 3 signoffs since the v4.5 deploy carry the new audit |
+| UI `/search` + `/vendor-studio/jobs` | ✅ Renders correctly (42 verified pros; vendor card shows "E2E Bob · ₹6,037 / ₹6,037 · 100% paid · APPROVED") |
+| Mobile-shim read by `id` column | ✅ enquiry row returns both `enquiry_id: 25` AND `id: 25` |
+
+### Open observations (intentionally deferred, not blockers)
+
+- `platform_transactions` always 0 in smoke runs — smoke uses
+  identical pay-amount and order-amount, so `platformShare =
+  totalReleased - baseAmount = 0`. Real Razorpay payments with
+  `calculateTax` will populate the gap.
+- `tools_master` table is empty — no seed data shipped in 004. Mobile
+  team can populate via the existing CRUD pattern when needed.
+- `vendor_wallet` is credited the full `intent.amount` instead of
+  `vendorNetPayout` (`base - platformFee - tds`). Pre-existing v4.0
+  behaviour; queued for a v5 fix.
+
+### Files
+
+`backend/migrations/004_align_mobile_schema.sql` (one ALTER added)
++ `backend/src/routes/adminMobile.ts` (3 handlers patched).
+Net: 2 files, +13 / −4 lines.
+
+---
+
 ## v4.5.0 — Schema alignment with the mobile team's reference DB + 50 admin endpoints (2026-05-27)
 
 After the mobile team shared their reference DB dump (`vayil-Dump20260527.sql`,

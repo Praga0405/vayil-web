@@ -737,3 +737,8 @@ The mobile team's 50-endpoint admin surface (`/Admin/loginAdmin`,
 `/Admin/Dashboard`, city/state/category/tag/proof CRUD, customer
 mgmt, payment history) is mounted from `backend/src/routes/adminMobile.ts`
 alongside the existing `/Admin/GetVendorList` family.
+
+**Verified end-to-end** (v4.5.1, 2026-05-27): all 47 admin endpoints
+pass + schema mirrors at 100% row parity (8/8 review pair, 13/13
+material pair, 358/358 rows have `id` column populated across the 7
+mirrored tables). See `RELEASE_NOTES.md` for the hotfix details.
