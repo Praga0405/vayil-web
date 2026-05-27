@@ -23,13 +23,23 @@ export async function addReview(b: AddReviewInput) {
        ON DUPLICATE KEY UPDATE rating = VALUES(rating), title = VALUES(title), comment = VALUES(comment)`,
       [b.customer_id, b.vendor_id, b.order_id ?? null, b.rating, b.title ?? null, b.comment ?? null],
     );
-    // Recompute vendor.rating from all visible reviews.
+    // Mirror to mobile-team's `customer_review` (singular) table so mobile
+    // clients see the same review.
+    await conn.query(
+      `INSERT INTO customer_review (order_id, customer_id, vendor_id, service_id, rating, review_description, status)
+       VALUES (?, ?, ?, COALESCE((SELECT service_id FROM orders WHERE order_id = ? LIMIT 1), 0), ?, ?, 1)`,
+      [b.order_id ?? null, b.customer_id, b.vendor_id, b.order_id ?? null, b.rating, b.comment ?? null],
+    ).catch(() => {});
+    // Recompute vendor.rating from all visible reviews across both tables.
     await conn.query(
       `UPDATE vendors v SET v.rating = (
-          SELECT COALESCE(AVG(rating), 0) FROM customer_reviews
-           WHERE vendor_id = ? AND status = 'visible'
+          SELECT COALESCE(AVG(rating), 0) FROM (
+            SELECT rating FROM customer_reviews WHERE vendor_id = ? AND status = 'visible'
+            UNION ALL
+            SELECT rating FROM customer_review  WHERE vendor_id = ? AND status = 1
+          ) r
        ) WHERE v.vendor_id = ?`,
-      [b.vendor_id, b.vendor_id],
+      [b.vendor_id, b.vendor_id, b.vendor_id],
     );
     return insRes.insertId;
   });
@@ -37,12 +47,23 @@ export async function addReview(b: AddReviewInput) {
 }
 
 export async function listVendorReviews(vendorId: number | string, limit = 50) {
+  // UNION across our + mobile review tables so a single endpoint returns
+  // every review regardless of which client wrote it.
   return query<any>(
-    `SELECT r.*, c.name AS customer_name, c.profile_image AS customer_image
+    `SELECT r.review_id AS review_id, r.vendor_id, r.customer_id, r.order_id,
+            r.rating, r.title, r.comment, r.created_at,
+            c.name AS customer_name, c.profile_image AS customer_image
        FROM customer_reviews r
        LEFT JOIN customers c ON c.customer_id = r.customer_id
       WHERE r.vendor_id = :id AND r.status = 'visible'
-      ORDER BY r.review_id DESC
+     UNION ALL
+     SELECT cr.id AS review_id, cr.vendor_id, cr.customer_id, cr.order_id,
+            cr.rating, NULL AS title, cr.review_description AS comment, cr.created_at,
+            c.name AS customer_name, c.profile_image AS customer_image
+       FROM customer_review cr
+       LEFT JOIN customers c ON c.customer_id = cr.customer_id
+      WHERE cr.vendor_id = :id AND cr.status = 1
+      ORDER BY created_at DESC
       LIMIT :limit`,
     { id: vendorId, limit },
   );

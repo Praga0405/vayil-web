@@ -81,17 +81,25 @@ export function adaptJob(
   // (originally-agreed amount, total in escrow). This still flags a
   // pre-payment that exceeds the quote (rare, paid into escrow ahead
   // of time) as 100% rather than negative-remaining.
-  const baseTotal = Number(order.amount ?? 0)
-  const milestones: MockMilestone[] = plan.map(p => ({
-    id:          p.plan_id,
-    title:       p.title ?? 'Milestone',
-    days:        0,
-    percentage:  baseTotal > 0 ? Math.round((Number(p.amount ?? 0) / baseTotal) * 100) : 0,
-    amount:      Number(p.amount ?? 0),
-    mandatory:   true,
-    status:      statusToMilestone(p.vendor_status, p.customer_status),
-    updates:     [],
-  }))
+  // v4.5: accept either the web `amount` column or the mobile team's
+  // `order_amount` (varchar). Same for plan rows: `amount` vs
+  // `amount_percentage`. Adapter absorbs the column rename.
+  const baseTotal = Number((order as any).amount ?? (order as any).order_amount ?? 0)
+  const milestones: MockMilestone[] = plan.map(p => {
+    const amt = Number((p as any).amount ?? 0)
+    const pct = Number((p as any).percentage ?? (p as any).amount_percentage ??
+                       (baseTotal > 0 ? Math.round((amt / baseTotal) * 100) : 0))
+    return {
+      id:          (p as any).plan_id ?? (p as any).id,
+      title:       p.title ?? 'Milestone',
+      days:        Number((p as any).days ?? (p as any).completion_days ?? 0),
+      percentage:  pct,
+      amount:      amt,
+      mandatory:   true,
+      status:      statusToMilestone(p.vendor_status, p.customer_status),
+      updates:     [],
+    }
+  })
   // Prefer the server-rolled escrow totals (added with v4.x) so the
   // vendor sees the customer's advance as "Paid (in escrow)" rather than
   // ₹0 until each milestone individually completes. The list endpoint
@@ -123,9 +131,10 @@ export function adaptJob(
        : plan.some(p => p.customer_status === 'pending')           ? 'SUBMITTED'
        : plan.length > 0                                            ? 'APPROVED'
        :                                                              'NOT_STARTED')
+  const orderIdResolved = (order as any).order_id ?? (order as any).id
   return {
-    id:           order.order_id,
-    order_id:     order.order_id,
+    id:           orderIdResolved,
+    order_id:     orderIdResolved,
     customer_name: order.customer_name ?? `Customer #${order.customer_id}`,
     service_title: order.service_title ?? 'Home Service',
     total,

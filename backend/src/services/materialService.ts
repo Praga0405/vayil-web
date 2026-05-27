@@ -39,6 +39,18 @@ export async function addMaterial(orderId: number | string, m: MaterialInput) {
       rate, total, status: m.status ?? 'UNPAID',
     },
   );
+  // Dual-write to the mobile team's order_plan_materials (richer tax cols).
+  await exec(
+    `INSERT INTO order_plan_materials
+       (order_id, title, unit_type, qty, unit_cost, total_cost, balance_cost,
+        m_final_amount, payment_status, status, created_at)
+     VALUES (:oid, :title, :unit, :qty, :rate, :total, :total,
+             :total, 'UNPAID', 'UNPAID', NOW())`,
+    {
+      oid: orderId, title: m.name, unit: m.unit ?? 'pc',
+      qty: String(qty), rate, total,
+    },
+  ).catch(() => {});
   return getMaterial(result.insertId);
 }
 

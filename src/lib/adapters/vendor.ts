@@ -89,11 +89,17 @@ export function adaptVendorDetail(
   listings: BackendListing[] = [],
   reviews: DummyReview[] = [],
 ): DummyVendor {
-  const company = vendor.company_name || vendor.name || `Vendor #${vendor.vendor_id}`
-  const owner   = vendor.name || vendor.company_name || `Owner #${vendor.vendor_id}`
+  // v4.5: backend rows may carry either our `vendor_id` (web schema) OR
+  // the mobile team's `id` (mobile schema), and profile photo may be
+  // `profile_image` or `profile_photo`. Accept both.
+  const vId = (vendor as any).vendor_id ?? (vendor as any).id
+  const photo = (vendor as any).profile_image ?? (vendor as any).profile_photo
+  const company = vendor.company_name || vendor.name || `Vendor #${vId}`
+  const owner   = (vendor as any).full_name || vendor.name || vendor.company_name || `Owner #${vId}`
   const rating  = Number(vendor.rating ?? 0)
-  const verified = vendor.status === 'verified' || vendor.status === 'active'
+  const verified = ['verified', 'active', 'approved'].includes(vendor.status as string)
   const years   = yearsFromOnboarded(vendor.onboarded_date)
+                || Number((vendor as any).years_of_experience ?? 0) || 0
   const services = listings.map(adaptListingToService)
   const startingPrice = services.length
     ? Math.min(...services.map(s => s.price).filter(n => n > 0)) || 0
@@ -103,12 +109,12 @@ export function adaptVendorDetail(
   const firstCategory = listings[0]?.category_id ? `category-${listings[0].category_id}` : 'home-services'
 
   return {
-    id:              String(vendor.vendor_id),
+    id:              String(vId),
     service_slug:    firstCategory,
     service_label:   'Home Services',
     company_name:    company,
     owner_name:      owner,
-    avatar:          placeholderAvatar(company),
+    avatar:          photo || placeholderAvatar(company),
     cover_image:     placeholderCover,
     city:            vendor.city ?? 'Coimbatore',
     area:            vendor.city ?? 'Coimbatore',

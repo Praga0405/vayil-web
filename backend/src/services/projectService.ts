@@ -206,6 +206,13 @@ export async function signoffOrder(orderId: number | string, customerId: number 
         WHERE o.order_id = ?`,
       [orderId],
     );
+    // Mobile-team audit trail: append a SIGNOFF step to order_step_logs
+    // so the mobile order detail timeline shows the signoff event.
+    await conn.query(
+      `INSERT INTO order_step_logs (order_id, step, step_status, performed_by, performed_by_id, remarks)
+       VALUES (?, 99, 'SIGNED_OFF', 'CUSTOMER', ?, ?)`,
+      [orderId, customerId, comment ?? null],
+    );
   });
   // Release every held payment_intent on this order — same behaviour as
   // the canonical /customers/projects/:id/signoff route. Without this
@@ -213,9 +220,40 @@ export async function signoffOrder(orderId: number | string, customerId: number 
   // never credits the vendor's wallet.
   const { releaseEscrow } = await import('../routes/payments');
   const intents = await query<any>(
-    `SELECT intent_id FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
+    `SELECT intent_id, amount FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
     { id: orderId },
   );
   for (const i of intents) await releaseEscrow(i.intent_id);
+
+  // Mirror the escrow release into the mobile team's vendor_transactions
+  // + platform_transactions tables so mobile clients see consistent
+  // earnings + platform-fee numbers without needing escrow_ledger.
+  const order = await one<any>(`SELECT vendor_id, amount FROM orders WHERE order_id = :id`, { id: orderId });
+  if (order?.vendor_id) {
+    const totalReleased = intents.reduce((s: number, i: any) => s + Number(i.amount), 0);
+    if (totalReleased > 0) {
+      const wallet = await one<any>(`SELECT balance FROM vendor_wallet WHERE vendor_id = :id`, { id: order.vendor_id });
+      await exec(
+        `INSERT INTO vendor_transactions (vendor_id, order_id, type, amount, balance_after, description, created_at)
+         VALUES (:vid, :oid, 'earning', :amt, :bal, :desc, NOW())`,
+        {
+          vid: order.vendor_id, oid: orderId, amt: totalReleased,
+          bal: Number(wallet?.balance ?? 0),
+          desc: `Earning from order #${orderId} signoff`,
+        },
+      ).catch(() => {});
+      // Platform earned: the customer paid customerTotal but the vendor
+      // gets baseAmount-platformFee. Difference = platform earning.
+      const baseAmount = Number(order.amount ?? 0);
+      const platformShare = Math.max(0, totalReleased - baseAmount);
+      if (platformShare > 0) {
+        await exec(
+          `INSERT INTO platform_transactions (order_id, amount, description, transaction_type)
+           VALUES (:oid, :amt, :desc, 'credit')`,
+          { oid: orderId, amt: platformShare, desc: `Platform fee for order #${orderId}` },
+        ).catch(() => {});
+      }
+    }
+  }
   return { order_id: Number(orderId), status: 'completed' };
 }

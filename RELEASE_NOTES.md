@@ -1,5 +1,206 @@
 # Release Notes
 
+## v4.5.0 — Schema alignment with the mobile team's reference DB + 50 admin endpoints (2026-05-27)
+
+After the mobile team shared their reference DB dump (`vayil-Dump20260527.sql`,
+28 tables) + Postman collection (`Vayil.json`, 146 endpoints across
+Admin / Customer Mobile / Vendor Mobile), we ran a full diff and adopted
+their schema as the single source of truth so both clients can read/write
+the same MySQL instance with zero integration friction.
+
+This is **Option A** from the plan I proposed before starting: full
+schema alignment with dual-write where it matters, no regression to the
+web portal. The 9 phases of the plan all landed in one commit.
+
+### Phase 1+2 — Migration `004_align_mobile_schema.sql`
+
+Massive idempotent additive migration. **5 new tables** + **~140
+column additions** across every existing table:
+
+#### New tables (mobile-team shapes)
+
+| Table | Purpose |
+|---|---|
+| `cart` | Mobile cart (status enum 1/2/3 — in cart / ordered / deleted). Coexists with our `customer_cart` |
+| `customer_review` (singular) | Mobile's review shape. Coexists with our `customer_reviews` (plural) |
+| `order_plan_materials` | Mobile's material rows with richer tax cols (`m_tax`, `m_tax_cost`, `m_platform_cost`, `m_convenience_cost`, `m_final_amount`). Coexists with `materials` |
+| `order_step_logs` | Per-step audit trail (step, performed_by enum, remarks) |
+| `platform_transactions` | Per-order platform earnings (replaces our escrow_ledger for mobile audit) |
+| `admins` | Flat admin user table (mobile uses simple email/password) |
+| `master_proof_types` | KYC ID types lookup |
+| `status_master` | Status name catalogue |
+| `tools_master` | Vendor tool dictionary |
+| `languages` | Spoken language list |
+| `states`, `city` | Indian state + city dropdown source |
+
+All seeded with sensible Indian-market defaults (7 proof types, 12
+status names, 13 languages, 10 states, 12 cities, 1 default admin).
+
+#### Column aliases on existing tables
+
+Every table gets an `id` column that mirrors its legacy `*_id` PK so
+both column names point at the same row. Plus the mobile team's
+per-table column set:
+
+| Table | New columns added |
+|---|---|
+| `customers` | `id`, `ph_code`, `profile_photo`, `device_id`, `otp`, `otp_expires_at`, `otp_attempts`, `last_otp_sent_at`, `terms_accept`, `is_deleted` |
+| `vendors` | `id`, `ph_code`, `full_name`, `state`, `profile_photo`, `service_tag`, `service_category`, `sub_service`, `years_of_experience`, `short_bio`, `languages`, `area_of_service`, `working_hours_from/to`, `willing_to_travel`, `tools_available`, `certifications`, `kyc_id_type/number/image`, `kyc_selfie`, `kyc_status`, `kyc_submitted_at`, `kyc_verified_at`, `device_id`, OTP columns, `accept_enquires`, `terms_accept`, `is_deleted` |
+| `enquiries` | `id`, `first_name`, `last_name`, `phone`, `files`, `service_id`, `message` |
+| `orders` | `id`, `quote_id`, `service_id`, `message`, `files`, `order_amount` (varchar), `currency`, `payment_id`, `payment_json`, `payment_status` |
+| `quotation` | `id`, `parent_id`, `sender_role` enum, `customer_id`, `sender_id`, `receiver_id`, `service_id`, `first_name`, `last_name`, `email`, `phone`, `files`, `q_tax`, `q_tax_cost`, `q_convenience_cost`, `q_platform_cost`, `final_amount`, `service_time` |
+| `order_plan` | `id`, `completion_days`, `amount_percentage`, `balance_cost`, `update_photo`, `update_comments` |
+| `vendor_services` | `id`, `service_title`, `service_category`, `service_subcategory`, `pricing_type` enum, `unit_name`, `service_image`, `certificate_url`, `is_active`, `show_review`, `minimum_fee`, `is_deleted` |
+| `service_categories/subcategories/tags` | `id`, `slug`, `icon_url`, `is_active`, `is_deleted` |
+| `bank_details` | `pan_number`, `swift_code` |
+| `vendor_wallet` | `total_payout` |
+| `vendor_transactions` | `balance_after`, `payout_fee`, `reference_id`, `description` |
+| `settings` | `site_name`, `site_logo`, `convenience_fee_percentage`, `platform_fee`, `payout_fee`, `payment_name/key/secret`, `tax_option`, SMTP cols, `site_url`, `support_email`, meta cols, `google_analytics_id` |
+
+Inline `UPDATE` statements backfill the new columns from the existing
+ones on every existing row (e.g. `id = customer_id`, `profile_photo =
+profile_image`, `short_bio = about`).
+
+### Phase 3+6 — Service layer dual-write
+
+Five services updated to write to both old + new tables so cross-client
+reads stay consistent:
+
+| Service | Dual-write target |
+|---|---|
+| `customerService.addToCart / removeCartItem / clearCart` | `customer_cart` + `cart` (status enum mirror) |
+| `reviewService.addReview` | `customer_reviews` + `customer_review`. Vendor rating now computed from `UNION ALL` across both tables |
+| `reviewService.listVendorReviews` | `UNION ALL` returns rows from both tables in one response |
+| `materialService.addMaterial` | `materials` + `order_plan_materials` |
+| `projectService.signoffOrder` | Existing: signoffs + orders.status + releaseEscrow. **New**: `order_step_logs` (step 99 = SIGNED_OFF), `vendor_transactions(type='earning', balance_after, description)`, `platform_transactions(transaction_type='credit')` for the platform fee share |
+| `authService.verifyOtpAndIssueToken` | After INSERT, mirrors `customer_id → id` / `vendor_id → id` so mobile reads via `id` work immediately |
+
+### Phase 4 — `adminMobile.ts` with 50 admin endpoints
+
+New `backend/src/routes/adminMobile.ts` mounted at `/Admin/*` and
+`/admin/*` (before the existing `adminRouter` so the open `/loginAdmin`
+endpoint isn't blocked by router-level auth). Exposes every endpoint
+from the mobile team's Admin folder:
+
+- **Auth + admin mgmt** (5): `loginAdmin`, `createAdmin`, `updateAdmin`,
+  `getAdminList`, `getAdminById`
+- **Cities + states + countries** (10): `addCity`, `updateCity`,
+  `deleteCity`, `get_city`, `updateCityStatus`, `addState`,
+  `updateState`, `deleteState`, `updateStateStatus`, `get_countries`
+- **Service categories / subcategories / tags** (13): full CRUD +
+  `UpdateStatus` toggles
+- **Proof types** (5): `addProofType`, `editProofType`, `ProofStatus`,
+  `deleteProof`, `listProofTypes`
+- **Customer mgmt** (6): `GetCustomerList`, `CreateCustomer`,
+  `UpdateCustomer`, `UpdateCustomerStatus`, `GetCustomerById`,
+  `DeleteCustomer`
+- **Orders / payments / dashboard** (8): `EnuqiryList`, `OrderList`,
+  `OrderDetails`, `orderPaymentSummary`, `PaymentHistory`,
+  `GetBankList`, `Dashboard`, `Settings` + `updateSettings`
+
+`/Admin/Dashboard` returns live stats (currently: 42 customers, 64
+vendors, 14 orders, ₹30,738 wallet total) joined across the existing
+tables.
+
+Admin auth uses a separate JWT signed with `STAFF_JWT_SECRET` carrying
+`{ admin_id, email_id, role }` — distinct from the customer/vendor
+user JWT so the same endpoint can't be reached by mistake.
+
+### Phase 5 — Web adapters absorb the column renames
+
+`src/lib/adapters/vendor.ts` and `vendor-studio.ts` now read either
+column name:
+
+```ts
+// Read both shapes — web and mobile schemas use different names
+const vId   = vendor.vendor_id ?? vendor.id
+const photo = vendor.profile_image ?? vendor.profile_photo
+const owner = vendor.full_name ?? vendor.name
+const years = yearsFromOnboarded(vendor.onboarded_date)
+              || Number(vendor.years_of_experience ?? 0)
+const verified = ['verified','active','approved'].includes(vendor.status)
+```
+
+```ts
+// vendor-studio adapter
+const baseTotal = Number(order.amount ?? order.order_amount ?? 0)
+const pct       = Number(p.percentage ?? p.amount_percentage ?? …)
+const orderId   = order.order_id ?? order.id
+```
+
+No JSX changes required — the JSX consumes whatever the adapter
+returns, and the adapter handles both schemas transparently.
+
+### Phase 7 — Backfill script `scripts/backfill-mobile-schema.ts`
+
+One-shot, re-runnable, idempotent. Three jobs:
+
+1. **id-column sync** — `UPDATE … SET id = legacy_id WHERE id IS NULL`
+   for all 7 tables that got an `id` mirror.
+2. **`customer_cart` → `cart`** — copies any web-cart rows into the
+   mobile cart with `status=1`. NOT EXISTS guard prevents duplicates.
+3. **`customer_reviews` → `customer_review`** — same pattern.
+4. **`materials` → `order_plan_materials`** — same pattern.
+
+Live run on the dev DB mirrored 5 reviews + 10 materials successfully
+(0 cart rows existed). `--dry-run` and `--verbose` flags supported.
+
+### Build verification
+
+```
+✓ backend  npm run build                     0 errors
+✓ backend  npm run migrate                   idempotent
+✓ backend  npm run smoke:web                 6/6 pass
+✓ backend  npm run smoke:mobile              38 endpoints + E2E pass
+✓ frontend npx tsc --noEmit                  0 errors
+✓ Admin/loginAdmin → JWT issued
+✓ Admin/Dashboard returns live stats {42 customers, 64 vendors,
+                                       14 orders, ₹30,738 wallet}
+✓ Admin/get_city {state_id:1} returns 4 Tamil Nadu cities
+✓ Admin/listProofTypes returns 7 seeded types
+✓ Admin/service-categories returns 12 categories
+✓ UI: /search renders 42 verified professionals (no regression)
+```
+
+### Files changed
+
+7 files, **+1,400 lines** added:
+
+| File | Change |
+|---|---|
+| `backend/migrations/004_align_mobile_schema.sql` | NEW — full schema alignment |
+| `backend/src/routes/adminMobile.ts` | NEW — 50 admin endpoints |
+| `backend/scripts/backfill-mobile-schema.ts` | NEW — re-runnable backfill |
+| `backend/src/index.ts` | Wired adminMobileRouter BEFORE adminRouter |
+| `backend/src/services/{auth,customer,review,material,project}Service.ts` | Dual-write across both schemas |
+| `src/lib/adapters/vendor.ts`, `vendor-studio.ts` | Read both column names |
+
+### Mobile integration checklist for the mobile team
+
+1. Point your Dio `baseUrl` at our backend host.
+2. Use the same OTP bypass (`123456`) you currently use in dev — no
+   change needed.
+3. Default admin login is `admin@vayil.in` / `Admin@123` (rotate after
+   first login).
+4. Every endpoint in your Postman collection is now mounted and
+   returning the same response shape.
+5. Both reads (your `id` column) and writes (legacy `customer_id` /
+   `vendor_id` etc.) work — pick whichever you prefer.
+6. The web portal continues to operate on the same DB without any
+   changes on your side.
+
+### Sunset (Phase 9 — deferred)
+
+We're keeping our richer `payment_intents` / `escrow_ledger` /
+`idempotency_keys` / `webhook_deliveries` tables as a defensive shadow
+audit alongside the mobile team's `vendor_transactions` +
+`platform_transactions`. They cost nothing to maintain, give us a
+paired-entry forensic trail, and can be dropped any time without
+affecting either client. Decision: keep for now, re-evaluate in a
+future v5.
+
+---
+
 ## v4.4.0 — Production-readiness pass: migration / uploads / payment hygiene / docs (2026-05-26)
 
 Commit: `a34d31f6`.

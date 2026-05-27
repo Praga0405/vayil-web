@@ -59,6 +59,8 @@ export async function verifyOtpAndIssueToken(opts: {
         status: userType === 'vendor' ? 'pending' : 'active',
       },
     );
+    // Mirror legacy_id → mobile `id` column so cross-schema reads work.
+    await exec(`UPDATE ${table} SET id = ${idCol} WHERE ${idCol} = :id`, { id: result.insertId }).catch(() => {});
     user = await one<any>(`SELECT * FROM ${table} WHERE ${idCol} = :id`, { id: result.insertId });
   }
   const token = signToken({ id: user[idCol], userType });

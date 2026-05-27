@@ -12,6 +12,7 @@ import { opsRouter } from './routes/ops';
 import { commonRouter } from './routes/common';
 import { paymentsRouter, paymentsWebhookRouter } from './routes/payments';
 import { adminRouter } from './routes/admin';
+import { adminMobileRouter } from './routes/adminMobile';
 import { legacyCustomerRouter } from './routes/legacyCustomer';
 import { legacyVendorRouter } from './routes/legacyVendor';
 
@@ -72,6 +73,13 @@ app.use('/vendors', vendorRouter);
 app.use('/ops', opsRouter);
 app.use('/payments', paymentsRouter);
 
+// Mount adminMobileRouter FIRST so its open /loginAdmin endpoint can
+// match before the existing adminRouter's router-level requireAuth
+// middleware rejects unauthenticated requests. The two routers expose
+// disjoint paths (mobile: loginAdmin, addCity, …; existing: GetVendorList,
+// VendorDetails, …) so there's no collision.
+app.use('/Admin', adminMobileRouter);
+app.use('/admin', adminMobileRouter);
 app.use('/Admin', adminRouter);
 app.use('/admin', adminRouter);
 

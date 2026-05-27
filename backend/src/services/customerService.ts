@@ -88,6 +88,8 @@ export async function addToCart(customerId: number | string, body: {
   vendor_id?: number | string; service_id?: number | string;
   quantity?: number; price?: number; service_title?: string; metadata?: any;
 }) {
+  // Dual-write: insert into our customer_cart (which has price/title/qty/
+  // metadata) AND the mobile team's `cart` table (status enum 1=in cart).
   const result: any = await exec(
     `INSERT INTO customer_cart (customer_id, vendor_id, service_id, service_title, quantity, price, metadata)
      VALUES (:cid, :vid, :sid, :title, :qty, :price, :meta)`,
@@ -101,6 +103,13 @@ export async function addToCart(customerId: number | string, body: {
       meta: body.metadata ? JSON.stringify(body.metadata) : null,
     },
   );
+  if (body.vendor_id && body.service_id) {
+    await exec(
+      `INSERT INTO cart (customer_id, vendor_id, service_id, status)
+       VALUES (:cid, :vid, :sid, 1)`,
+      { cid: customerId, vid: body.vendor_id, sid: body.service_id },
+    ).catch(() => { /* tolerate if mobile cart already has the row */ });
+  }
   return one<any>('SELECT * FROM customer_cart WHERE cart_id = :id', { id: result.insertId });
 }
 
@@ -116,11 +125,23 @@ export async function getCart(customerId: number | string) {
 }
 
 export async function removeCartItem(customerId: number | string, cartId: number | string) {
+  // Look up the legacy row first so we can also soft-delete the mirror
+  // in the mobile `cart` table (status=3).
+  const legacy = await one<any>(
+    'SELECT vendor_id, service_id FROM customer_cart WHERE cart_id = :id AND customer_id = :cid',
+    { id: cartId, cid: customerId },
+  );
   const result: any = await exec(
     'DELETE FROM customer_cart WHERE cart_id = :id AND customer_id = :cid',
     { id: cartId, cid: customerId },
   );
   if (!result.affectedRows) throw new ApiError(404, 'Cart item not found');
+  if (legacy?.vendor_id && legacy?.service_id) {
+    await exec(
+      `UPDATE cart SET status = 3 WHERE customer_id = :cid AND vendor_id = :vid AND service_id = :sid AND status = 1`,
+      { cid: customerId, vid: legacy.vendor_id, sid: legacy.service_id },
+    ).catch(() => {});
+  }
   return { cart_id: Number(cartId), removed: true };
 }
 
@@ -129,5 +150,7 @@ export async function clearCart(customerId: number | string) {
     'DELETE FROM customer_cart WHERE customer_id = :id',
     { id: customerId },
   );
+  // Soft-clear the mobile mirror too.
+  await exec(`UPDATE cart SET status = 3 WHERE customer_id = :id AND status = 1`, { id: customerId }).catch(() => {});
   return { cleared: true, count: result.affectedRows };
 }

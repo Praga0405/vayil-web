@@ -481,6 +481,7 @@ Hot reload is on for both. Edits to `src/` reflect immediately; backend uses `ts
 | `002_prd_workflow_tables.sql` | PRD §10 workflow: `payment_intents`, `escrow_ledger`, `materials`, `plan_submissions`, `signoffs`, `rework_requests`, `milestone_updates`, `webhook_deliveries`, `idempotency_keys` + ALTER on `order_plan` and `enquiries` |
 | `003_mobile_compatibility_tables.sql` | 5 mobile-parity tables (`customer_cart`, `customer_reviews`, `notifications`, `bank_details`, `payout_requests`) + ~30 metadata columns across `customers`, `vendors`, `vendor_services`, `enquiries`, `quotation` (profile_image, fcm_token, pincode, attachment_urls, location_lat/lng, budget, advance_amount, platform_fee, gst, total, onboarding_metadata, …) |
 | `003_seed_tagging.sql` | `seed_source VARCHAR(40)` column on base tables for `unseed:marketplace` |
+| `004_align_mobile_schema.sql` | **v4.5 mobile team alignment** — adds `id` mirror PK + mobile column set on every table; creates `cart`, `customer_review`, `order_plan_materials`, `order_step_logs`, `platform_transactions`, `admins`, `master_proof_types`, `status_master`, `tools_master`, `languages`, `states`, `city` |
 | `004_vendor_review_queue.sql` | `vendor_review_queue` + admin notify columns |
 | `005_orders_enquiry_unique.sql` | `UNIQUE KEY uniq_orders_enquiry (enquiry_id)` on `orders` |
 
@@ -709,3 +710,30 @@ Both env vars are optional. When unset the notification is skipped
 - [`docs/DB_SCHEMA.md`](./docs/DB_SCHEMA.md) — per-table column reference + migration order
 - [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — Render + Vercel + Razorpay webhook + S3/R2/GCS upload setup + prod checklist
 - [`docs/mobile-api-inventory.md`](./docs/mobile-api-inventory.md) — Flutter app endpoint inventory + payload shapes (audit doc)
+
+### Schema alignment with the mobile team (v4.5+)
+
+The backend serves both the web portal **and** the mobile team's
+Flutter apps off the same MySQL. Both schemas coexist in the same
+tables:
+
+- Every table has both legacy and mobile primary-key columns (e.g.
+  `customers.customer_id` AND `customers.id` point at the same row).
+- Mobile-only tables (`cart`, `customer_review` singular,
+  `order_plan_materials`, `order_step_logs`, `platform_transactions`,
+  `admins`, `master_proof_types`, `status_master`, `tools_master`,
+  `languages`, `states`, `city`) are created by migration 004.
+- The service layer dual-writes for the high-traffic cross-client
+  flows (cart, reviews, materials, signoff → vendor_transactions +
+  platform_transactions).
+- Web adapters (`src/lib/adapters/vendor.ts`, `vendor-studio.ts`)
+  read either column name transparently, so the web JSX needs no
+  changes.
+- A re-runnable backfill script (`backend/scripts/backfill-mobile-schema.ts
+  [--dry-run] [--verbose]`) copies historical rows from the legacy
+  tables into the mobile mirrors.
+
+The mobile team's 50-endpoint admin surface (`/Admin/loginAdmin`,
+`/Admin/Dashboard`, city/state/category/tag/proof CRUD, customer
+mgmt, payment history) is mounted from `backend/src/routes/adminMobile.ts`
+alongside the existing `/Admin/GetVendorList` family.
