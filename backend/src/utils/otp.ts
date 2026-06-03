@@ -32,10 +32,32 @@ export async function storeOtp(phone: string, purpose: string, otp: string) {
 }
 
 export async function sendOtp(phone: string, otp: string) {
-  if (!config.twoFactorApiKey || config.otpBypass) return { delivered: false, bypass: true };
-  const url = `https://2factor.in/API/V1/${config.twoFactorApiKey}/SMS/${phone}/${otp}`;
-  await axios.get(url, { timeout: 10000 });
-  return { delivered: true };
+  // Skip sending if OTP bypass is enabled or no API key configured
+  if (config.otpBypass) return { delivered: false, bypass: true };
+  if (!config.twoFactorApiKey) {
+    console.error('[v0] OTP Send Error: TWO_FACTOR_API_KEY or OTP_FACTOR_API_KEY not configured');
+    throw new ApiError(500, 'OTP service not configured. Please check environment variables.');
+  }
+
+  try {
+    // Normalize phone number: remove +, spaces, and ensure it's just digits
+    const normalizedPhone = phone.replace(/[\s+]/g, '');
+    if (!/^\d{10,12}$/.test(normalizedPhone)) {
+      throw new ApiError(400, 'Invalid phone number format. Please provide a 10-12 digit number.');
+    }
+
+    // 2Factor API endpoint: GET /V1/{API_KEY}/SMS/{PHONE_NUMBER}/{OTP}
+    const url = `${config.twoFactorUrl}/${config.twoFactorApiKey}/SMS/${normalizedPhone}/${otp}`;
+    console.log('[v0] Sending OTP to:', normalizedPhone);
+    
+    const response = await axios.get(url, { timeout: 10000 });
+    console.log('[v0] OTP sent successfully:', response.status);
+    return { delivered: true };
+  } catch (error: any) {
+    const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+    console.error('[v0] OTP Send Failed:', errorMsg);
+    throw new ApiError(500, `Failed to send OTP: ${errorMsg}`);
+  }
 }
 
 export async function verifyOtp(phone: string, purpose: string, otp: string) {

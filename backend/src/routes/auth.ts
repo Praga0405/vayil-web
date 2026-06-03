@@ -15,7 +15,16 @@ authRouter.post('/otp/send', async (req, res, next) => {
     const body = sendOtpSchema.parse(req.body);
     const otp = generateOtp();
     await storeOtp(body.phone, `${body.userType}_login`, otp);
-    await sendOtp(body.phone, otp);
+    try {
+      await sendOtp(body.phone, otp);
+    } catch (sendError: any) {
+      // If OTP bypass is enabled, we can still proceed even if sendOtp fails
+      if (process.env.OTP_BYPASS === 'true') {
+        console.warn('[v0] OTP bypass enabled, proceeding despite send error');
+      } else {
+        throw sendError;
+      }
+    }
     ok(res, { message: 'OTP sent successfully' });
   } catch (err) { next(err); }
 });
