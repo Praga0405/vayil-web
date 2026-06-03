@@ -46,11 +46,32 @@ export async function sendOtp(phone: string, otp: string) {
       throw new ApiError(400, 'Invalid phone number format. Please provide a 10-12 digit number.');
     }
 
-    // 2Factor API endpoint: GET /V1/{API_KEY}/SMS/{PHONE_NUMBER}/{OTP}
-    const url = `${config.twoFactorUrl}/${config.twoFactorApiKey}/SMS/${normalizedPhone}/${otp}`;
+    // 2Factor exposes two endpoint families:
+    //   V1 — /API/V1/<key>/SMS/<phone>/<otp>            default OTP template, sender ID is account-level
+    //   R1 — /API/R1/?module=TRANS_SMS&apikey=…&from=…  DLT transactional, custom sender ID + template
+    // Pick based on the configured base URL. The senderId / template
+    // env vars are mandatory for R1; ignored on V1.
+    const base = config.twoFactorUrl.replace(/\/+$/, '');
+    const url = /\/R1$/i.test(base)
+      ? `${base}/?` + new URLSearchParams({
+          module: 'TRANS_SMS',
+          apikey: config.twoFactorApiKey,
+          to: normalizedPhone,
+          from: config.twoFactorSenderId,
+          templatename: config.twoFactorTemplateName,
+          var1: otp,
+        }).toString()
+      : `${base}/${config.twoFactorApiKey}/SMS/${normalizedPhone}/${otp}`;
     console.log('[v0] Sending OTP to:', normalizedPhone);
     
     const response = await axios.get(url, { timeout: 10000 });
+    // 2Factor signals failure in body even on HTTP 200 (Status: "Error").
+    const status = String(response.data?.Status || response.data?.status || '').toLowerCase();
+    if (status && status !== 'success') {
+      const detail = response.data?.Details || response.data?.message || JSON.stringify(response.data);
+      console.error('[v0] OTP gateway rejected:', detail);
+      throw new ApiError(502, `2Factor gateway: ${detail}`);
+    }
     console.log('[v0] OTP sent successfully:', response.status);
     return { delivered: true };
   } catch (error: any) {
