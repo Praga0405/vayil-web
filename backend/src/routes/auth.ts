@@ -51,7 +51,16 @@ async function legacySendOtp(userType: 'customer' | 'vendor', phone: string, res
     if (!phone || phone.length < 8) throw new ApiError(400, 'Phone is required');
     const otp = generateOtp();
     await storeOtp(phone, `${userType}_login`, otp);
-    await sendOtp(phone, otp);
+    try {
+      await sendOtp(phone, otp);
+    } catch (sendError: any) {
+      // If OTP bypass is enabled, we can still proceed even if sendOtp fails
+      if (process.env.OTP_BYPASS === 'true') {
+        console.warn('[v0] OTP bypass enabled, proceeding despite send error');
+      } else {
+        throw sendError;
+      }
+    }
     ok(res, { message: 'OTP sent successfully' });
   } catch (err) { next(err); }
 }
