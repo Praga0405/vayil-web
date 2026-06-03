@@ -21,7 +21,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { authApi, customerApi, vendorApi } from '@/lib/api/client'
-import { IS_DEMO_MODE, OTP_BYPASS_ON, DEV_OTP_CODE, SHOW_DEV_OTP_BANNER } from '@/lib/demoMode'
+import { IS_DEMO_MODE } from '@/lib/demoMode'
 import { VayilIcon } from '@/components/shared/VayilLogo'
 import { X, ArrowRight, ArrowLeft, RotateCw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -38,7 +38,7 @@ interface Props {
 type Tab   = 'customer' | 'vendor'
 type Stage = 'phone' | 'otp' | 'signup'
 
-const DEV_OTP = DEV_OTP_CODE
+const DEV_OTP = '123456'
 const RESEND_SECONDS = 30
 const KNOWN_KEY = 'vayil_known_mobiles'
 
@@ -319,9 +319,9 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
 
         {/* Form body */}
         <div className="px-6 py-6 space-y-4">
-          {SHOW_DEV_OTP_BANNER && (stage === 'phone' || stage === 'otp') && (
+          {IS_DEMO_MODE && stage === 'phone' && (
             <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 font-medium">
-              🛠 Dev mode — OTP delivery is bypassed. Enter <span className="font-mono font-bold">{DEV_OTP}</span> to {stage === 'phone' ? 'sign in or sign up' : 'continue'}.
+              🛠 Dev mode — any 10-digit number works. OTP: <span className="font-mono">{DEV_OTP}</span>
             </div>
           )}
 

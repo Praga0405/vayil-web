@@ -15,22 +15,6 @@ const OPT_OUT    = process.env.NEXT_PUBLIC_USE_MOCK_DATA === 'false'
 export const IS_DEMO_MODE = USE_MOCK || (NO_BACKEND && !OPT_OUT)
 
 /**
- * OTP bypass flag — independent of IS_DEMO_MODE. Real backend, real
- * DB writes, but OTP send/verify is short-circuited so testers can
- * sign in with the well-known dev code (default `123456`) without
- * waiting on an SMS gateway. Mirrors the backend's OTP_BYPASS env
- * — set both together so the UI banner and the API stay in sync.
- *
- * Production checklist (docs/RELEASE_READINESS.md) requires this to
- * be false before any live launch.
- */
-export const OTP_BYPASS_ON = process.env.NEXT_PUBLIC_OTP_BYPASS === 'true'
-export const DEV_OTP_CODE  = process.env.NEXT_PUBLIC_OTP_BYPASS_CODE || '123456'
-
-/** Show the dev OTP banner whenever either bypass path is active. */
-export const SHOW_DEV_OTP_BANNER = IS_DEMO_MODE || OTP_BYPASS_ON
-
-/**
  * Helper for mutation handlers — in demo mode, resolves after a short
  * delay so the UI shows a realistic "submitting" state, then succeeds.
  * In live mode, runs the real promise.
