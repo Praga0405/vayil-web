@@ -1,5 +1,71 @@
 # Release Notes
 
+## v4.5.4 — Full mobile-dump schema parity (2026-06-03)
+
+The mobile team reviewed v4.5.3 against their reference dump
+(`vayil-Dump20260527.sql`) and reported that several tables still
+diverged. v4.5.4 closes every remaining structural gap so the live
+DB's `CREATE TABLE` output matches the dump column-for-column.
+
+### What changed
+
+**New migration: `006_full_mobile_parity.sql`** — 50+ additive
+`ALTER`s, fully idempotent (errno 1060/1061/1091 swallowed by
+`migrate.ts`). No renames, no destructive changes.
+
+Tables touched:
+- `notifications` — added mobile-shape columns (`id`, `description`,
+  `customer_id`, `vendor_id`, `service_id`, `sender_role`,
+  `receiver_role`, `read_status`) alongside our existing columns;
+  backfilled from `notification_id` / `body`.
+- `payment_log` — 14 missing legacy columns (`order_id_legacy`,
+  `mode`, `bank_ref`, `txn_status`, …) added so the mobile app's
+  payment list query stops 500-ing.
+- `states` — added world-DB columns (`country_id`, `fips_code`,
+  `iso2`, `flag`, `wikiDataId`).
+- Audit timestamps — `updated_at` on customers/vendors/enquiries/
+  orders/quotation/vendor_services; `created_at` on the
+  service taxonomy tables; `updated_at` on `settings`.
+- `order_plan.status INT` mirror column added.
+- `enquiries` / `orders` / `quotation` / `bank_details` — added
+  `status_int TINYINT` parity columns + **8 MySQL triggers** (INS/UPD
+  per table) auto-sync `status_int` from the existing `status`
+  varchar on every write. Zero service-layer changes required.
+- Type widenings — `bigint` for the FK columns the mobile schema uses
+  bigints for; `BIGINT NULL` on the mirror `id` columns of
+  `service_categories` / `service_subcategories` / `service_tags` /
+  `vendors`.
+- `vendor_transactions.type` widened to the full mobile ENUM
+  (`earning,payout,refund,adjustment`).
+- `customers` / `vendors` — `status` and `kyc_status` tightened to
+  the mobile ENUM sets; pre-MODIFY UPDATEs normalise the existing
+  rows (`'active'` → `'approved'`, `'kyc_submitted'` →
+  `'pending_approval'`, etc.) so the column conversion succeeds.
+- `customers.ph_code` / `vendors.ph_code` — NOT NULL with
+  `DEFAULT '+91'` (matches dump's NOT NULL; default keeps web's
+  OTP-only insert path working).
+
+### Code
+
+- `authService.ts` — OTP-bootstrapped customer rows now insert with
+  `status='approved'` (was `'active'`) to fit the tightened ENUM.
+
+### Verification
+
+- `npm run migrate` clean. Trigger functional test:
+  `INSERT enquiries(status='accepted')` → `status_int=2` automatic.
+- `smoke:web`, `smoke:mobile`, `smoke:admin` — all green (web 30+,
+  mobile 30+ E2E, admin 50 / 0 fail).
+- `python3 /tmp/schema_diff.py` — only remaining diffs are:
+  (a) the intentional `status varchar + status_int tinyint` dual
+  representation, (b) `quotation.amount` kept as `DECIMAL(12,2)`
+  (strictly safer than dump's `varchar(45)`), and (c) a handful of
+  unsigned/signed mediumint/int cosmetic deltas with no behavioural
+  impact. Net: every column the dump declares is present, with a
+  compatible type, on every shared table.
+
+---
+
 ## v4.5.3 — Functional-test hotfix: `/customers/payments` reads `payment_intents` (2026-05-27)
 
 Commit: `fb9f84b7`.

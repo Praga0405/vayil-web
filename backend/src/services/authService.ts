@@ -56,7 +56,7 @@ export async function verifyOtpAndIssueToken(opts: {
       {
         name: name || defaultName,
         phone,
-        status: userType === 'vendor' ? 'pending' : 'active',
+        status: userType === 'vendor' ? 'pending' : 'approved',
       },
     );
     // Mirror legacy_id → mobile `id` column so cross-schema reads work.
