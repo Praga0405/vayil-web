@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
 const required = (name: string, fallback?: string) => {
   const value = process.env[name] || fallback;
   if (!value) throw new Error(`Missing env var: ${name}`);

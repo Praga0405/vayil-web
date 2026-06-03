@@ -1,24 +1,5 @@
 # Release Notes
 
-## v4.5.14 — `trust proxy` for Vercel edge (2026-06-03)
-
-Runtime logs from production showed `express-rate-limit` throwing `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` on every request. Vercel's edge proxy injects `X-Forwarded-For`, but Express defaults to not trusting proxy headers — the rate-limit middleware refuses to derive the client IP from an untrusted header.
-
-### Fix
-
-`backend/src/index.ts` adds:
-```ts
-app.set('trust proxy', 1);
-```
-
-This trusts exactly one proxy hop (Vercel's edge), which is the safe value when running behind a single managed edge. It does NOT enable wildcard trust.
-
-### Separate issue still open (not a code fix)
-
-Logs also showed `getaddrinfo ENOTFOUND DB_HOST` with `hostname: 'DB_HOST'` (the literal string). This means the Vercel env var `DB_HOST` is set to the placeholder value `"DB_HOST"` instead of the real TiDB hostname. The fix is on the Vercel dashboard, not in code: open Project Settings → Environment Variables → DB_HOST → replace `DB_HOST` with the actual hostname from TiDB Cloud Connect tab (e.g. `gateway01.xx.prod.aws.tidbcloud.com`). Same check for `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`, and confirm `DB_SSL=true`.
-
----
-
 ## v4.5.13 — Unblock Vercel build: tolerate `useParams() | null` type during build (2026-06-03)
 
 v4.5.12's Pages Router catch-all fix never reached production because every redeploy attempt failed at the TypeScript-check step with:
