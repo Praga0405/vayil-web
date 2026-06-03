@@ -1,5 +1,41 @@
 # Release Notes
 
+## v4.5.5 — Demo deployment scaffolding (Railway + Vercel) (2026-06-03)
+
+Added the config and walkthrough needed to stand up a leadership-demo
+cloud environment in ~20 minutes.
+
+### New files
+
+- `railway.json` — Railway build/deploy config. Uses the existing
+  `backend/Dockerfile`, sets the start command to
+  `npm run migrate && node dist/index.js` so the schema is applied
+  on every boot (idempotent — already-applied statements are skipped),
+  and points the health probe at `/health`.
+- `.env.example` — frontend env template (`NEXT_PUBLIC_API_URL`,
+  `NEXT_PUBLIC_USE_MOCK_DATA`) for the Vercel project.
+- `docs/DEPLOY_DEMO.md` — step-by-step recipe: Railway project for
+  backend + managed MySQL 8, Vercel project for the Next.js frontend,
+  full env-var table, CORS wiring, smoke commands, demo accounts,
+  rollback notes, ~$10/mo cost estimate.
+
+### Demo defaults baked in
+
+- `OTP_BYPASS=true` + `OTP_BYPASS_CODE=123456` — sales team can
+  log in as any phone number without an SMS gateway.
+- `PAYMENT_VERIFY_BYPASS=true` — the escrow / placeOrder flow runs
+  end-to-end without hitting real Razorpay.
+- No Razorpay / S3 / 2Factor keys required to boot the demo.
+
+### Out of scope (intentionally)
+
+- Custom domain / TLS — Railway and Vercel both ship managed HTTPS
+  on their default domains, fine for internal demos.
+- DB seed — leadership walkthrough starts on an empty DB per request;
+  accounts will be created live during the demo.
+
+---
+
 ## v4.5.4 — Full mobile-dump schema parity (2026-06-03)
 
 The mobile team reviewed v4.5.3 against their reference dump
