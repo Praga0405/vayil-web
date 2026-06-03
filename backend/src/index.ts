@@ -113,8 +113,13 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   fail(res, status, message, err?.details || err?.issues);
 });
 
-app.listen(config.port, () => {
-  console.log(`Vayil backend running on port ${config.port}`);
-});
+// Only bind a port when running standalone (local dev, Docker, Render,
+// Railway). On Vercel serverless we just export the express app —
+// pages/api/[...all].ts invokes it per-request.
+if (!process.env.VERCEL) {
+  app.listen(config.port, () => {
+    console.log(`Vayil backend running on port ${config.port}`);
+  });
+}
 
 export default app;
