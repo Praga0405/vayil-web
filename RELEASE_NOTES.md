@@ -1,5 +1,26 @@
 # Release Notes
 
+## v4.5.12 — Fix `/api/*` 404s on Vercel: move catch-all under Pages Router (2026-06-03)
+
+Production deployment was returning HTTP 404 (with `x-matched-path: /404` and `x-next-error-status: 404`) for every `/api/*` route. Root cause: the root-level `api/[...all].ts` is the Vercel-native function convention, which works in pure Pages Router projects but is shadowed by Next.js's App Router routing layer in this project (`src/app/`). Next.js matches `/api/*` first and serves its own 404 for anything not declared under `src/app/api/`. The root-level function never gets invoked.
+
+### Fix
+- Moved `api/[...all].ts` → `pages/api/[...all].ts`. Pages Router API routes coexist with App Router and ARE routed natively by Next.js to serverless functions.
+- Updated `vercel.json` functions config to the new path.
+- Added the `if (!process.env.VERCEL)` guard around `app.listen()` in `backend/src/index.ts` that was supposed to land in v4.5.6 but never made it into git (`git log -S` confirmed). Without the guard the Express app was attempting to bind a port on every serverless cold start — wasted ~10ms but otherwise harmless.
+
+### Behaviour unchanged
+- Frontend still hits `${NEXT_PUBLIC_API_URL}/auth/otp/send` with `NEXT_PUBLIC_API_URL=https://<project>.vercel.app/api`.
+- Strip-prefix logic in the handler is identical.
+- Body parsing still disabled at Next.js layer (`bodyParser: false`); Express handles its own JSON / urlencoded / multer / raw body. Webhooks still see raw bodies for HMAC.
+- Local dev (`npm run dev` on port 9090) unchanged — guard only kicks in when `VERCEL=1`.
+
+### Deploy
+- Redeploy on Vercel with **"Use existing Build Cache" UNCHECKED** so `pages/` is picked up.
+- Verify with `curl https://<production>/api/health` — should return JSON, not Next.js 404 HTML.
+
+---
+
 ## v4.5.10 — Dev-mode OTP bypass UX + release readiness doc (2026-06-03)
 
 The leadership demo needs the team to walk through the portal
