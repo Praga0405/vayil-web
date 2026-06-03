@@ -18,6 +18,12 @@ import { legacyVendorRouter } from './routes/legacyVendor';
 
 const app = express();
 
+// Trust the first proxy hop. Required when running behind Vercel (or
+// any cloud load balancer) so express-rate-limit can read the real
+// client IP from X-Forwarded-For instead of throwing
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every request.
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins, credentials: true }));
 
