@@ -1,4 +1,5 @@
-# Vercel deploys the Next.js app at the repo root; the backend lives in
-# its own deploy target (Render) so we keep it out of the Vercel build
-# context.
-backend/
+# Keep backend/ in the Vercel build context — api/[...all].ts imports
+# backend/src/index.ts as a serverless function. Exclude only the
+# files that aren't needed at runtime.
+backend/Dockerfile
+backend/scripts/smoke-*.ts

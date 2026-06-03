@@ -1,5 +1,47 @@
 # Release Notes
 
+## v4.5.6 — One-click all-Vercel deploy (2026-06-03)
+
+Railway setup turned out to be too click-heavy for the demo team.
+Collapsed the whole stack onto a single Vercel project so the
+deploy is "import repo → paste env vars → done."
+
+### How it works
+
+- **`api/[...all].ts`** — a single Vercel serverless function. Strips
+  the `/api` prefix and hands the request to the Express `app`
+  exported from `backend/src/index.ts`. Body parsing is disabled at
+  the Vercel layer (`bodyParser: false`) so Express keeps full
+  control — webhooks still see raw bodies, multer still parses
+  multipart, JSON middleware still parses JSON.
+- **`vercel.json`** — points the build at `npm run vercel-build`,
+  sets the function's max duration to 30s and memory to 1GB.
+- **`vercel-build` script** — runs `backend/scripts/migrate.ts`
+  against the production DB before `next build`, so the schema is
+  ready on first request.
+- **npm workspaces** — root `package.json` now declares
+  `"workspaces": ["backend"]` so one `npm install` covers both
+  packages and Vercel's bundler can follow imports from `api/` into
+  `backend/`.
+- **`backend/src/index.ts`** — `app.listen()` now gated on
+  `!process.env.VERCEL` so the function doesn't try to bind a port.
+- **`backend/src/config.ts`** — added `DB_SSL=true` opt-in for
+  managed MySQL providers (TiDB Cloud, PlanetScale, RDS).
+
+### Docs
+
+`docs/DEPLOY_VERCEL.md` — full walkthrough using TiDB Cloud
+Serverless (free, MySQL-wire compatible) as the DB. Total cost for
+the demo: **$0/mo**. Total wall-clock to live URL: **~10 min**.
+
+### Local dev unchanged
+
+`npm run dev` (frontend) and `cd backend && npm run dev` (backend on
+port 9090) still work exactly as before — the serverless wrapper is
+only invoked when `VERCEL=1` is set in the environment.
+
+---
+
 ## v4.5.5 — Demo deployment scaffolding (Railway + Vercel) (2026-06-03)
 
 Added the config and walkthrough needed to stand up a leadership-demo

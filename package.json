@@ -2,11 +2,13 @@
   "name": "vayil-web",
   "version": "1.0.0",
   "private": true,
+  "workspaces": ["backend"],
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "vercel-build": "cd backend && npx tsx scripts/migrate.ts || true && cd .. && next build"
   },
   "dependencies": {
     "next": "14.2.29",

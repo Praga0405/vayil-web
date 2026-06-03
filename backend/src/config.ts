@@ -17,6 +17,11 @@ export const config = {
     user: required('DB_USER', 'root'),
     password: process.env.DB_PASSWORD || '',
     database: required('DB_NAME', 'vayil'),
+    // Enable TLS for managed providers (TiDB Cloud, PlanetScale, RDS).
+    // Set DB_SSL=true to switch on; default off for local dev.
+    ...(String(process.env.DB_SSL || '').toLowerCase() === 'true'
+      ? { ssl: { minVersion: 'TLSv1.2' as const, rejectUnauthorized: true } }
+      : {}),
   },
   jwtSecret: required('JWT_SECRET', 'dev-secret-change-me'),
   staffJwtSecret: required('STAFF_JWT_SECRET', 'dev-staff-secret-change-me'),
