@@ -26,7 +26,24 @@ export const config = {
   jwtSecret: required('JWT_SECRET', 'dev-secret-change-me'),
   staffJwtSecret: required('STAFF_JWT_SECRET', 'dev-staff-secret-change-me'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
-  twoFactorApiKey: process.env.TWO_FACTOR_API_KEY || '',
+  // 2Factor SMS OTP. Accepts both the legacy TWO_FACTOR_* names and
+  // the OTPFactor_* names the ops team uses in their secret store.
+  twoFactorApiKey:
+    process.env.OTPFactor_API_KEY ||
+    process.env.TWO_FACTOR_API_KEY ||
+    '',
+  twoFactorApiUrl:
+    process.env.OTPFactor_API_URL ||
+    process.env.TWO_FACTOR_API_URL ||
+    'https://2factor.in/API/V1/',
+  twoFactorSenderId:
+    process.env.OTPFactor_API_senderId ||
+    process.env.TWO_FACTOR_SENDER_ID ||
+    '',
+  twoFactorTemplateName:
+    process.env.OTPFactor_TEMPLATE_NAME ||
+    process.env.TWO_FACTOR_TEMPLATE_NAME ||
+    'OTP',
   otpBypass: process.env.OTP_BYPASS === 'true',
   otpBypassCode: process.env.OTP_BYPASS_CODE || '123456',
   razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',

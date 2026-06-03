@@ -33,9 +33,43 @@ export async function storeOtp(phone: string, purpose: string, otp: string) {
 
 export async function sendOtp(phone: string, otp: string) {
   if (!config.twoFactorApiKey || config.otpBypass) return { delivered: false, bypass: true };
-  const url = `https://2factor.in/API/V1/${config.twoFactorApiKey}/SMS/${phone}/${otp}`;
-  await axios.get(url, { timeout: 10000 });
-  return { delivered: true };
+
+  // Strip a leading +91 / 91 country code so 2Factor sees a 10-digit
+  // mobile (their gateway expects bare Indian numbers).
+  const to = phone.replace(/^\+?91/, '').replace(/\D/g, '');
+
+  // 2Factor exposes two endpoint families:
+  //   V1 — /API/V1/<apikey>/SMS/<phone>/<otp>          (default OTP template, sender ID is account-level)
+  //   R1 — /API/R1/?module=TRANS_SMS&apikey=…&from=…   (DLT transactional, custom sender ID + template)
+  // We pick based on the base URL the ops team configured.
+  const base = config.twoFactorApiUrl.replace(/\/+$/, '');
+  let url: string;
+  if (/\/R1$/i.test(base)) {
+    const qs = new URLSearchParams({
+      module: 'TRANS_SMS',
+      apikey: config.twoFactorApiKey,
+      to,
+      from: config.twoFactorSenderId,
+      templatename: config.twoFactorTemplateName,
+      var1: otp,
+    });
+    url = `${base}/?${qs.toString()}`;
+  } else {
+    url = `${base}/${config.twoFactorApiKey}/SMS/${to}/${otp}`;
+  }
+
+  try {
+    const res = await axios.get(url, { timeout: 10000 });
+    const status = String(res.data?.Status || res.data?.status || '').toLowerCase();
+    if (status && status !== 'success') {
+      console.error('[otp] 2Factor returned non-success:', res.data);
+      return { delivered: false, error: res.data?.Details || 'gateway rejected' };
+    }
+    return { delivered: true };
+  } catch (err: any) {
+    console.error('[otp] 2Factor send failed:', err?.response?.data || err?.message);
+    return { delivered: false, error: err?.response?.data?.Details || err?.message };
+  }
 }
 
 export async function verifyOtp(phone: string, purpose: string, otp: string) {
