@@ -1,5 +1,69 @@
 # Release Notes
 
+## v4.5.8 — OTP error handling and 2Factor configuration fixes (2026-06-03)
+
+Debugging the "Failed to send OTP" error revealed several gaps in
+the 2Factor SMS integration. This release hardens error handling,
+improves phone number validation, and adds support for both
+`TWO_FACTOR_API_KEY` and `OTP_FACTOR_API_KEY` environment variables.
+
+### What changed
+
+**`backend/src/config.ts`** — Added flexible API key binding:
+- Reads `OTP_FACTOR_API_KEY` or `TWO_FACTOR_API_KEY` (in that order)
+- Configurable `twoFactorUrl` endpoint (defaults to v1 API)
+- Allows teams with legacy naming to keep working
+
+**`backend/src/utils/otp.ts`** — Enhanced `sendOtp()` with production-ready error handling:
+- Validates phone format (10-12 digit requirement)
+- Phone number normalization (removes `+` and spaces)
+- Throws descriptive `ApiError` with clear messages when API key is missing
+- Added `[v0]` debug logging for troubleshooting (`sendOtp` errors,
+  URL construction, 2Factor response codes)
+- Proper error propagation instead of silent failures
+
+**`backend/src/routes/auth.ts`** — Updated `/otp/send` endpoint:
+- Catches `sendOtp` errors and re-throws them to the client
+- Respects `OTP_BYPASS` mode even if 2Factor send fails
+- Returns proper HTTP 500 with error message when SMS gateway fails
+
+### Live debugging
+
+A request to `POST /otp/send` with a missing or invalid `TWO_FACTOR_API_KEY`
+now returns:
+
+```json
+{ "success": false, "error": "OTP service not configured. Please check environment variables." }
+```
+
+Instead of silently returning `{ delivered: false }` and confusing the frontend.
+
+### Verification
+
+- `npm run build` — 0 errors
+- Demo mode (`OTP_BYPASS=true`) — passes OTP generation and storage
+- Live mode with valid 2Factor key — SMS delivery confirmed ✓
+- Live mode with missing API key — descriptive 500 response ✓
+
+---
+
+## v4.5.7 — 2Factor SMS OTP services with hardened auth (2026-06-03)
+
+Pull in the latest 2-factor authentication implementation with OTP
+sending via 2Factor.in SMS gateway and improved error handling for
+production deployments.
+
+### What landed
+
+- 2Factor SMS API integration for OTP delivery
+- Configurable OTP bypass for demo mode
+- Phone number format handling
+- OTP storage and verification with hash validation
+- 10-minute OTP expiry window
+- OTP attempt tracking
+
+---
+
 ## v4.5.6 — One-click all-Vercel deploy (2026-06-03)
 
 Railway setup turned out to be too click-heavy for the demo team.
