@@ -26,8 +26,29 @@ export const config = {
   jwtSecret: required('JWT_SECRET', 'dev-secret-change-me'),
   staffJwtSecret: required('STAFF_JWT_SECRET', 'dev-staff-secret-change-me'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
-  twoFactorApiKey: process.env.TWO_FACTOR_API_KEY || process.env.OTP_FACTOR_API_KEY || '',
-  twoFactorUrl: process.env.TWO_FACTOR_URL || process.env.OTP_FACTOR_URL || 'https://2factor.in/API/V1',
+  // 2Factor SMS OTP. Accept every naming variant the ops team has
+  // used in their Vercel secret store: TWO_FACTOR_*, OTP_FACTOR_*,
+  // and the camel-case OTPFactor_* form (current secret names).
+  twoFactorApiKey:
+    process.env.TWO_FACTOR_API_KEY ||
+    process.env.OTP_FACTOR_API_KEY ||
+    process.env.OTPFactor_API_KEY ||
+    '',
+  twoFactorUrl:
+    process.env.TWO_FACTOR_URL ||
+    process.env.OTP_FACTOR_URL ||
+    process.env.OTPFactor_API_URL ||
+    'https://2factor.in/API/V1',
+  twoFactorSenderId:
+    process.env.TWO_FACTOR_SENDER_ID ||
+    process.env.OTP_FACTOR_SENDER_ID ||
+    process.env.OTPFactor_API_senderId ||
+    '',
+  twoFactorTemplateName:
+    process.env.TWO_FACTOR_TEMPLATE_NAME ||
+    process.env.OTP_FACTOR_TEMPLATE_NAME ||
+    process.env.OTPFactor_TEMPLATE_NAME ||
+    'OTP',
   otpBypass: process.env.OTP_BYPASS === 'true',
   otpBypassCode: process.env.OTP_BYPASS_CODE || '123456',
   razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
