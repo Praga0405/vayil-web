@@ -129,6 +129,14 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
 
   /* ── Stage 2 → verify OTP ──────────────────────────────── */
   const verifyOTP = async () => {
+    // Re-entry guard — the button's disabled={loading} prop alone is
+    // racy in React 18 (state updates are async; back-to-back clicks
+    // within the same tick both see loading=false). StrictMode in dev
+    // also double-invokes some handlers. Without this guard, two
+    // parallel verify calls land at the backend, the second hits an
+    // already-consumed OTP row, and the user sees "Invalid OTP" even
+    // though the first call succeeded.
+    if (loading) return
     if (otp.length !== 6) { setError('OTP must be 6 digits'); return }
     setError(null); setLoading(true)
     try {

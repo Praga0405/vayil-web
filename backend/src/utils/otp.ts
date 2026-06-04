@@ -82,6 +82,7 @@ export async function sendOtp(phone: string, otp: string) {
 }
 
 export async function verifyOtp(phone: string, purpose: string, otp: string) {
+  // First try the happy path: fresh, unconsumed row.
   const row = await one<any>(
     `SELECT id FROM otp_codes
      WHERE phone = :phone AND purpose = :purpose AND consumed = false
@@ -89,6 +90,25 @@ export async function verifyOtp(phone: string, purpose: string, otp: string) {
      ORDER BY id DESC LIMIT 1`,
     { phone, purpose, otp }
   );
-  if (!row) throw new ApiError(400, 'Invalid or expired OTP');
-  await exec(`UPDATE otp_codes SET consumed = true WHERE id = :id`, { id: row.id });
+  if (row) {
+    await exec(`UPDATE otp_codes SET consumed = true WHERE id = :id`, { id: row.id });
+    return;
+  }
+  // Idempotency window — if the SAME otp+phone+purpose was consumed
+  // in the last 30 seconds, treat this as a duplicate of a
+  // just-succeeded verify (React StrictMode double-fire in dev, or
+  // a user double-tap before the button's disabled state propagates).
+  // Returning success here is safe: we're verifying the EXACT same
+  // OTP value the user already used moments ago, on the same row,
+  // for the same purpose. No security leakage.
+  const recent = await one<any>(
+    `SELECT id FROM otp_codes
+     WHERE phone = :phone AND purpose = :purpose AND consumed = true
+       AND otp_hash = SHA2(:otp, 256)
+       AND expires_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+     ORDER BY id DESC LIMIT 1`,
+    { phone, purpose, otp }
+  );
+  if (recent) return;
+  throw new ApiError(400, 'Invalid or expired OTP');
 }

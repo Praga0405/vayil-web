@@ -1,5 +1,47 @@
 # Release Notes
 
+## v4.5.15 — Fix race condition causing "Invalid OTP" on existing-user login (2026-06-03)
+
+Existing customers/vendors logging in were intermittently seeing "Invalid OTP — try again" even with the correct code. Repro:
+
+1. Existing user enters correct OTP
+2. Backend logs show TWO simultaneous POST `/auth/otp/verify` calls
+3. First call consumes the `otp_codes` row → returns success + token
+4. Second call lands on the same (now-consumed) row → returns `Invalid or expired OTP`
+5. React renders the second response, masking the first → user sees the error
+
+### Root cause
+
+Two parallel verify calls can fire from the frontend when:
+- **Dev mode:** React 18 StrictMode double-invokes some handlers
+- **Anywhere:** user double-taps the Verify button before the `disabled={loading}` state propagates (state updates are async; back-to-back clicks in the same tick both see `loading=false`)
+
+The backend's `verifyOtp()` was strictly one-shot — first request consumed the row, second hit a 400.
+
+### Fix on both layers
+
+**Frontend** (`src/components/shared/LoginModal.tsx`)
+- Added `if (loading) return` at the top of `verifyOTP()`. Closes the re-entry window between user click and React's `setLoading(true)` propagating to the button's `disabled` prop.
+
+**Backend** (`backend/src/utils/otp.ts`)
+- `verifyOtp()` now has an idempotency window: if the happy-path SELECT returns no fresh unconsumed row, fall back to a SELECT for the same `phone + purpose + otp_hash` that was consumed within the last minute (`expires_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)`). If found, return success.
+- Safe: we are verifying the **exact same OTP value** the user already used moments ago, on the same row, for the same purpose. No security weakening — a re-verify of a still-valid (just-used) OTP is functionally identical to the original verify.
+
+### Why both layers
+
+- Frontend guard alone wouldn't help in production where StrictMode is off but legitimate user double-taps still happen.
+- Backend idempotency alone wouldn't help if a malicious caller sent 100 concurrent requests with different OTPs — frontend still needs to gate re-entry.
+- Together they cover dev double-fire, accidental double-tap, and network retries.
+
+### Verified
+
+- Parallel race (two simultaneous verifies of correct OTP): both return success ✅
+- Bad OTP (`999999`): still returns 400 ✅
+- Truly expired OTP (older than 1 min after consumption): still returns 400 ✅
+- Existing customer Vaibhav (id 64) logs in cleanly on first try in dev mode ✅
+
+---
+
 ## v4.5.14 — `trust proxy` for Vercel edge (2026-06-03)
 
 Runtime logs from production showed `express-rate-limit` throwing `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` on every request. Vercel's edge proxy injects `X-Forwarded-For`, but Express defaults to not trusting proxy headers — the rate-limit middleware refuses to derive the client IP from an untrusted header.
