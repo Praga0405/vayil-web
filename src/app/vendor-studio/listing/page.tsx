@@ -208,7 +208,7 @@ export default function VendorListingPage() {
             title="Service catalogue"
             description="Toggle a service off to pause new enquiries without deleting it."
             actions={
-              <Link href="/vendor/services/add"
+              <Link href="/vendor-studio/services/add"
                 className="inline-flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-navy/90 transition">
                 <Plus className="w-4 h-4" /> Add Service
               </Link>
@@ -219,7 +219,7 @@ export default function VendorListingPage() {
               <EmptyState icon={Wrench} title="No services listed yet"
                 description="Add your first service to start receiving enquiries"
                 action={
-                  <Link href="/vendor/services/add"
+                  <Link href="/vendor-studio/services/add"
                     className="inline-flex items-center gap-1.5 bg-navy text-white text-sm font-semibold px-4 py-2 rounded-xl">
                     <Plus className="w-4 h-4" /> Add Service
                   </Link>
@@ -249,7 +249,7 @@ export default function VendorListingPage() {
                             className="text-gray-400 hover:text-navy transition p-1" aria-label="Toggle status">
                             {active ? <ToggleRight className="w-6 h-6 text-orange" /> : <ToggleLeft className="w-6 h-6" />}
                           </button>
-                          <Link href={`/vendor/services/${sid}`}
+                          <Link href={`/vendor-studio/services/${sid}`}
                             className="text-xs font-semibold text-navy hover:text-orange transition inline-flex items-center gap-1">
                             Edit <ChevronRight className="w-3.5 h-3.5" />
                           </Link>

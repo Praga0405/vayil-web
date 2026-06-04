@@ -1,5 +1,47 @@
 # Release Notes
 
+## v4.5.16 — Modern-design Add/Edit Service inside vendor-studio + dump-aligned taxonomy seed (2026-06-04)
+
+Two related issues:
+
+1. **"My Listing" dropped vendors into the legacy portal.** From `/vendor-studio/listing` (modern design system — `PageHero` / `PageSection` / `TwoColumn` / `FieldGrid`), the **Add Service** and per-service **Edit** links pointed at `/vendor/services/add` and `/vendor/services/${id}` — the legacy portal pages built with the older `.card` / `heading-lg` / `btn-primary` CSS. Vendors were jarringly bounced into an "old" design mid-flow.
+2. **Category / sub-category / tag dropdowns were polluted with smoke-test rows.** Local dev DB had `SmokeCat smpo3g423`, `TestCat test-cat-29807`, `smoke-tag-test-cat-83591` etc. drowning out the real taxonomy.
+
+### Frontend — modern Add / Edit Service inside vendor-studio
+
+- **`src/app/vendor-studio/services/add/page.tsx`** (new) — full Add Service flow rebuilt with `PageHero` + `TwoColumn` (left rail with onboarding tips, right rail with stacked `PageSection`s for basics / category & tag / pricing / photos). Uses `FieldGrid columns={3}` for the category / sub-category / tag triple. Loads dropdown data from `commonApi.getCategories`, `commonApi.getSubcategories`, and `/service-tags`.
+- **`src/app/vendor-studio/services/[id]/page.tsx`** (new) — symmetric Edit page that pre-loads the existing service, shows `StatusBadge` + Activate/Deactivate toggle in the header, lists existing photos with × buttons to remove, and allows adding more on top. Form validation matches the Add page.
+- **`src/app/vendor-studio/listing/page.tsx`** updated — the three legacy links (`/vendor/services/add` in the empty-state CTA, the top-right Add Service button, and per-card Edit link) all now route to the new vendor-studio pages. No more design break.
+
+Pricing types and units are the same as the legacy page (Fixed / Per sq.ft / Per r.ft / Per unit / Quote-based) so backend contracts are unchanged.
+
+### Backend — `007_seed_taxonomy.sql`
+
+New migration that aligns the taxonomy dropdowns with the mobile team's reference dump (`vayil-Dump20260527.sql`):
+
+- **Cleans** rows where `name LIKE 'TestCat%' / 'SmokeCat%' / 'TestSub%' / 'SmokeSub%' / 'smoke-tag%' / 'test-tag%'` or `seed_source LIKE 'smoke%' / 'test%'`. Soft cleanup of the dev pollution.
+- **Seeds** 10 production-quality categories from the dump: All, Electrical, Kitchen Renovation, Painting, Waterproofing, Bathroom Renovation, Plumbing, AC Install & Maintenance, Transport, Interior Design. (Dump rows with `is_deleted=1` — "venkat", "testing", "demo cat" — are filtered out.)
+- **Seeds** 24 production sub-categories mapped to the right parents (Wiring → Electrical, Modular/Platform/Chimney/Sink → Kitchen Renovation, Tiles/Fittings/Complete remodel → Bathroom Renovation, Split AC/Window AC/Servicing/Gas refill → AC, etc.).
+- **Seeds** 15 production tags (Bathroom Upgrades, Home Additions, Living Room Makeovers, Outdoor Spaces, Designer Uniforms, 3D Home Design, etc.).
+- **Idempotent** — `INSERT IGNORE` on the `id` mirror UNIQUE column. Existing legitimate rows are not clobbered; re-running the migration is a no-op.
+- `tools_master` deliberately skipped: dump has one row (Brush) marked deleted, local already has Drill Machine / Plumbing Wrench Set / Pipe Cutter etc., and the dump's column names diverge (`tool_name`/`tool_slug` vs `name`/`slug`).
+
+### What's not changed yet (follow-ups)
+
+The legacy `/vendor/...` portal is still mounted and reachable by direct URL. Pages still using the old design system:
+
+- `/vendor/dashboard`, `/vendor/profile`, `/vendor/enquiries`, `/vendor/projects/*`, `/vendor/earnings`, `/vendor/services`, `/vendor/services/add`, `/vendor/bank`, `/vendor/kyc`, `/vendor/notifications`, `/vendor/onboarding`, `/vendor/payout`, `/vendor/login`, `/vendor/signup`
+
+The plan is to either redirect these to the vendor-studio equivalents or rebuild them with the modern primitives during the post-demo cleanup. The two service Add/Edit pages were the most-trafficked entry points and the only ones reachable through normal in-app navigation, so this lap covers the user-visible regression.
+
+### Verified
+
+- `npm run migrate` clean. Local DB now shows the dump taxonomy alongside surviving legitimate rows.
+- Categories visible in the Add Service dropdown: Kitchen, Bathroom, Electrical, Plumbing, Waterproofing, AC Service, Carpentry, Painting, Home Renovation, Cleaning, Interior Design, Home Repair, Plumbing (dump), AC Install & Maintenance, Transport, Interior Design (dump).
+- Sub-category dropdown filters correctly when you pick a category.
+
+---
+
 ## v4.5.15 — Fix race condition causing "Invalid OTP" on existing-user login (2026-06-03)
 
 Existing customers/vendors logging in were intermittently seeing "Invalid OTP — try again" even with the correct code. Repro:
