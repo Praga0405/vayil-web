@@ -1,5 +1,34 @@
 # Release Notes
 
+## v4.5.17 — Wire vendor-studio Add/Edit Service to the real taxonomy (2026-06-04)
+
+Local-preview verification of v4.5.16 surfaced three bugs that prevented the new Add/Edit Service pages from actually rendering categories, sub-categories, or tags:
+
+1. **Frontend extractor blind to the wrapped response shape.** `commonApi.getCategories()` returns `{ categories: [...] }`, `getSubcategories()` returns `{ subcategories: [...] }`, `getTags()` returns `{ tags: [...] }`. The Add/Edit pages were only reading `r.data?.data` / `r.data?.result`, so all three dropdowns came back empty.
+2. **Backend filter silently ignored.** `/service-subcategories` was reading `req.query.categoryId` (camelCase) while the client sends `category_id` (snake_case). The route returned all 25 sub-categories regardless of the picked parent. Also the SQL used the `:catId IS NULL OR category_id = :catId` pattern which mysql2 silently mis-binds — both problems were rolled into a single rewrite that branches on null explicitly and accepts either query-string spelling.
+3. **Migration 007's sub-category mapping was id-keyed.** The dump's `category_id` values for sub-categories don't align with the local DB's category IDs (dump cat 2 = Electrical but local cat 2 = Bathroom; dump cat 3 = Kitchen Renovation but local cat 3 = Electrical). Result: Wiring/Switches/MCB landed under "Bathroom", Modular/Chimney/Sink landed under "Electrical", etc.
+
+### Changes
+
+- `backend/migrations/008_fix_subcategory_mapping.sql` (new) — deletes every `seed_source='dump-007'` sub-category row that 007 inserted with the wrong FK, then re-inserts each one using a slug-based `SELECT … FROM service_categories WHERE slug = ? LIMIT 1` so the FK always points at the correct **local** category. Handles slug aliases too (`kitchen` ↔ `kitchen-renovation`, `bathroom` ↔ `bathroom-renovation`, `ac-service` ↔ `ac-install-maintenance`). Datetimes intentionally omitted from the SELECTs — `CURRENT_TIMESTAMP` default kicks in and avoids mysql2's known false-positive when `:HH:MM:SS` inside string literals is mis-parsed as a named placeholder.
+- `backend/src/routes/common.ts` — `/service-subcategories` accepts both `category_id` and `categoryId`, branches on null explicitly to dodge mysql2's bind quirk, returns 25 rows unfiltered or N rows filtered.
+- `src/app/vendor-studio/services/add/page.tsx` + `[id]/page.tsx` — both pages now read `r.data?.categories || r.data?.data || r.data?.result`, equivalent fallbacks for `subcategories` and `tags`. Tag fetching switched from a raw `fetch` to `commonApi.getTags?.()` so the project's axios interceptor (auth headers, baseURL, etc.) is honoured.
+
+### Verified in the local preview
+
+- Category dropdown: 17 options (12 local + 5 from dump, deduped by name).
+- Tags dropdown: 15 production tags.
+- Sub-category dropdown filters live:
+  - Electrical → Wiring, Switches, MCB / fuse, Fan & light install
+  - Plumbing → Pipe repair, New installation, Tap / fixture
+  - Bathroom → Tiles, Fittings, Complete remodel
+  - AC Service → Split AC, Window AC, Servicing, Gas refill
+  - Painting → Exterior, Texture, Waterproof paint
+  - Waterproofing → Terrace, Wall seepage, Tank
+  - Kitchen → Modular, Platform, Chimney, Sink (+ pre-existing Test Sub)
+
+---
+
 ## v4.5.16 — Modern-design Add/Edit Service inside vendor-studio + dump-aligned taxonomy seed (2026-06-04)
 
 Two related issues:

@@ -48,7 +48,18 @@ commonRouter.get('/service-categories', async (_req, res, next) => {
   try { ok(res, { categories: await query('SELECT * FROM service_categories WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }
 });
 commonRouter.get('/service-subcategories', async (req, res, next) => {
-  try { ok(res, { subcategories: await query('SELECT * FROM service_subcategories WHERE (:categoryId IS NULL OR category_id = :categoryId) AND status = 1 ORDER BY name ASC', { categoryId: req.query.categoryId || null }) }); } catch (err) { next(err); }
+  // Accept both naming conventions — current client uses `category_id`
+  // (snake_case, matches the rest of the API) and the legacy mobile
+  // shim sent `categoryId`. Also avoid the `:x IS NULL` pattern which
+  // mysql2 silently mis-binds — branch on null explicitly instead.
+  const raw = req.query.category_id ?? req.query.categoryId;
+  const catId = raw === undefined || raw === '' ? null : Number(raw);
+  try {
+    const rows = catId == null
+      ? await query('SELECT * FROM service_subcategories WHERE status = 1 ORDER BY name ASC')
+      : await query('SELECT * FROM service_subcategories WHERE category_id = :catId AND status = 1 ORDER BY name ASC', { catId });
+    ok(res, { subcategories: rows });
+  } catch (err) { next(err); }
 });
 commonRouter.get('/service-tags', async (_req, res, next) => {
   try { ok(res, { tags: await query('SELECT * FROM service_tags WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }

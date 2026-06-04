@@ -57,14 +57,15 @@ export default function EditServicePage() {
     Promise.all([
       vendorApi.getMyServices(),
       commonApi.getCategories(),
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/service-tags`).then(r => r.json()).catch(() => ({})),
-    ]).then(([sr, cr, tagsResp]: any[]) => {
+      commonApi.getTags?.() ?? Promise.resolve({ data: {} }),
+    ]).then(([sr, cr, tr]: any[]) => {
       const list = sr.data?.data || sr.data?.result || []
       const s = list.find((x: any) => (x.id || x.service_id) === sid)
       if (!s) { toast.error('Service not found'); router.push('/vendor-studio/listing'); return }
-      const cats = cr.data?.data || cr.data?.result || []
+      const cats = cr.data?.categories || cr.data?.data || cr.data?.result || []
       setCats(Array.isArray(cats) ? cats : [])
-      setTags(Array.isArray(tagsResp?.data) ? tagsResp.data : [])
+      const tagList = tr?.data?.tags || tr?.data?.data || tr?.data?.result || []
+      setTags(Array.isArray(tagList) ? tagList : [])
       setStatus(s.status || 'active')
       setExistingImages(Array.isArray(s.images) ? s.images : [])
       setForm({
@@ -80,7 +81,7 @@ export default function EditServicePage() {
       })
       if (s.category_id) {
         commonApi.getSubcategories(Number(s.category_id)).then(r => {
-          const d = r.data?.data || r.data?.result || []
+          const d = r.data?.subcategories || r.data?.data || r.data?.result || []
           setSubcats(Array.isArray(d) ? d : [])
         }).catch(() => setSubcats([]))
       }
@@ -97,7 +98,7 @@ export default function EditServicePage() {
     if (k === 'category_id') {
       setForm(f => ({ ...f, category_id: v, subcategory_id: '' }))
       commonApi.getSubcategories(Number(v)).then(r => {
-        const d = r.data?.data || r.data?.result || []
+        const d = r.data?.subcategories || r.data?.data || r.data?.result || []
         setSubcats(Array.isArray(d) ? d : [])
       }).catch(() => setSubcats([]))
     }

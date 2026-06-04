@@ -54,13 +54,13 @@ export default function AddServicePage() {
 
   useEffect(() => {
     commonApi.getCategories().then(r => {
-      const d = r.data?.data || r.data?.result || []
+      const d = r.data?.categories || r.data?.data || r.data?.result || []
       setCats(Array.isArray(d) ? d : [])
     }).catch(() => {})
-    // Tags are best-effort — endpoint may not exist on every backend.
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/service-tags`).then(r => r.json())
-      .then(j => setTags(Array.isArray(j?.data) ? j.data : []))
-      .catch(() => setTags([]))
+    commonApi.getTags?.().then(r => {
+      const d = r.data?.tags || r.data?.data || r.data?.result || []
+      setTags(Array.isArray(d) ? d : [])
+    }).catch(() => setTags([]))
   }, [])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -69,7 +69,7 @@ export default function AddServicePage() {
     if (k === 'category_id') {
       setForm(f => ({ ...f, category_id: v, subcategory_id: '' }))
       commonApi.getSubcategories(Number(v)).then(r => {
-        const d = r.data?.data || r.data?.result || []
+        const d = r.data?.subcategories || r.data?.data || r.data?.result || []
         setSubcats(Array.isArray(d) ? d : [])
       }).catch(() => setSubcats([]))
     }
