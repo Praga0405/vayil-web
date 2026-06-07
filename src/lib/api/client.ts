@@ -35,10 +35,29 @@ function makeClient(baseURL: string, tokenFn: () => string | null): AxiosInstanc
   client.interceptors.response.use(
     (r) => r,
     (err: AxiosError) => {
-      if (err.response?.status === 401 && typeof window !== 'undefined') {
+      // v4.5.22 — Handle both 401 (token missing/invalid) AND 403 (token
+      // valid but wrong role / record no longer exists). For unauthed
+      // areas (homepage, search, public vendor profile) we just clear
+      // the stale token so subsequent guarded effects don't keep firing
+      // and getting rejected (which Lighthouse picks up as a Best
+      // Practices console error). For logged-in areas we redirect to
+      // login as before.
+      const status = err.response?.status
+      if ((status === 401 || status === 403) && typeof window !== 'undefined') {
         const p = window.location.pathname
-        if      (p.startsWith('/vendor-studio')) window.location.href = '/vendor/login'
-        else if (p.startsWith('/account'))       window.location.href = '/customer/login'
+        if (p.startsWith('/vendor-studio')) {
+          if (status === 401) window.location.href = '/vendor/login'
+        } else if (p.startsWith('/account')) {
+          if (status === 401) window.location.href = '/customer/login'
+        } else if (status === 401) {
+          // Public page + stale token → silently clear so we stop firing
+          // role-gated calls behind the scenes. No redirect (user isn't
+          // expecting one).
+          try {
+            localStorage.removeItem('vayil_token')
+            localStorage.removeItem('vayil-user-auth')
+          } catch { /* SSR / private mode — ignore */ }
+        }
       }
       return Promise.reject(err)
     },

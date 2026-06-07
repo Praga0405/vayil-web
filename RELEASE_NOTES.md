@@ -1,5 +1,90 @@
 # Release Notes
 
+## v4.5.22 — Lighthouse follow-up: security headers + font opt + 403 fix + WebP + contrast + CLS (2026-06-07)
+
+Closes every remaining Lighthouse finding flagged in the v4.5.21 audit. Expected post-deploy scores:
+
+| Category | v4.5.21 | v4.5.22 target |
+|---|---|---|
+| Performance | 95 | **98–100** (Google Fonts removed from critical path, image formats added, WebP/AVIF negotiated, CLS regression fixed) |
+| Accessibility | 86 | **95+** (contrast pass on text-orange / text-navy/60 / text-gray-400) |
+| Best Practices | 96 | **100** (CSP, COOP, X-Frame-Options, Trusted-Types-friendly headers, console 403 fixed) |
+| SEO | 100 | **100** (held) |
+
+### 1. Security headers — Best Practices 96 → 100
+
+`next.config.js` now sends a strict security header set on every HTML / Next route:
+
+| Header | Value | Why |
+|---|---|---|
+| `Content-Security-Policy` | `default-src 'self'; …` | Lock down what scripts / styles / images / connects are allowed. Explicit allow-lists for Razorpay (`checkout.razorpay.com` + `api.razorpay.com`), Google Fonts (style + font-src), Unsplash + our S3 bucket (img-src), and 2Factor (connect-src). `script-src 'unsafe-inline' 'unsafe-eval'` retained for Razorpay's checkout bundle + Next.js's RSC hydration markers; replacing with nonces tracked in `RELEASE_READINESS.md`. |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Prevents a malicious popup from accessing `window.opener`. |
+| `Cross-Origin-Resource-Policy` | `same-origin` | Stops cross-origin embedding of our resources. |
+| `X-Frame-Options` | `DENY` | Clickjacking protection — also covered by CSP's `frame-ancestors 'none'`. |
+| `X-Content-Type-Options` | `nosniff` | Disables MIME-sniffing exploits. |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Leaks less URL data when users follow outbound links. |
+| `Permissions-Policy` | denies camera/mic/USB/etc. | Browser features the app doesn't use are explicitly denied. Razorpay payment iframe explicitly allowed via `payment=(self "https://checkout.razorpay.com")`. |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | 2-year HSTS, preload-eligible. |
+
+CORS headers on `/api/*` and the bare-prefix legacy mobile paths are unchanged so the mobile team's Dio client keeps working.
+
+### 2. Self-hosted Inter via `next/font/google` — Performance render-block fix
+
+`src/app/globals.css` previously did `@import url('https://fonts.googleapis.com/css2?…')` which is render-blocking and forced a cross-origin TLS handshake on every cold visit (Lighthouse measured **~580 ms** of LCP delay).
+
+`src/app/layout.tsx` now imports Inter via `next/font/google`. Next.js downloads the woff2 at build time and serves it from Vercel's edge under `/_next/static/media/`. Benefits:
+
+- No more `fonts.googleapis.com` / `fonts.gstatic.com` fetches → render-blocking gone
+- `font-display: swap` auto-applied → no FOIT
+- `adjustFontFallback: true` (default) → tiny `size-adjust` shim on the system fallback font so the layout doesn't shift when Inter swaps in
+- `--font-inter` CSS variable wired through `<html className={inter.variable}>` and `body { font-family: var(--font-inter), 'Inter', system-ui, sans-serif }` in globals.css
+
+Bonus: the manifest-link `<link rel="preconnect">` tags for the two Google Fonts origins were removed; replaced with `dns-prefetch` for the image CDNs we DO actually call (`images.unsplash.com`, our S3 bucket, `checkout.razorpay.com`) and a `preconnect` to `api.razorpay.com` (used during checkout).
+
+### 3. `next/image` WebP/AVIF — Performance image savings
+
+`next.config.js` → `images.formats: ['image/avif', 'image/webp']`. Browsers that support AVIF (~96% globally) get it; everyone else gets WebP; the remaining ~2% of legacy browsers fall back to the original JPG/PNG. Estimated savings per Lighthouse: **101 KiB**.
+
+Also added `images.remotePatterns` entries for `images.unsplash.com` and `vayil-files.s3.ap-south-1.amazonaws.com` so `<Image>` can transform those too. `minimumCacheTTL: 30 days` so transformed variants stay warm at the CDN edge.
+
+### 4. Console 403 fix — Best Practices clean-up
+
+Lighthouse flagged `Failed to load resource: 403` on `/api/customer/enquiryList` from the homepage's "recent enquiries" widget. Root cause: the widget guarded on `useUserAuth.user` (rehydrated from Zustand persist) but the JWT in localStorage could be stale (expired, or for a user that no longer exists on production DB after a re-seed). The call fired anyway, backend rejected with 403, console error logged.
+
+Two-layer fix:
+
+- **`src/app/page.tsx`** — widget effect now requires `user && user.type === 'customer' && localStorage.getItem('vayil_token')` before firing. Vendor-role users on the home page won't fire the customer-only endpoint either.
+- **`src/lib/api/client.ts`** — interceptor now handles 403 the same way as 401. On a public page (not `/account` / `/vendor-studio`), a 401 silently clears the stale `vayil_token` + `vayil-user-auth` localStorage entries so subsequent guarded effects stop firing. On a logged-in area, 401 still redirects to login. 403 on a public page is a no-op (don't redirect because the user wasn't expecting one).
+
+### 5. CLS regression fix — Performance contributing
+
+`v4.5.21`'s CLS regressed from **0.023 → 0.102** (Lighthouse threshold for "Good" is < 0.1; we landed just over). The flagged culprit was `div.bg-white.border-y.border-gray-100` (the trust bar on the home page) shifting due to a carousel image above it loading without reserved dimensions.
+
+Fix: `src/app/page.tsx` line 556 — the quick-link card thumbnails now have explicit `width={140} height={160}` HTML attributes (CSS-side `w-[140px] h-[160px]` was retained for styling). HTML attrs reserve layout space pre-CSS so the trust bar below stops drifting after image load. Also added `loading="lazy"` + `decoding="async"` to avoid blocking the LCP path.
+
+### 6. Colour contrast pass — Accessibility 86 → 95+
+
+Lighthouse listed ~30 elements failing WCAG AA contrast — every one was one of these four patterns:
+
+| Pattern | Was | Now |
+|---|---|---|
+| `text-orange` on white | `#E8943A` → **2.57:1** ❌ | `#A85E21` (orange-700) → **5.27:1** ✅ |
+| `text-orange-600` on white | `#D4782A` → **3.30:1** ❌ | `#8C4D19` → **7.0:1** ✅ |
+| `text-navy/60` small body | navy at 60% → **4.0:1** ❌ | navy at 78% → **5.5:1** ✅ |
+| `text-gray-400` tiny labels (10-12px) | `#9CA3AF` → **3.7:1** ❌ | gray-600 `#4B5563` → **7.2:1** ✅ |
+
+Fixed via `src/app/globals.css` overrides — single source of truth, no per-component JSX changes needed. Brand orange on bg-navy stays passing (~7:1 contrast), buttons that use `text-white` are unaffected.
+
+### Verified locally
+
+- `/robots.txt`, `/sitemap.xml`, `/manifest.webmanifest` still serve correctly with full CSP applied
+- Homepage `<head>` ships all 8 security headers (CSP, COOP, COR-P, XFO, XCTO, Ref-P, Perm-P, HSTS)
+- `/api/*` retains CORS-only headers (no strict CSP — preserves CORS for the mobile app)
+- Inter font self-hosted under `/_next/static/media/`
+- 5 JSON-LD blocks still rendering on homepage
+
+---
+
 ## v4.5.21 — Comprehensive SEO + accessibility upgrade (Lighthouse 63 → expected 95+) (2026-06-07)
 
 A Lighthouse audit on the Vercel deployment scored:

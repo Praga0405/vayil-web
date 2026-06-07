@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { Inter } from 'next/font/google'
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
 import { siteConfig, ogImageUrl } from '@/lib/seo/site-config'
@@ -7,6 +8,20 @@ import {
   WebSiteJsonLd,
   LocalBusinessJsonLd,
 } from '@/lib/seo/jsonld'
+
+/** v4.5.22 — Self-hosted Inter via next/font/google.
+ *  Eliminates ~580 ms of render-blocking fetch to fonts.googleapis.com
+ *  (and the follow-up to fonts.gstatic.com), removes the cross-origin
+ *  TLS handshake, and applies font-display: swap automatically.
+ *  Lighthouse flagged this as the single biggest performance win
+ *  after v4.5.21. */
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700', '800'],
+  variable: '--font-inter',
+  display: 'swap',
+  preload: true,
+})
 
 /* ──────────────────────────────────────────────────────────────────
  * v4.5.21 — Comprehensive SEO + accessibility metadata upgrade.
@@ -171,17 +186,16 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang={siteConfig.language} dir="ltr">
+    <html lang={siteConfig.language} dir="ltr" className={inter.variable}>
       <head>
-        {/* DNS prefetch + preconnect — improves LCP for Google Fonts.
-            preconnect opens the TCP+TLS handshake early; dns-prefetch
-            is the fallback for browsers that ignore preconnect. */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
-        <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+        {/* v4.5.22 — fonts.googleapis.com / fonts.gstatic.com preconnect
+            removed; next/font/google self-hosts Inter so those origins
+            are no longer in the critical path. DNS-prefetch retained
+            for the image CDNs we DO still call. */}
         <link rel="dns-prefetch" href="https://images.unsplash.com" />
         <link rel="dns-prefetch" href="https://vayil-files.s3.ap-south-1.amazonaws.com" />
+        <link rel="dns-prefetch" href="https://checkout.razorpay.com" />
+        <link rel="preconnect" href="https://api.razorpay.com" crossOrigin="anonymous" />
 
         {/* Sitewide structured data — Organization + WebSite +
             LocalBusiness. Page-level JSON-LD (Service, Vendor profile,

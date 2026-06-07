@@ -213,11 +213,21 @@ export default function HomePage() {
   const [recentEnquiries, setRecentEnquiries] = useState<any[]>([])
 
   useEffect(() => {
-    if (!user) return
+    // v4.5.22 — guard against firing /customer/enquiryList when the user
+    // object hydrated from Zustand persist but the JWT in localStorage
+    // has expired (Lighthouse audit caught a 403 in the console because
+    // of this — Best Practices score deduction). Require BOTH a user
+    // and a token, and require the user to be a customer (vendors hit
+    // 403 because the route is role-gated). Errors are swallowed
+    // silently because this is a non-essential "recent enquiries"
+    // widget on the public home page.
+    if (!user || user.type !== 'customer') return
+    const token = typeof window !== 'undefined' ? localStorage.getItem('vayil_token') : null
+    if (!token) return
     customerApi.getEnquiries().then(r => {
       const d = r.data?.data || r.data?.result || []
       setRecentEnquiries(Array.isArray(d) ? d.slice(0, 3) : [])
-    }).catch(() => {})
+    }).catch(() => { /* stale token, role mismatch, network — fine to ignore */ })
   }, [user])
 
   // Search is public: anyone can browse results without logging in.
@@ -543,7 +553,17 @@ export default function HomePage() {
               <div key={title}
                 className={`rounded-2xl overflow-hidden flex hover:shadow-md transition-shadow cursor-pointer ${dark ? 'bg-[#183954]' : 'bg-[#FAF7F2]'}`}
                 onClick={() => goToCategory(title)}>
-                <img src={img} alt={title} className="w-[140px] h-[160px] object-cover shrink-0" />
+                <img
+                  src={img}
+                  alt={title}
+                  width={140}
+                  height={160}
+                  loading="lazy"
+                  decoding="async"
+                  // v4.5.22 — explicit width/height HTML attrs reserve
+                  // pre-CSS layout space; was a Lighthouse CLS culprit.
+                  className="w-[140px] h-[160px] object-cover shrink-0"
+                />
                 <div className="flex-1 p-5 flex flex-col justify-center">
                   <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${dark ? 'text-orange' : 'text-orange'}`}>{tag}</p>
                   <h3 className={`font-bold text-base mb-1 ${dark ? 'text-white' : 'text-navy'}`}>{title}</h3>
