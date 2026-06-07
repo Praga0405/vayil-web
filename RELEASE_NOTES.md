@@ -1,5 +1,49 @@
 # Release Notes
 
+## v4.5.18 — Legacy mobile URL compatibility (bare `/customer/*` and `/vendor/*` paths) (2026-06-04)
+
+The mobile team reported hitting `https://vayil-web.vercel.app/customer/getSettings` and getting back the Next.js HTML 404 page instead of JSON. Root cause: the Flutter app was built against `https://app.vayil.in/customer/...` — bare paths, no `/api` prefix. Our Vercel catch-all `pages/api/[...all].ts` only handles requests under `/api/*`, so any request to `/customer/getSettings`, `/vendor/vendorlistReviews`, `/auth/otp/send`, `/Admin/Settings` etc. fell through to the Next.js App Router which served its built-in 404 page.
+
+### Fix
+
+`next.config.js` adds an `afterFiles` rewrites block that forwards every legacy mobile path prefix to the same path under `/api/`:
+
+```js
+{ source: '/customer/:path*',  destination: '/api/customer/:path*'  },
+{ source: '/vendor/:path*',    destination: '/api/vendor/:path*'    },
+{ source: '/customers/:path*', destination: '/api/customers/:path*' },
+{ source: '/vendors/:path*',   destination: '/api/vendors/:path*'   },
+{ source: '/auth/:path*',      destination: '/api/auth/:path*'      },
+{ source: '/Admin/:path*',     destination: '/api/Admin/:path*'     },
+{ source: '/admin/:path*',     destination: '/api/admin/:path*'     },
+{ source: '/payments/:path*',  destination: '/api/payments/:path*'  },
+{ source: '/webhooks/:path*',  destination: '/api/webhooks/:path*'  },
+{ source: '/ops/:path*',       destination: '/api/ops/:path*'       },
+
+// bare top-level mobile endpoints
+{ source: '/CustomerupdatePlan',   destination: '/api/CustomerupdatePlan'   },
+{ source: '/logincustomerWithOTP', destination: '/api/logincustomerWithOTP' },
+{ source: '/vendor-login-otp',     destination: '/api/vendor-login-otp'     },
+{ source: '/upload_files',         destination: '/api/upload_files'         },
+{ source: '/health',               destination: '/api/health'               },
+```
+
+### Why `afterFiles` and not `beforeFiles`
+
+The web app has real Next.js pages at `/customer/dashboard`, `/customer/profile`, `/customer/login`, `/vendor/dashboard`, `/vendor/services`, etc. `afterFiles` rewrites only apply when no Next.js page matches — so the web UI keeps loading those pages normally, and only requests for paths Next.js doesn't know about (like `/customer/getSettings`, `/vendor/vendorlistReviews`) fall through to Express.
+
+CORS headers extended to mirror the same prefix list so cross-origin requests (mobile Dio client) get the right Access-Control-Allow-* headers on both the bare and `/api/` shapes.
+
+### Mobile-team impact: zero new code, zero new app release
+
+The Flutter app's existing base URL keeps working as long as it points at the new Vercel deployment (`https://vayil-web.vercel.app` or any future custom domain like `api.vayil.in`). No new build, no Play Store / App Store release required. The legacy mobile shim routers (`legacyCustomerRouter`, `legacyVendorRouter`) in `backend/src/routes/` are already preserving the original request/response shapes (multipart form-data parsing, response envelopes, etc.), so the round-trip behaviour is identical to the old `app.vayil.in` server.
+
+### Verified locally
+
+All 9 Next.js pages tested (`/customer/dashboard`, `/customer/profile`, `/customer/login`, `/customer/signup`, `/vendor/dashboard`, `/vendor/profile`, `/vendor/login`, `/vendor/services`, `/vendor-studio/listing`) still return HTTP 200 with the actual UI. All 5 legacy mobile endpoints (`/customer/getSettings`, `/customer/getProfile`, `/vendor/getProfile`, `/vendor/vendorlistReviews`, `/health`) now reach Express — the 401 responses (or 200 for `/health`) come from Express's auth middleware, not Next.js's 404 page. CORS headers present on both shapes.
+
+---
+
 ## v4.5.17 — Wire vendor-studio Add/Edit Service to the real taxonomy (2026-06-04)
 
 Local-preview verification of v4.5.16 surfaced three bugs that prevented the new Add/Edit Service pages from actually rendering categories, sub-categories, or tags:
