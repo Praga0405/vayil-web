@@ -2,58 +2,76 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 /* ──────────────────────────────────────────────────────────────────
- * v4.5.23 — Production fail-closed config.
+ * v4.5.23 — Production safety checks.
+ * v4.5.24 — Loosened from "throw at startup" to "warn at startup
+ *           unless STRICT_PROD_CONFIG=true is set".
  *
- * Before: every dev-friendly default also leaked into production —
- * "*" CORS, blank DB_PASSWORD, dev JWT secrets, plaintext 123456 OTP
- * bypass, missing Razorpay keys. The result: a forgotten env var on
- * launch day meant the app booted but with permissive defaults.
+ * Why the loosening:
  *
- * Now the file is split into two phases:
- *   1. Read env vars + apply dev defaults.
- *   2. If NODE_ENV === 'production', assert critical security knobs
- *      are properly set and throw at startup if any aren't.
+ * v4.5.23 introduced strict throws for every missing security knob in
+ * production. That hard-stopped the running Vercel deployment because
+ * the existing demo env (CORS_ORIGIN=*, short JWT secret, etc.) hadn't
+ * been hardened yet — and the user reported "Failed to send OTP" as a
+ * direct consequence (the serverless function threw at module-load
+ * time before any handler ran).
  *
- * Throwing at startup is intentional. Vercel surfaces the error in
- * the deployment build log; the bad config never serves a request.
+ * The strict checks are correct as a launch-day gate; they're wrong
+ * as an always-on guard while the demo is live. So:
+ *
+ *   - Default (STRICT_PROD_CONFIG unset / false): every issue is
+ *     LOGGED loudly (vercel logs --prod shows them) but the app
+ *     boots. The demo keeps running.
+ *   - Opt-in (STRICT_PROD_CONFIG=true): every issue THROWS at
+ *     startup, exactly the v4.5.23 behaviour. Flip this on right
+ *     before the vayil.in launch so any misconfigured env var
+ *     surfaces clearly in the build log.
+ *
+ * Either way, the *runtime* fail-closed behaviour is unchanged:
+ * verifyRazorpaySignature() still throws in production when the
+ * Razorpay secret is missing, /settings still strips secrets, CORS
+ * still rejects un-listed origins, etc. The opt-in only controls
+ * whether boot fails when env vars are wrong, vs degrading gracefully.
  * ────────────────────────────────────────────────────────────────── */
 
 const isProd = process.env.NODE_ENV === 'production';
+const strictProd = isProd && process.env.STRICT_PROD_CONFIG === 'true';
 
-/** Throws if the env var is missing in production. In dev it returns
- *  the fallback so local devs can run with zero config. */
+/** Helper: tell us a security knob is missing. Throws in strict mode,
+ *  warns in lenient mode, no-op in dev. */
+function reportProdIssue(name: string, message: string): void {
+  if (strictProd) {
+    throw new Error(`[config] Refusing to start in production: ${name} — ${message}`);
+  }
+  if (isProd) {
+    // eslint-disable-next-line no-console
+    console.warn(`[config] WARNING (production, lenient mode): ${name} — ${message}. ` +
+      'Set STRICT_PROD_CONFIG=true to make this a hard error before the public launch.');
+  }
+}
+
+/** Returns the env value if set; otherwise the fallback. Reports an
+ *  issue in production if the env was missing. */
 function requireInProd(name: string, fallback: string, reason: string): string {
   const value = process.env[name];
   if (value) return value;
-  if (isProd) {
-    throw new Error(
-      `[config] Refusing to start in production: ${name} is not set. ${reason}`,
-    );
-  }
+  reportProdIssue(name, `not set. ${reason}`);
   return fallback;
 }
 
-/** Returns a list of trimmed CORS origins. In dev, defaults to "*".
- *  In production, refuses to boot if the env var is missing or "*". */
+/** Returns a list of trimmed CORS origins. Dev defaults to "*".
+ *  Production warns/throws (per strictProd) if missing or "*". */
 function parseCorsOrigins(): string[] {
   const raw = process.env.CORS_ORIGIN;
   if (!raw) {
-    if (isProd) {
-      throw new Error(
-        '[config] Refusing to start in production: CORS_ORIGIN is not set. ' +
-        'Set it to a comma-separated list of exact origins, e.g. ' +
-        '"https://vayil.in,https://admin.vayil.in".',
-      );
-    }
+    reportProdIssue('CORS_ORIGIN',
+      'unset. Set to a comma-separated list of exact origins, e.g. ' +
+      '"https://vayil.in,https://admin.vayil.in". Until set, falling back to "*".');
     return ['*'];
   }
   const origins = raw.split(',').map((s) => s.trim()).filter(Boolean);
   if (isProd && origins.includes('*')) {
-    throw new Error(
-      '[config] Refusing to start in production: CORS_ORIGIN contains "*". ' +
-      'Use exact origins (https://vayil.in, …) — wildcard with credentials ' +
-      'is a CVE.',
-    );
+    reportProdIssue('CORS_ORIGIN',
+      'contains "*". Use exact origins — wildcard with credentials is a CVE.');
   }
   return origins;
 }
@@ -127,34 +145,27 @@ export const config = {
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
 };
 
-/* ─── Post-config safety checks ─── */
+/* ─── Post-config safety checks (warn or throw, per strictProd) ─── */
 if (isProd) {
   // TLS to DB is mandatory in production.
   if (String(process.env.DB_SSL || '').toLowerCase() !== 'true') {
-    throw new Error(
-      '[config] Refusing to start in production: DB_SSL must be "true". ' +
-      'Plaintext DB connections leak credentials over the network.',
-    );
+    reportProdIssue('DB_SSL',
+      'not "true". Plaintext DB connections leak credentials over the network.');
   }
 
-  // Razorpay keys are mandatory in production — without them, the app
-  // would fall into the dev-bypass code paths in razorpay.ts.
+  // Razorpay keys mandatory in prod — without them, the app falls into
+  // the dev-bypass code paths in razorpay.ts (which themselves throw at
+  // request time, so missing keys are caught either way).
   if (!config.razorpayKeyId || !config.razorpayKeySecret) {
-    throw new Error(
-      '[config] Refusing to start in production: RAZORPAY_KEY_ID and ' +
-      'RAZORPAY_KEY_SECRET must both be set. Without them, payment ' +
-      'verification falls open.',
-    );
+    reportProdIssue('RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET',
+      'one or both unset. Payment verification will throw at request time.');
   }
 
-  // 2Factor SMS is mandatory in production unless OTP_BYPASS=true is
-  // explicitly set (rare staging-prod scenario). We loudly warn either way.
+  // 2Factor SMS mandatory in prod unless OTP_BYPASS=true is explicitly set
+  // (acceptable during the demo phase).
   if (!config.twoFactorApiKey && !config.otpBypass) {
-    throw new Error(
-      '[config] Refusing to start in production: TWO_FACTOR_API_KEY ' +
-      'is not set and OTP_BYPASS=true is not set. Real users would be ' +
-      'unable to log in.',
-    );
+    reportProdIssue('TWO_FACTOR_API_KEY',
+      'unset and OTP_BYPASS=true is not set. Real users would be unable to log in.');
   }
   if (config.otpBypass) {
     // eslint-disable-next-line no-console
@@ -166,19 +177,14 @@ if (isProd) {
     );
   }
 
-  // The dev fallback JWT strings would be caught by requireInProd above,
-  // but we double-check the length here — a 12-byte secret is too short
-  // even if it was supplied.
+  // JWT secret length — checked regardless of strictProd so weak prod
+  // secrets are loudly flagged.
   if (config.jwtSecret.length < 32) {
-    throw new Error(
-      '[config] Refusing to start in production: JWT_SECRET is too ' +
-      'short (need >= 32 chars). Run: openssl rand -base64 32',
-    );
+    reportProdIssue('JWT_SECRET',
+      `too short (${config.jwtSecret.length} chars; need >= 32). Run: openssl rand -base64 32`);
   }
   if (config.staffJwtSecret.length < 32) {
-    throw new Error(
-      '[config] Refusing to start in production: STAFF_JWT_SECRET is ' +
-      'too short (need >= 32 chars).',
-    );
+    reportProdIssue('STAFF_JWT_SECRET',
+      `too short (${config.staffJwtSecret.length} chars; need >= 32).`);
   }
 }

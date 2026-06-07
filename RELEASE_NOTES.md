@@ -1,5 +1,62 @@
 # Release Notes
 
+## v4.5.24 — Hotfix: relax v4.5.23 startup throws to warnings (gated behind STRICT_PROD_CONFIG) (2026-06-07)
+
+v4.5.23 introduced strict throw-at-startup checks for every missing production security knob (CORS_ORIGIN, DB_SSL, JWT_SECRET length, Razorpay keys, …). That immediately hard-stopped the live demo: the user's existing Vercel env had CORS_ORIGIN unset and JWT secrets shorter than 32 chars, so the serverless function threw at module-load time and every request returned a generic 500. Symptom: "Failed to send OTP" in the LoginModal.
+
+### Fix
+
+`backend/src/config.ts` — every `throw new Error('Refusing to start in production…')` call is now routed through a `reportProdIssue()` helper that:
+
+- **Throws** when `STRICT_PROD_CONFIG=true` is set in the environment (the v4.5.23 behaviour, opt-in)
+- **Warns loudly** (visible in `vercel logs --prod`) otherwise — but the app boots
+
+The opt-in flag means: keep the demo running NOW, then set `STRICT_PROD_CONFIG=true` on the Vercel project right before the `vayil.in` launch. Any misconfigured env var surfaces as a clean `[config] Refusing to start…` message in the build log instead of taking the running deployment down mid-demo.
+
+### Runtime safety unchanged
+
+The *runtime* fail-closed behaviour from v4.5.23 is preserved:
+
+- `verifyRazorpaySignature()` still throws in production when the key is missing — payments can't fall open
+- `/settings` still strips secrets via `publicSettingsSafe()`
+- CORS callback still rejects un-listed origins (when `CORS_ORIGIN` IS set; with `*` it warns and reflects)
+- Customer/vendor ownership checks still enforced
+- Admin bcrypt-only check in production unchanged
+- Token transport header-only in production unchanged
+- Idempotency cross-user scoping unchanged
+- OTP plaintext mirror removal unchanged
+
+The opt-in only controls **boot behaviour** for env-var misconfiguration, not the per-request safety guarantees.
+
+### How to verify your prod env before launch
+
+```bash
+# On Vercel — Settings → Environment Variables, set:
+STRICT_PROD_CONFIG=true
+
+# Trigger a redeploy. If any required env var is missing or weak,
+# the Vercel build log will show a `[config] Refusing to start…`
+# error and the deployment won't ship. Fix the env var and redeploy.
+
+# Required values (no exceptions):
+CORS_ORIGIN=https://vayil.in,https://admin.vayil.in    # exact origins, no *
+DB_SSL=true
+JWT_SECRET=$(openssl rand -base64 32)                   # >= 32 chars
+STAFF_JWT_SECRET=$(openssl rand -base64 32)             # >= 32 chars
+RAZORPAY_KEY_ID=rzp_live_…                              # live key
+RAZORPAY_KEY_SECRET=…
+TWO_FACTOR_API_KEY=…                                    # OR OTP_BYPASS=true
+OTP_BYPASS=false                                        # for launch
+NEXT_PUBLIC_OTP_BYPASS=false
+PAYMENT_VERIFY_BYPASS=false
+```
+
+### Verified locally
+
+Reproduced the exact bad-env conditions that tripped production (`NODE_ENV=production CORS_ORIGIN='*' DB_SSL=false JWT_SECRET=short …`). v4.5.24 boots cleanly with a list of 7 warnings logged; v4.5.23 threw and crashed.
+
+---
+
 ## v4.5.23 — Security audit fixes: fail-closed config, ownership checks, settings deny-list, CORS allow-list, admin bcrypt-only, OTP plaintext removed, idempotency scoping, Swiper CVE (2026-06-07)
 
 Closes the P0 and most of the P1 items from the production-readiness security audit. **OTP and payment-verify bypass flags intentionally remain on per the user's directive** (needed for the leadership demo) — but every code path that previously made those bypasses risky in production now refuses to enter the bypass branch when `NODE_ENV === 'production'`. Result: when you flip the bypass flags to `false` before launch, the rest of the system is already in a fail-closed posture.
