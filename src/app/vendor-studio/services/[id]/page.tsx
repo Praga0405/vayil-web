@@ -168,8 +168,14 @@ export default function EditServicePage() {
             </Link>
             <div className="flex items-center gap-3">
               <StatusBadge status={status} />
-              <button onClick={toggleStatus} disabled={toggling}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-navy hover:text-orange transition disabled:opacity-50">
+              <button
+                type="button"
+                onClick={toggleStatus}
+                disabled={toggling}
+                aria-label={status === 'active' ? 'Deactivate this service' : 'Activate this service'}
+                aria-pressed={status === 'active'}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-navy hover:text-orange transition disabled:opacity-50 px-2 py-2 rounded-lg hover:bg-gray-50"
+              >
                 {status === 'active' ? <ToggleRight className="w-5 h-5 text-orange" /> : <ToggleLeft className="w-5 h-5" />}
                 {status === 'active' ? 'Deactivate' : 'Activate'}
               </button>
@@ -262,9 +268,17 @@ export default function EditServicePage() {
                   {existingImages.map((src, i) => (
                     <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100">
                       <img src={src} alt={`Service photo ${i + 1}`} className="w-full h-full object-cover" />
-                      <button onClick={() => setExistingImages(prev => prev.filter((_, idx) => idx !== i))}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 text-navy text-xs font-bold hover:bg-white"
-                        aria-label="Remove image">×</button>
+                      <button
+                        type="button"
+                        onClick={() => setExistingImages(prev => prev.filter((_, idx) => idx !== i))}
+                        aria-label={`Remove service photo ${i + 1}`}
+                        // v4.5.21 — 44×44 min hit area for touch
+                        // accessibility (WCAG 2.5.5). Visible chip stays
+                        // small; the surrounding padding catches taps.
+                        className="absolute top-0 right-0 w-11 h-11 flex items-center justify-center"
+                      >
+                        <span className="w-6 h-6 rounded-full bg-white/90 text-navy text-xs font-bold hover:bg-white shadow flex items-center justify-center">×</span>
+                      </button>
                     </div>
                   ))}
                 </div>

@@ -1,23 +1,211 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
+import { siteConfig, ogImageUrl } from '@/lib/seo/site-config'
+import {
+  OrganizationJsonLd,
+  WebSiteJsonLd,
+  LocalBusinessJsonLd,
+} from '@/lib/seo/jsonld'
+
+/* ──────────────────────────────────────────────────────────────────
+ * v4.5.21 — Comprehensive SEO + accessibility metadata upgrade.
+ *
+ * Before: a 4-line metadata object (title + description + themeColor).
+ * Lighthouse SEO scored 63 because of:
+ *   - no robots.txt              → fixed in src/app/robots.ts
+ *   - no sitemap.xml             → fixed in src/app/sitemap.ts
+ *   - no canonical / hreflang    → fixed below in metadataBase + alternates
+ *   - no Open Graph / Twitter    → fixed below
+ *   - no structured data         → fixed via JSON-LD components
+ *   - x-robots-tag: noindex      → Vercel preview-only behaviour; goes
+ *                                  away as soon as a custom domain
+ *                                  (or production alias) is configured.
+ *                                  No code change needed for this one.
+ *
+ * Accessibility (was 84) gets two free wins from this file alone:
+ *   - <main> landmark element wrapping {children}
+ *   - skip-to-content link for keyboard users
+ *
+ * After this file ships:
+ *   - SEO          63 → expected ~95+
+ *   - Accessibility 84 → ~90+ (further button-aria-label work happens
+ *                        on the components themselves; see commit notes)
+ * ────────────────────────────────────────────────────────────────── */
 
 export const metadata: Metadata = {
-  title: 'Vayil – Home Services Marketplace',
-  description: 'Connect with trusted home service professionals. Get quotes, track projects, and pay securely.',
-  themeColor: '#183954',
+  /** metadataBase tells Next.js the absolute base URL so every relative
+   *  metadata field (openGraph.images, alternates.canonical, etc.) is
+   *  resolved to absolute URLs in the rendered <head>. */
+  metadataBase: new URL(siteConfig.url),
+
+  /** Template means individual pages can set `title: 'Foo'` and the
+   *  rendered title becomes "Foo · Vayil". Keep total under 60
+   *  chars for Google SERPs. */
+  title: {
+    default: `${siteConfig.name} — ${siteConfig.tagline}`,
+    template: `%s · ${siteConfig.name}`,
+  },
+  description: siteConfig.description,
+  keywords: [...siteConfig.keywords],
+
+  applicationName: siteConfig.name,
+  authors: [{ name: siteConfig.legalName, url: siteConfig.url }],
+  generator: 'Next.js',
+  creator: siteConfig.legalName,
+  publisher: siteConfig.legalName,
+
+  /** Search engines: index + follow by default. Individual pages
+   *  (account/*, vendor-studio/*) can override with `robots: { index: false }`
+   *  in their own metadata exports. */
+  robots: {
+    index: true,
+    follow: true,
+    nocache: false,
+    googleBot: {
+      index: true,
+      follow: true,
+      noimageindex: false,
+      'max-snippet': -1,
+      'max-image-preview': 'large',
+      'max-video-preview': -1,
+    },
+  },
+
+  /** Canonical URL + language alternates. hreflang for India + a
+   *  generic x-default lets non-English crawlers know which page to
+   *  serve. */
+  alternates: {
+    canonical: '/',
+    languages: {
+      'en-IN': '/',
+      'x-default': '/',
+    },
+  },
+
+  /** Open Graph for Facebook, WhatsApp, LinkedIn, Slack, iMessage,
+   *  Discord, Telegram, Pinterest — basically every social platform. */
+  openGraph: {
+    type: 'website',
+    locale: siteConfig.locale,
+    url: siteConfig.url,
+    siteName: siteConfig.name,
+    title: `${siteConfig.name} — ${siteConfig.tagline}`,
+    description: siteConfig.description,
+    images: [
+      {
+        url: ogImageUrl(),
+        width: 1200,
+        height: 630,
+        alt: `${siteConfig.name} — verified home services in ${siteConfig.city}`,
+        type: 'image/png',
+      },
+    ],
+  },
+
+  /** Twitter / X large summary card. */
+  twitter: {
+    card: 'summary_large_image',
+    title: `${siteConfig.name} — ${siteConfig.tagline}`,
+    description: siteConfig.description,
+    images: [ogImageUrl()],
+    site: siteConfig.social.twitter,
+    creator: siteConfig.social.twitter,
+  },
+
+  /** Icons for browser tab, iOS Home Screen, and Android Chrome. */
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/vayil-icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [
+      { url: '/vayil-icon.svg', sizes: '180x180', type: 'image/svg+xml' },
+    ],
+    shortcut: '/favicon.svg',
+  },
+
+  /** Wires up the PWA manifest from src/app/manifest.ts. */
+  manifest: '/manifest.webmanifest',
+
+  /** Verification tokens — fill in once the brand owns the domains. */
+  verification: {
+    // google:     'paste Search-Console verification token here',
+    // yandex:     '…',
+    // other:      { 'msvalidate.01': '…' }, // Bing
+  },
+
+  /** Geographic metadata — extra signal for local-pack ranking. */
+  other: {
+    'geo.region':       `${siteConfig.countryCode}-TN`,
+    'geo.placename':    siteConfig.city,
+    'geo.position':     `${siteConfig.geo.latitude};${siteConfig.geo.longitude}`,
+    'ICBM':             `${siteConfig.geo.latitude}, ${siteConfig.geo.longitude}`,
+    'format-detection': 'telephone=no',
+  },
+
+  /** Allow inline Apple-app banners later if/when the iOS app is live. */
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: siteConfig.name,
+  },
+
+  category: 'business',
+}
+
+/** v4.5.21 — themeColor / viewport moved out of metadata per Next.js 14's
+ *  separation. `width=device-width` fixes Lighthouse's "Optimize
+ *  viewport for mobile" (was previously firing 300ms tap delays). */
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: siteConfig.themeColor },
+    { media: '(prefers-color-scheme: dark)',  color: siteConfig.themeColor },
+  ],
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,           // accessibility: allow pinch-zoom up to 5x
+  userScalable: true,
+  viewportFit: 'cover',      // iPhone notch-aware
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang={siteConfig.language} dir="ltr">
       <head>
+        {/* DNS prefetch + preconnect — improves LCP for Google Fonts.
+            preconnect opens the TCP+TLS handshake early; dns-prefetch
+            is the fallback for browsers that ignore preconnect. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+        <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+        <link rel="dns-prefetch" href="https://images.unsplash.com" />
+        <link rel="dns-prefetch" href="https://vayil-files.s3.ap-south-1.amazonaws.com" />
+
+        {/* Sitewide structured data — Organization + WebSite +
+            LocalBusiness. Page-level JSON-LD (Service, Vendor profile,
+            BreadcrumbList, FAQPage) lives inside the relevant page.tsx. */}
+        <OrganizationJsonLd />
+        <WebSiteJsonLd />
+        <LocalBusinessJsonLd />
       </head>
       <body>
-        {children}
+        {/* Skip-to-content link for keyboard / screen-reader users.
+            Visually hidden until focused. */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[9999] focus:bg-navy focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:font-semibold focus:shadow-lg"
+        >
+          Skip to main content
+        </a>
+
+        {/* <main> landmark — fixes Lighthouse "Document does not have a
+            main landmark". All page content goes inside. */}
+        <main id="main-content">
+          {children}
+        </main>
+
         <Toaster
           position="top-center"
           toastOptions={{

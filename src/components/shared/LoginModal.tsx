@@ -294,8 +294,19 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
       <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm animate-slide-up overflow-hidden">
-        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition z-10">
-          <X className="w-4 h-4 text-gray-500" />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close sign-in dialog"
+          // v4.5.21 — bumped to 44×44 minimum touch-target size per
+          // Lighthouse / WCAG 2.5.5 ("Touch targets do not have sufficient
+          // size or spacing"). Visual chip stays w-8 h-8; the surrounding
+          // padded hit area satisfies the spec.
+          className="absolute top-3 right-3 w-11 h-11 rounded-full hover:bg-gray-100 flex items-center justify-center transition z-10"
+        >
+          <span className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
+            <X className="w-4 h-4 text-gray-500" />
+          </span>
         </button>
 
         {/* Header */}
