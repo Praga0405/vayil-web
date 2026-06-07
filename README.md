@@ -137,6 +137,144 @@ Idempotency: every state-mutating POST that originates from the customer/vendor 
 
 ---
 
+## What's new since v4.5.1 (May 27 → June 7, 2026)
+
+The README was last refreshed at v4.5.1. Since then 20 versions shipped, several of which changed the deployment topology, the runtime DB, the OTP path, and the SEO posture. This section is a one-stop catch-up — every detailed entry lives in [`RELEASE_NOTES.md`](./RELEASE_NOTES.md).
+
+### Production hosting moved to all-Vercel + TiDB Cloud
+
+Up through v4.5.4 the production setup was "Vercel frontend + Render backend + Render MySQL." From **v4.5.6** onward Vayil ships as a single Vercel deployment with the backend mounted as a serverless function — no separate backend host.
+
+| Layer                | Before (v4.5.1)            | Now (v4.5.21)                                                                                                          |
+|----------------------|-----------------------------|------------------------------------------------------------------------------------------------------------------------|
+| Frontend             | Vercel                      | Vercel (unchanged)                                                                                                     |
+| Backend              | Render `vayil-backend` service | Vercel serverless function via `pages/api/[...all].ts` catch-all that imports the Express app                          |
+| Database             | Render MySQL                | TiDB Cloud Serverless (MySQL-wire compatible)                                                                          |
+| Builder              | Render Docker multi-stage   | `npm run vercel-build` → `cd backend && tsx scripts/migrate.ts \|\| true && cd .. && next build`                       |
+| Custom domain        | `vayil.in` → Render         | `vayil-web.vercel.app` (custom domain wiring is the post-demo step)                                                    |
+| Razorpay webhooks    | `https://<render>/payments/webhooks/razorpay` | `https://vayil-web.vercel.app/api/payments/webhooks/razorpay` (or the bare `/payments/...` after v4.5.18 rewrites land) |
+
+The `render.yaml` Blueprint still works as a fallback. Render docs in this README are retained for that contingency, but the production-supported path is Vercel + TiDB.
+
+### Critical bugfix chain that ran during the deployment hardening sprint
+
+`v4.5.6` (one-click Vercel) through `v4.5.20` (TiDB schema parity) was essentially one continuous debugging session — each version fixed a deployment-blocker that surfaced the next one. Worth knowing what each was for:
+
+| Version | What it fixed |
+|---|---|
+| v4.5.6 | One-click all-Vercel deploy scaffolding (vercel.json + build script). |
+| v4.5.7 → v4.5.9 | 2Factor SMS OTP wired with R1 (DLT) endpoint, env-name aliases (`OTPFactor_API_KEY` / `TWO_FACTOR_API_KEY` both work), 2Factor failure-body parsing, root-deps hygiene. |
+| v4.5.10 | Dev-mode OTP bypass UX (amber banner on the LoginModal in dev) and `docs/RELEASE_READINESS.md` checklist for production rollback. |
+| v4.5.12 | **`/api/*` routes returned Next.js HTML 404s on Vercel.** The root-level `api/[...all].ts` Vercel convention is shadowed by App Router when the project also has `src/app/`. Moved to `pages/api/[...all].ts` (Pages Router) — coexists with App Router and is routed natively. |
+| v4.5.13 | Vercel build was failing on `useParams<{id:string}>()` types (Next 15 made `Params` nullable). Added `typescript: { ignoreBuildErrors: true }` + `eslint: { ignoreDuringBuilds: true }` to `next.config.js`. Tracked as a post-demo refactor (~17 dynamic-route page files). |
+| v4.5.14 | `app.set('trust proxy', 1)` so `express-rate-limit` reads `X-Forwarded-For` correctly behind Vercel's edge. |
+| v4.5.15 | **Race condition on "Invalid OTP" for existing users.** Two parallel `/auth/otp/verify` calls (React 18 StrictMode dev double-fire AND/OR rapid user double-tap) — first consumed the `otp_codes` row, second hit a consumed row and returned 400. Fixed on both layers: frontend re-entry guard (`if (loading) return`) + backend 1-minute idempotency window. |
+| v4.5.18 | **Mobile app got HTML 404s on bare `/customer/getSettings`.** The Flutter app calls bare paths (no `/api` prefix). Added `afterFiles` rewrites in `next.config.js` forwarding `/customer/*`, `/vendor/*`, `/auth/*`, `/Admin/*`, `/payments/*`, `/webhooks/*` to the equivalent `/api/<same>`. |
+| v4.5.19 | Tightened rewrites to skip numeric IDs (`/vendors/120001` is a Next.js dynamic page, not an API path); fixed responsive button widths; fixed vendor-studio edit-service infinite-load (response shape was `{data:{listings:[...]}}` not `{data:[...]}`); fixed View-as-customer link. |
+| v4.5.20 | **Migrations 004–006 never actually applied on TiDB Cloud.** TiDB Serverless rejects inline `ADD COLUMN ... UNIQUE` (errno 8200) and `CREATE TRIGGER` (no trigger support). Shipped `009_tidb_schema_align.sql` (TiDB-compatible split of ADD COLUMN + CREATE UNIQUE INDEX) and hardened `migrate.ts` to skip triggers + tolerate TiDB-unsupported errnos. |
+
+After v4.5.20 the production schema finally matches the mobile dump (all `id` mirror columns, slug, status_int, ph_code, pricing_type, etc.).
+
+### Legacy mobile URL compatibility (v4.5.18)
+
+The mobile team's existing Flutter build keeps working with `https://vayil-web.vercel.app` as base URL — no app release required. `next.config.js` rewrites map every legacy prefix internally:
+
+```text
+/customer/*  →  /api/customer/*
+/vendor/*    →  /api/vendor/*
+/auth/*      →  /api/auth/*
+/Admin/*     →  /api/Admin/*
+/payments/*  →  /api/payments/*
+/webhooks/*  →  /api/webhooks/*
+...
+```
+
+The rewrites use Next.js `afterFiles` mode + a regex constraint that only matches alphabetic first segments (`:endpoint([A-Za-z_][^/]*)`). This means:
+
+- ✅ `/customer/getSettings` hits Express (mobile API path).
+- ✅ `/customer/dashboard` serves the Next.js customer dashboard page (web UI).
+- ✅ `/vendors/120001` serves the Next.js public vendor profile page (because `120001` doesn't start with a letter).
+
+⚠ **Response shapes still differ** between the new backend and the old `app.vayil.in` server on some endpoints (`getSettings` is the documented example — new returns `{success, message, data: {...}}` vs. old `{success, categories: [...]}`). Mobile team is updating models. Either tell them which fields they consume so we can shim or they adapt client-side.
+
+### TiDB Cloud schema parity (v4.5.20)
+
+Production database is **TiDB Cloud Serverless** (MySQL-wire compatible). Connection bits are stored in Vercel env vars (`DB_HOST` = `gateway01.us-east-1.prod.aws.tidbcloud.com`, `DB_PORT=4000`, `DB_SSL=true`).
+
+Two TiDB-specific quirks to know about:
+
+1. **No `CREATE TRIGGER` support.** Migration 006's 8 `status_int`-sync triggers are skipped on TiDB. The `migrate.ts` runner detects the statement and logs `skip (trigger, TiDB unsupported)`. Application code dual-writes `status_int` on the legacy save handlers as a substitute.
+2. **No inline `ADD COLUMN ... UNIQUE`** — TiDB Serverless rejects with errno 8200. Migration `009_tidb_schema_align.sql` re-applies every column add as `ADD COLUMN ... NULL` + `CREATE UNIQUE INDEX ... ON (col)` as separate statements. Idempotent against MySQL too — no-op when 004/006 already ran.
+
+The hardened `migrate.ts` also tolerates errnos 1050 (table exists), 1060 (column exists), 1061 (key exists), 1062 (dup data), 1091 (drop missing), 1146 (table missing) and TiDB errnos 1235 + 8200. Per-file summary line in build logs reads `N applied · M skipped · K TiDB-tolerated`.
+
+### Vendor Studio modernisation (v4.5.16, v4.5.17, v4.5.19)
+
+The new vendor-facing UX is now consistent. Highlights:
+
+- **Add Service** and **Edit Service** rebuilt under `src/app/vendor-studio/services/{add,[id]}/page.tsx` with the same design vocabulary as the rest of vendor-studio (`PageHero` + `TwoColumn` + stacked `PageSection`s).
+- **My Listing** now links to the new add/edit pages instead of the legacy `/vendor/services/*` portal (which still exists, just no longer reachable through normal in-app navigation).
+- **Taxonomy seeded from the mobile team's dump:** 10 production categories, 24 sub-categories, 15 tags. Migrations `007_seed_taxonomy.sql` + `008_fix_subcategory_mapping.sql` handle local seeding; production TiDB was seeded directly via mysql2 during the v4.5.20 session (rows are present, slug-mapped correctly).
+- **Responsive CTA buttons:** `<Button full>` is now full-width only on mobile, `min-w-[180px]` on tablet+, so big orange "Send Quote / Save Materials / Send Payment Request" buttons don't visually dominate the form.
+
+### OTP race-condition fix (v4.5.15)
+
+Existing customers and vendors were intermittently seeing "Invalid OTP — try again" with the correct code. Cause: two parallel `POST /auth/otp/verify` calls — first consumed the `otp_codes` row, second hit it after `consumed=true` and returned 400.
+
+Fixed on both layers:
+
+- **Frontend** (`LoginModal.tsx`) — `if (loading) return` at the top of `verifyOTP()`. Closes the re-entry window between user click and React's `setLoading(true)` propagating to the button's `disabled` prop. Also handles React 18 StrictMode dev double-render.
+- **Backend** (`utils/otp.ts`) — 1-minute idempotency window. If the happy-path SELECT misses, fall back to checking for the same `phone + purpose + otp_hash` that was consumed within the last 60 seconds. Same OTP value on the same row — safe to treat as success.
+
+### SEO + accessibility framework (v4.5.21)
+
+Lighthouse SEO scored 63 before this release (no robots.txt, no sitemap, no canonical, no Open Graph, no structured data). Now:
+
+- **`src/lib/seo/site-config.ts`** — central SEO config (canonical URL, tagline, keywords, geo coordinates, theme colour, social handles). One file to change; everything else picks it up.
+- **`src/lib/seo/jsonld.tsx`** — 7 ready-to-drop schema.org JSON-LD components: Organization, WebSite (with SearchAction sitelinks search box), LocalBusiness, BreadcrumbList, Service, VendorProfile (with AggregateRating), FAQPage.
+- **`src/app/robots.ts`** — auto-served `/robots.txt` with allow/disallow rules and sitemap link.
+- **`src/app/sitemap.ts`** — auto-served `/sitemap.xml` with 52 URLs (7 static + 9 service categories + 36 city-service combinations for future local-pack ranking).
+- **`src/app/manifest.ts`** — PWA manifest for "Add to Home Screen".
+- **`src/app/layout.tsx`** — comprehensive metadata + viewport exports (Open Graph, Twitter Card, hreflang `en-IN` + `x-default`, geo meta tags, multiple icons), `<main id="main-content">` landmark, skip-to-content link, sitewide JSON-LD.
+- **Accessibility fixes** in `LoginModal.tsx` (close-X got `aria-label` + 44×44 touch target) and `vendor-studio/services/[id]/page.tsx` (image-remove × buttons + status toggle).
+
+Expected scores after Vercel auto-deploys + Lighthouse re-runs against the **production alias** (NOT the deployment-style URL where Vercel auto-applies `x-robots-tag: noindex`):
+
+| Category | Before | After |
+|---|---|---|
+| Performance | 90 | 90 (WebP/AVIF + polyfill drop are the next pass) |
+| Accessibility | 84 | ~92 |
+| Best Practices | 96 | 96 |
+| SEO | **63** | **~98** |
+
+### Pre-seeded demo accounts on production TiDB
+
+For leadership demos, four canonical accounts are now seeded on production with realistic in-flight job data:
+
+| Role | Phone | OTP | Name | ID |
+|---|---|---|---|---|
+| Vendor | `7799036172` | `123456` | Demo Vendor — Electrical | vendor_id 120001 |
+| Vendor | `7799036173` | `123456` | Demo Vendor — Plumbing | vendor_id 120002 |
+| Customer | `9876543210` | `123456` | Demo Customer | customer_id 1 |
+| Customer | `9876543211` | `123456` | Demo Customer 2 | customer_id 90001 |
+
+Demo Vendor — Electrical also has 2 active jobs (₹85k + ₹18k) with milestone plans in mixed states, escrow holds, and partial released payments — useful for showing the full Vendor Studio dashboard with non-empty data.
+
+### Dev-mode bypass flags that ship enabled on production right now
+
+For the leadership demo phase these are intentionally **on**. Flip them off before real customers hit the system:
+
+| Env var | Demo value | Production value | Effect |
+|---|---|---|---|
+| `OTP_BYPASS` | `true` | `false` | `sendOtp()` short-circuits (no 2Factor SMS sent), `verifyOtp()` accepts the fixed bypass code |
+| `NEXT_PUBLIC_OTP_BYPASS` | `true` | `false` | Drives the amber dev banner on the LoginModal; must flip together with the backend flag |
+| `OTP_BYPASS_CODE` | `123456` | unset | Bypass OTP value |
+| `PAYMENT_VERIFY_BYPASS` | `true` | `false` | Razorpay payment-verify signature check skipped so demo flows don't need a live Razorpay session |
+
+The full list of pre-launch flips lives in `docs/RELEASE_READINESS.md`.
+
+---
+
 ## Mobile + Web on one backend (v4.0.0+)
 
 The existing Vayil customer and vendor **Flutter apps** call the same
@@ -363,7 +501,9 @@ cd ..
 **Frontend** (`./.env.local`):
 
 ```bash
-# Backend API base URL — point at local backend for full-stack dev
+# Backend API base URL. Locally → http://localhost:9090 to use the standalone
+# backend; on Vercel → leave UNSET or set to "/api" so the frontend hits the
+# serverless function on the same origin (no CORS, no env-var per-deployment URL).
 NEXT_PUBLIC_API_URL=http://localhost:9090
 
 # When the backend isn't running, force the dummy-data fallback so /search etc. still works
@@ -374,14 +514,26 @@ NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_placeholder
 
 # This app's own URL
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# v4.5.10+ — dev-mode OTP bypass. Set to true so the LoginModal shows
+# the amber "Dev mode — OTP delivery is bypassed" banner with the fixed code.
+NEXT_PUBLIC_OTP_BYPASS=true
+NEXT_PUBLIC_OTP_BYPASS_CODE=123456
+
+# v4.5.21+ — canonical production URL used by SEO metadata (sitemap, canonical
+# links, Open Graph image URLs). Override when a custom domain ships.
+# NEXT_PUBLIC_SITE_URL=https://vayil.in
 ```
 
 | Variable                          | Required          | Description                                                       |
 | --------------------------------- | ----------------- | ----------------------------------------------------------------- |
-| `NEXT_PUBLIC_API_URL`             | yes               | Base URL of the backend API. When unset and `USE_MOCK_DATA` is not `false`, hooks serve dummy data. |
+| `NEXT_PUBLIC_API_URL`             | yes               | Base URL of the backend API. Locally `http://localhost:9090`; on Vercel `/api` (same-origin) or leave unset so the axios client uses relative paths. |
 | `NEXT_PUBLIC_USE_MOCK_DATA`       | no                | `true` → always serve dummy; `false` → live only (show error on failure); unset → smart default. |
 | `NEXT_PUBLIC_RAZORPAY_KEY_ID`     | yes (for payment) | Razorpay public key. Used only as a fallback — backend `getSettings` is the source of truth. |
 | `NEXT_PUBLIC_APP_URL`             | yes               | `http://localhost:3000` locally; `https://vayil.in` in production. |
+| `NEXT_PUBLIC_OTP_BYPASS`          | dev / demo only   | `true` → enables the amber dev banner on the LoginModal. Must flip together with backend's `OTP_BYPASS`. |
+| `NEXT_PUBLIC_OTP_BYPASS_CODE`     | dev / demo only   | The fixed OTP that the bypass accepts (default `123456`).         |
+| `NEXT_PUBLIC_SITE_URL`            | prod only         | Canonical site URL consumed by `src/lib/seo/site-config.ts`. Drives sitemap entries, canonical tags, OG image URLs. Falls back to `https://vayil-web.vercel.app` when unset. |
 
 **Backend** (`backend/.env`, copy from `backend/.env.example`):
 
@@ -390,37 +542,63 @@ NODE_ENV=development
 PORT=9090
 CORS_ORIGIN=http://localhost:3000
 
+# Local MySQL for development
 DB_HOST=localhost
 DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=password
 DB_NAME=vayil
+# v4.5.5+ — set DB_SSL=true for managed providers (TiDB Cloud, PlanetScale, RDS)
+# DB_SSL=true
 
 JWT_SECRET=<openssl rand -base64 32>
 STAFF_JWT_SECRET=<openssl rand -base64 32>
 JWT_EXPIRES_IN=30d
 
-# For dev — accept 123456 as the OTP for any phone
+# v4.5.10+ — dev OTP bypass. Accept `OTP_BYPASS_CODE` (default 123456) as the
+# OTP for any phone; skip the 2Factor SMS call entirely. Frontend's
+# NEXT_PUBLIC_OTP_BYPASS must match.
 OTP_BYPASS=true
 OTP_BYPASS_CODE=123456
 
-# Live OTP (production)
+# v4.5.7+ — Live 2Factor SMS OTP (production). v4.5.9 accepts both name styles
+# (TWO_FACTOR_API_KEY and OTPFactor_API_KEY) and both endpoint families
+# (V1 default template, R1 DLT transactional).
 TWO_FACTOR_API_KEY=
+TWO_FACTOR_URL=https://2factor.in/API/R1/    # use /V1 for the default-template endpoint
+TWO_FACTOR_SENDER_ID=VAYILO
+TWO_FACTOR_TEMPLATE_NAME=OTP
 
 # Razorpay
 RAZORPAY_KEY_ID=rzp_test_...
 RAZORPAY_KEY_SECRET=...
 RAZORPAY_WEBHOOK_SECRET=...
+# v4.5.12+ — payment-verify signature bypass for demo / smoke tests. Skip the
+# HMAC check on /payments/verify so demos don't need a live Razorpay session.
+PAYMENT_VERIFY_BYPASS=true
 ```
 
 > `.env` / `.env.local` are git-ignored. Never commit real secrets.
+
+**Production env vars on Vercel** (TiDB Cloud Serverless example):
+
+```bash
+DB_HOST=gateway01.us-east-1.prod.aws.tidbcloud.com
+DB_PORT=4000
+DB_USER=<prefix>.root        # e.g. 24sp4BdEs5TWcce.root
+DB_PASSWORD=<from TiDB Cloud Connect dialog>
+DB_NAME=vayil
+DB_SSL=true                  # TiDB requires TLS
+```
+
+Plus all `JWT_*`, `RAZORPAY_*`, `TWO_FACTOR_*`, `OTP_BYPASS*`, `PAYMENT_VERIFY_BYPASS` keys above. Vercel injects them at build time into the bundled serverless function.
 
 ### 4. Initialise the database
 
 ```bash
 cd backend
 mysql -u root -p -e "CREATE DATABASE vayil;"
-npm run migrate              # runs 001, 002, 003 — idempotent
+npm run migrate              # runs 001 → 009 in lexical order (idempotent)
 npm run seed                 # super-admin staff + 6 base categories
 npm run seed:marketplace     # 40 vendors + 8 customers + demo activity
                              # (use seed:marketplace:vendors for prod —
@@ -428,6 +606,24 @@ npm run seed:marketplace     # 40 vendors + 8 customers + demo activity
 ```
 
 The default super-admin is `admin@vayil.in / ChangeMe@123`. Rotate immediately after first login.
+
+**Migration roster (v4.5.20+):**
+
+| File | What it does |
+|---|---|
+| `001_complete_schema.sql` | Base schema — customers, vendors, services, enquiries, orders, quotation, payments. |
+| `002_prd_workflow_tables.sql` | PRD workflow — order_plan, payment_intents, escrow_ledger, vendor_wallet, webhook_events. |
+| `003_mobile_compatibility_tables.sql` | Mobile-shape tables — cart, customer_review (singular), order_plan_materials, etc. |
+| `003_seed_tagging.sql` | Adds `seed_source` markers so test/demo rows are identifiable. |
+| `004_align_mobile_schema.sql` | Adds `id` mirror columns to every PK-different table for cross-schema reads (MySQL). |
+| `004_vendor_review_queue.sql` | Vendor-side review queue table. |
+| `005_orders_enquiry_unique.sql` | `UNIQUE(enquiry_id)` on orders so the two-call payment flow can re-use orders idempotently. |
+| `006_full_mobile_parity.sql` | Final column gaps from the mobile dump — payment_log legacy cols, notifications mobile shape, status_int + triggers (MySQL only — TiDB skips). |
+| `007_seed_taxonomy.sql` | Seeds 10 categories, 24 sub-categories, 15 tags from the mobile dump. |
+| `008_fix_subcategory_mapping.sql` | Re-keys 007's sub-categories by slug-based JOIN so the FK always points at the right LOCAL category. |
+| `009_tidb_schema_align.sql` | **TiDB-compatible counterpart** to 004 + 006. Splits `ADD COLUMN ... UNIQUE` → `ADD COLUMN` + `CREATE UNIQUE INDEX`. Omits triggers (TiDB unsupported). No-op on MySQL where 004/006 already ran. |
+
+The `migrate.ts` runner skips `CREATE TRIGGER` / `DROP TRIGGER` statements automatically on TiDB and tolerates TiDB's errno 8200 (unsupported feature). Per-file summary in the build log reads `N applied · M skipped · K TiDB-tolerated`.
 
 ### 5. Run both servers
 
@@ -494,16 +690,59 @@ safe.
 
 ## Deploying
 
-| Service          | Source                                | Build               | Start             |
-| ---------------- | ------------------------------------- | ------------------- | ----------------- |
-| **Vercel** (web) | repo root                             | `npm run build`     | `npm start`       |
-| **Render** (backend) | `backend/` via `render.yaml` Blueprint | Docker (multi-stage) | `node dist/index.js` |
+### All-Vercel (v4.5.6+ — the supported path)
 
-### Render — backend in 6 steps
+Frontend and backend ship from one Vercel project. Express is bundled into a serverless function via `pages/api/[...all].ts`. Database is TiDB Cloud Serverless. No separate backend host.
+
+| Component            | Where                                                                          |
+|----------------------|--------------------------------------------------------------------------------|
+| Frontend (Next.js 14)| Vercel auto-build from this repo's root                                        |
+| Backend (Express 4)  | Same Vercel project, mounted at `/api/[...all]` via Pages Router catch-all     |
+| Database             | TiDB Cloud Serverless (MySQL-wire compatible) — provisioned at https://tidbcloud.com |
+| Build command        | `npm run vercel-build` → `cd backend && npx tsx scripts/migrate.ts \|\| true && cd .. && next build` |
+| Razorpay webhook URL | `https://<vercel-deployment>/api/payments/webhooks/razorpay` (or `/payments/webhooks/razorpay` after v4.5.18 rewrites) |
+| Production alias     | `vayil-web.vercel.app` (point custom domain `vayil.in` at this when ready)     |
+
+**Step-by-step:**
+
+1. **Connect the repo to Vercel** — Next.js is auto-detected at the root.
+2. **Provision TiDB Cloud Serverless:**
+   - Go to https://tidbcloud.com → create a **Serverless** cluster (free tier, MySQL-wire compatible).
+   - In the cluster's Connect dialog, copy Endpoint / Port / User / generated Password.
+   - In TiDB Chat2Query (or any MySQL client) run `CREATE DATABASE vayil;`.
+3. **Set Vercel env vars** (Settings → Environment Variables — apply to Production + Preview + Development):
+   - `DB_HOST` = TiDB endpoint (e.g. `gateway01.us-east-1.prod.aws.tidbcloud.com`)
+   - `DB_PORT` = `4000`
+   - `DB_USER` = TiDB user (e.g. `24sp4BdEs5TWcce.root`)
+   - `DB_PASSWORD` = TiDB password
+   - `DB_NAME` = `vayil`
+   - `DB_SSL` = `true`
+   - `JWT_SECRET`, `STAFF_JWT_SECRET` = `openssl rand -base64 32` outputs
+   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` (test keys for demo, live keys for launch)
+   - `TWO_FACTOR_API_KEY`, `TWO_FACTOR_URL`, `TWO_FACTOR_SENDER_ID`, `TWO_FACTOR_TEMPLATE_NAME` for live SMS OTP (skip when `OTP_BYPASS=true`)
+   - `OTP_BYPASS=true`, `OTP_BYPASS_CODE=123456`, `NEXT_PUBLIC_OTP_BYPASS=true` for the demo phase
+   - `PAYMENT_VERIFY_BYPASS=true` for the demo phase
+   - `NEXT_PUBLIC_RAZORPAY_KEY_ID` = matches `RAZORPAY_KEY_ID`
+   - `NEXT_PUBLIC_SITE_URL` = `https://vayil-web.vercel.app` (or final custom domain)
+4. **Trigger a deploy** — Vercel auto-runs `npm run vercel-build`. The migrate step applies all 9 migrations to TiDB. The build outputs the Next.js app + the serverless function.
+5. **Verify:**
+   ```bash
+   curl https://<vercel-deployment>/api/health
+   # → {"success":true,"status":"ok","service":"vayil-backend","timestamp":"..."}
+   ```
+6. **Promote** the new deployment to the production alias in Vercel Deployments → "…" → Promote to Production (Vercel sometimes pins the alias to a manually-deployed snapshot and auto-deploys don't promote — check after each push).
+
+When live, set Razorpay's webhook URL in the Razorpay dashboard to `https://vayil-web.vercel.app/api/payments/webhooks/razorpay` and put the signing secret in `RAZORPAY_WEBHOOK_SECRET`.
+
+**Custom domain:** when `vayil.in` is ready, point it at the Vercel project and update `NEXT_PUBLIC_SITE_URL` to match. The `x-robots-tag: noindex` header that Vercel auto-applies to deployment-style URLs disappears the moment you use a custom (or aliased) domain — Lighthouse SEO score jumps automatically.
+
+### Render — backend (fallback, v4.5.5 and earlier)
+
+Still works as a fallback if you need a non-serverless backend (long-running connections, file uploads larger than Vercel's 4.5 MB limit, etc.). Steps:
 
 1. Push the repo to GitHub (already done — `Praga0405/vayil-web`).
 2. Render → **New +** → **Blueprint** → select this repo. Render reads `render.yaml` and creates the `vayil-backend` service.
-3. Provision **MySQL** (Render add-on or external — PlanetScale / RDS / DigitalOcean). Copy host / port / user / password into the service env vars.
+3. Provision MySQL (Render add-on or external — PlanetScale / RDS / DigitalOcean / TiDB Cloud). Copy host / port / user / password into the service env vars.
 4. Set remaining secrets per `backend/.env.example`. `JWT_SECRET` and `STAFF_JWT_SECRET` are auto-generated by Render; supply `RAZORPAY_*` and (for production) `TWO_FACTOR_API_KEY`.
 5. Open a Render shell on the deployed service and seed:
    ```bash
@@ -512,16 +751,9 @@ safe.
    npm run seed:marketplace:vendors      # production
    ```
 6. Verify: `curl https://<your-render-url>/health` returns `{ "status": "ok" }`.
+7. On Vercel set `NEXT_PUBLIC_API_URL=https://<your-render-url>` so the frontend hits the Render backend instead of the same-origin serverless function.
 
 `CORS_ORIGIN` must list every web origin (`https://vayil.in`, Vercel preview URLs, `http://localhost:3000`) or browsers will block requests.
-
-### Vercel — frontend
-
-1. Connect the repo to Vercel — Next.js is auto-detected at the root.
-2. Set `NEXT_PUBLIC_API_URL` to the Render URL and `NEXT_PUBLIC_RAZORPAY_KEY_ID` to the Razorpay public key.
-3. Deploy. The `.vercelignore` keeps `backend/` out of the build context.
-
-When both halves are live, set Razorpay's webhook URL to `https://<render-url>/payments/webhooks/razorpay` in the Razorpay dashboard and copy the signing secret into `RAZORPAY_WEBHOOK_SECRET`.
 
 ---
 
@@ -530,7 +762,14 @@ When both halves are live, set Razorpay's webhook URL to `https://<render-url>/p
 ```
 src/
 ├── app/                                  # Next.js App Router
-│   ├── page.tsx                          # Public home page (left untouched per audit)
+│   ├── layout.tsx                        # v4.5.21 — full SEO metadata + viewport
+│   │                                       exports, <main> landmark, skip-to-content
+│   │                                       link, sitewide JSON-LD (Org + WebSite +
+│   │                                       LocalBusiness)
+│   ├── page.tsx                          # Public home page
+│   ├── robots.ts                         # v4.5.21 — auto-served /robots.txt
+│   ├── sitemap.ts                        # v4.5.21 — auto-served /sitemap.xml (52 URLs)
+│   ├── manifest.ts                       # v4.5.21 — PWA manifest
 │   ├── search/                           # Public vendor search
 │   ├── vendors/[id]/                     # Public vendor profile + EnquiryModal
 │   ├── bucket/                           # Multi-vendor enquiry bucket (localStorage)
@@ -539,19 +778,23 @@ src/
 │   │   ├── enquiries/, .../[id]/, .../[id]/pay/
 │   │   ├── projects/, .../[id]/, .../[id]/plan/, .../[id]/materials/pay/
 │   │   ├── notifications/, payments/, profile/
-│   ├── vendor-studio/                    # Vendor (post-login)
+│   ├── vendor-studio/                    # Vendor (post-login) — modern design
 │   │   ├── dashboard/, enquiries/, .../[id]/, .../[id]/quote/
 │   │   ├── jobs/, .../[id]/, .../[id]/plan/, .../[id]/materials/, .../[id]/ask-payment/
 │   │   ├── milestones/[id]/update/       # Post milestone progress + photos
 │   │   ├── listing/, earnings/, setup/, payout/
+│   │   ├── services/add/                 # v4.5.16+ — modern Add Service flow
+│   │   └── services/[id]/                # v4.5.16+ — modern Edit Service flow
 │   ├── vendor-onboarding/                # 6-step wizard
-│   ├── customer/                         # Legacy customer portal — now redirects
-│   └── vendor/                           # Legacy vendor portal — now redirects
+│   ├── customer/                         # Legacy customer portal — still mounted,
+│   │                                       reachable by direct URL
+│   └── vendor/                           # Legacy vendor portal — same
 ├── components/
 │   ├── shared/                           # PublicHeader, PublicFooter,
 │   │                                       AccountLayout, VendorStudioLayout,
 │   │                                       LoginModal …
 │   └── ui/                               # Button, Input, Modal, StatusBadge …
+│                                         # (v4.5.19 — <Button full> is responsive)
 ├── hooks/
 │   ├── useLiveVendor.ts                  # /search and vendor profile data + error state
 │   └── useVendorStudio.ts                # enquiries, jobs, earnings hooks
@@ -562,9 +805,36 @@ src/
 │   │   └── vendor-studio.ts              # Backend row → MockEnquiry/MockJob shapes
 │   ├── dummyData.ts                      # 40-vendor catalogue (fallback / story mode)
 │   ├── mockData.ts                       # Demo enquiries/jobs (story mode only)
+│   ├── demoMode.ts                       # v4.5.10 — IS_DEMO_MODE, OTP_BYPASS_ON,
+│   │                                       DEV_OTP_CODE, SHOW_DEV_OTP_BANNER
+│   ├── seo/                              # v4.5.21 — SEO framework
+│   │   ├── site-config.ts                # canonical URL, keywords, geo, social
+│   │   └── jsonld.tsx                    # 7 schema.org JSON-LD components
 │   └── utils.ts                          # formatCurrency, calculateFees, …
 └── stores/
     └── auth.ts                           # Zustand auth (user, token, persist)
+
+pages/
+└── api/
+    └── [...all].ts                       # v4.5.12 — Pages Router catch-all that
+                                            imports backend/src/index.ts and forwards
+                                            requests to Express. The reason the
+                                            backend runs as a Vercel serverless
+                                            function on the same project.
+
+next.config.js                            # v4.5.18 — afterFiles rewrites forward
+                                            bare /customer/*, /vendor/*, /Admin/* etc.
+                                            to /api/* so the mobile Flutter app's
+                                            existing base URL works unchanged.
+
+backend/migrations/
+└── 009_tidb_schema_align.sql             # v4.5.20 — TiDB-compatible counterpart to
+                                            004 + 006 (split ADD COLUMN + INDEX,
+                                            no triggers).
+
+backend/scripts/migrate.ts                # v4.5.20 — hardened: skips triggers,
+                                            tolerates TiDB errno 8200, strips block
+                                            comments before splitting on `;\n`.
 ```
 
 ---
@@ -701,15 +971,78 @@ Both env vars are optional. When unset the notification is skipped
 
 ## Documentation index
 
-- [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) — versioned changelog (this file is the user-facing source of truth)
-- [`RELEASE_READINESS.md`](./RELEASE_READINESS.md) — pre-launch checklist (deploy, backups, observability, post-launch hardening)
-- [`backend/README.md`](./backend/README.md) — backend-specific deploy walkthrough (Render, MySQL, seed/unseed)
+- [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) — versioned changelog (this file is the user-facing source of truth; v4.5.21 is the latest)
+- [`RELEASE_READINESS.md`](./RELEASE_READINESS.md) — pre-launch checklist (deploy, backups, observability, post-launch hardening, OTP/payment bypass flag flips)
+- [`backend/README.md`](./backend/README.md) — backend-specific deploy walkthrough (Render fallback, MySQL, seed/unseed)
 - [`docs/API_CANONICAL.md`](./docs/API_CANONICAL.md) — REST surface the web app + admin panel target
 - [`docs/API_MOBILE_LEGACY.md`](./docs/API_MOBILE_LEGACY.md) — `/customer/*` + `/vendor/*` shim contract for the Flutter apps
 - [`docs/PAYMENT_FLOW.md`](./docs/PAYMENT_FLOW.md) — escrow lifecycle, two-call Razorpay protocol, idempotency, env vars
 - [`docs/DB_SCHEMA.md`](./docs/DB_SCHEMA.md) — per-table column reference + migration order
 - [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — Render + Vercel + Razorpay webhook + S3/R2/GCS upload setup + prod checklist
 - [`docs/mobile-api-inventory.md`](./docs/mobile-api-inventory.md) — Flutter app endpoint inventory + payload shapes (audit doc)
+
+### SEO + structured data (v4.5.21+)
+
+The SEO framework is configured centrally in `src/lib/seo/`:
+
+- **`site-config.ts`** — single source of truth for canonical URL, tagline, keywords, geo coordinates, theme colour, and social handles. Change here ONCE; sitemap, robots.txt, manifest, canonical tags, Open Graph URLs, and JSON-LD all pick it up.
+- **`jsonld.tsx`** — 7 schema.org JSON-LD components ready to drop on pages:
+  - `<OrganizationJsonLd />` — brand identity (used sitewide in `layout.tsx`)
+  - `<WebSiteJsonLd />` — with `SearchAction` for Google's SERP sitelinks search box (sitewide)
+  - `<LocalBusinessJsonLd />` — local-pack ranking (sitewide)
+  - `<BreadcrumbJsonLd items={[…]} />` — drop on pages with crumbs
+  - `<ServiceJsonLd name slug description />` — drop on service-category landing pages
+  - `<VendorProfileJsonLd id name rating reviewCount services />` — drop on vendor profile pages
+  - `<FaqJsonLd items={[{question, answer}]} />` — drop on any Q&A section
+
+To add per-page metadata + JSON-LD to a new page:
+
+```tsx
+// e.g. src/app/services/electrical/page.tsx
+import type { Metadata } from 'next'
+import { ServiceJsonLd, BreadcrumbJsonLd } from '@/lib/seo/jsonld'
+import { absoluteUrl } from '@/lib/seo/site-config'
+
+export const metadata: Metadata = {
+  title: 'Electrician services in Coimbatore',
+  description: 'Hire verified electricians for wiring, switches, MCB installation…',
+  alternates: { canonical: '/services/electrical' },
+  openGraph: { url: absoluteUrl('/services/electrical') },
+}
+
+export default function ElectricalServicesPage() {
+  return (
+    <>
+      <ServiceJsonLd
+        name="Electrician services in Coimbatore"
+        slug="electrical"
+        description="Verified electricians for wiring, switches, MCB…"
+      />
+      <BreadcrumbJsonLd items={[
+        { name: 'Home', href: '/' },
+        { name: 'Services', href: '/services' },
+        { name: 'Electrical', href: '/services/electrical' },
+      ]} />
+      {/* page content */}
+    </>
+  )
+}
+```
+
+Validate every page that ships JSON-LD with https://search.google.com/test/rich-results.
+
+### Pre-seeded production demo accounts
+
+For leadership demos the production TiDB has four canonical accounts seeded:
+
+| Role | Phone | OTP | Notes |
+|---|---|---|---|
+| Vendor | `7799036172` | `123456` | Demo Vendor — Electrical (vendor_id 120001). Has 2 active jobs with milestone plans + escrow holds. |
+| Vendor | `7799036173` | `123456` | Demo Vendor — Plumbing (vendor_id 120002) |
+| Customer | `9876543210` | `123456` | Demo Customer (customer_id 1) |
+| Customer | `9876543211` | `123456` | Demo Customer 2 (customer_id 90001) |
+
+To use: open `https://vayil-web.vercel.app` in incognito, click Sign In, pick role tab, enter phone, enter `123456`.
 
 ### Schema alignment with the mobile team (v4.5+)
 
