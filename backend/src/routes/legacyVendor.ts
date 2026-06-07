@@ -12,6 +12,7 @@ import { ApiError } from '../utils/http';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { one, query } from '../db';
+import { publicSettingsSafe } from './common';
 
 import * as authService from '../services/authService';
 import * as vendorSvc from '../services/vendorService';
@@ -592,9 +593,12 @@ legacyVendorRouter.post('/vendorlistReviews', async (req: AuthRequest, res, next
 async function vendorSettingsHandler(_req: any, res: any, next: any) {
   try {
     const row = await one<any>('SELECT * FROM settings LIMIT 1');
+    // v4.5.23 — strip payment_secret / smtp_password / etc. before
+    // shipping to the mobile vendor app. See publicSettingsSafe().
+    const safe = publicSettingsSafe(row);
     send(res, {
       data: {
-        ...row,
+        ...safe,
         razorpay_key: process.env.RAZORPAY_KEY_ID || null,
         currency: 'INR',
       },

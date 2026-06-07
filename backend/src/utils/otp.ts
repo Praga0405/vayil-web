@@ -9,25 +9,35 @@ export function generateOtp() {
 }
 
 export async function storeOtp(phone: string, purpose: string, otp: string) {
+  // SHA2-hashed storage in otp_codes — the source of truth for verifyOtp().
   await exec(
     `INSERT INTO otp_codes (phone, purpose, otp_hash, expires_at, consumed, created_at)
      VALUES (:phone, :purpose, SHA2(:otp, 256), DATE_ADD(NOW(), INTERVAL 10 MINUTE), false, NOW())`,
     { phone, purpose, otp }
   );
-  // v4.5.2: also mirror the OTP onto the user row (vendors.otp /
-  // customers.otp + expires_at + attempts + last_otp_sent_at). This
-  // is the column set the mobile team's reference DB uses; their
-  // direct queries (admin tooling, diagnostics) look there. Storage
-  // in otp_codes remains the source of truth for verifyOtp().
+  // v4.5.23 — Removed plaintext OTP mirror onto customers.otp / vendors.otp.
+  //
+  // Previously we wrote `customers.otp = :otp` so the mobile team's admin
+  // diagnostics could see the OTP value in plaintext. That's a clear
+  // security problem: any DB read (backup dump, replica lag inspector,
+  // staging mysqldump shared with the team) exposed every active OTP.
+  //
+  // The metadata columns — `otp_expires_at`, `otp_attempts`,
+  // `last_otp_sent_at` — are still useful (rate-limit signals,
+  // diagnostics) and are kept. Only the plaintext value column is
+  // skipped.
+  //
+  // Admin tooling that needs to verify an OTP should call the same
+  // /auth/otp/verify endpoint everyone else does, not read it out of
+  // the DB.
   const table = purpose.startsWith('vendor') ? 'vendors' : 'customers';
   await exec(
     `UPDATE ${table}
-        SET otp = :otp,
-            otp_expires_at = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+        SET otp_expires_at = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
             otp_attempts = COALESCE(otp_attempts, 0) + 1,
             last_otp_sent_at = NOW()
       WHERE phone = :phone OR mobile = :phone`,
-    { otp, phone },
+    { phone },
   ).catch(() => { /* row may not exist yet on first-time signup */ });
 }
 

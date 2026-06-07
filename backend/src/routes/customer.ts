@@ -106,7 +106,22 @@ customerRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
 
 customerRouter.post('/projects/:id/milestones/:milestoneId/approve', async (req: AuthRequest, res, next) => {
   try {
-    await exec(`UPDATE order_plan SET customer_status = 'approved', updated_at = NOW() WHERE plan_id = :milestoneId AND order_id = :id`, { milestoneId: req.params.milestoneId, id: req.params.id });
+    // v4.5.23 — Ownership check. Previously this UPDATE only matched on
+    // `plan_id` + `order_id` without verifying that the order belongs to
+    // the calling customer. A customer who knew (or guessed) another
+    // customer's order_id + plan_id could approve milestones on someone
+    // else's project. Authorization bug — closed here.
+    const owns = await one<any>(
+      `SELECT order_id FROM orders WHERE order_id = :id AND customer_id = :customerId LIMIT 1`,
+      { id: req.params.id, customerId: req.user!.id },
+    );
+    if (!owns) throw new ApiError(404, 'Project not found');
+    await exec(
+      `UPDATE order_plan
+          SET customer_status = 'approved', updated_at = NOW()
+        WHERE plan_id = :milestoneId AND order_id = :id`,
+      { milestoneId: req.params.milestoneId, id: req.params.id },
+    );
     ok(res, { message: 'Milestone approved' });
   } catch (err) { next(err); }
 });

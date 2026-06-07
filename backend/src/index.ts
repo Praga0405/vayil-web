@@ -25,7 +25,30 @@ const app = express();
 app.set('trust proxy', 1);
 
 app.use(helmet());
-app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins, credentials: true }));
+
+/* v4.5.23 — CORS hardening.
+ *
+ * Before: `origin: true` (reflect any origin) + `credentials: true`
+ * combined with broad mobile-shim mounts meant that ANY website could
+ * read authed responses if the user visited it while logged in.
+ *
+ * Now:
+ *   - Dev: still reflects any origin so localhost / preview URLs work.
+ *   - Production: strict allow-list. config.ts already refuses to boot
+ *     with CORS_ORIGIN unset or containing "*", so by the time we hit
+ *     this line in prod, config.corsOrigins is a non-empty array of
+ *     exact origins.
+ *   - Mobile-app callers send NO Origin header at all (native Dio
+ *     client doesn't set one), so `!origin` is allowed unconditionally
+ *     — mobile traffic isn't restricted by CORS regardless.
+ */
+const corsAllowFn = (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+  if (!origin) return cb(null, true);                          // mobile / server-to-server / Postman
+  if (!config.isProd && config.corsOrigins.includes('*')) return cb(null, true);
+  if (config.corsOrigins.includes(origin)) return cb(null, true);
+  return cb(new Error(`CORS: origin ${origin} not in allow-list`), false);
+};
+app.use(cors({ origin: corsAllowFn, credentials: true }));
 
 // Webhooks MUST receive the raw body for signature verification — mount
 // the dedicated webhook router BEFORE any body parser.

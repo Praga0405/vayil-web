@@ -81,6 +81,22 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
       estimatedDays: z.number().optional(),
       validUntil: z.string().optional(),
     }).parse(req.body);
+
+    // v4.5.23 — Ownership check. Previously this INSERT only used the
+    // calling vendor's id as the vendor_id but never verified that the
+    // enquiry was actually addressed to them. A vendor who knew (or
+    // guessed) another vendor's enquiry_id could post a quote on it.
+    // Also defends against quoting on rejected/cancelled enquiries.
+    const enquiry = await one<any>(
+      `SELECT enquiry_id, status FROM enquiries
+        WHERE enquiry_id = :id AND vendor_id = :vendorId LIMIT 1`,
+      { id: req.params.id, vendorId: req.user!.id },
+    );
+    if (!enquiry) throw new ApiError(404, 'Enquiry not found');
+    if (['rejected', 'cancelled', 'completed'].includes(String(enquiry.status).toLowerCase())) {
+      throw new ApiError(400, `Cannot quote on a ${enquiry.status} enquiry`);
+    }
+
     // Coerce undefined → null so mysql2 named-placeholders don't blow up.
     const result = await exec(
       `INSERT INTO quotation

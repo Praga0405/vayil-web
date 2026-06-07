@@ -19,15 +19,30 @@ export function signToken(payload: AuthUser, staff = false) {
  *   • query.token                            (rare — legacy GET endpoints)
  */
 export function extractToken(req: AuthRequest): string | undefined {
+  // Headers are the safe path — always honoured.
   const auth = req.headers.authorization || '';
   if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
   const xat = req.headers['x-access-token'];
   if (typeof xat === 'string' && xat) return xat.trim();
-  const body: any = req.body || {};
-  if (typeof body.token === 'string' && body.token) return body.token.trim();
-  if (typeof body.access_token === 'string' && body.access_token) return body.access_token.trim();
-  const q: any = req.query || {};
-  if (typeof q.token === 'string' && q.token) return q.token.trim();
+
+  // v4.5.23 — Body / query token transport is a leak risk:
+  //   - query.token shows up in access logs, Referer headers,
+  //     server-side analytics, CDN cache keys, browser history.
+  //   - body.token is fine over HTTPS but every endpoint that doesn't
+  //     authenticate via header would still write the value into
+  //     request-body debug logs.
+  //
+  // The legacy Flutter app's Dio FormData sometimes attaches `token`
+  // in the body; we keep that path for dev/staging only so the mobile
+  // team isn't broken mid-migration. Production REQUIRES header-based
+  // auth — query/body tokens are ignored.
+  if (!config.isProd) {
+    const body: any = req.body || {};
+    if (typeof body.token === 'string' && body.token) return body.token.trim();
+    if (typeof body.access_token === 'string' && body.access_token) return body.access_token.trim();
+    const q: any = req.query || {};
+    if (typeof q.token === 'string' && q.token) return q.token.trim();
+  }
   return undefined;
 }
 

@@ -64,6 +64,58 @@ commonRouter.get('/service-subcategories', async (req, res, next) => {
 commonRouter.get('/service-tags', async (_req, res, next) => {
   try { ok(res, { tags: await query('SELECT * FROM service_tags WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }
 });
+/**
+ * v4.5.23 — Public settings deny-list.
+ *
+ * The `settings` table stores both public branding (site name, logo,
+ * tax structure, Razorpay PUBLIC key) and **private secrets**
+ * (Razorpay SECRET key, SMTP password). The previous `/settings`
+ * endpoint did `SELECT *` and shipped the whole row to anonymous
+ * callers — anyone could `curl https://vayil.in/settings | jq
+ * .settings[0].payment_secret` and walk away with our Razorpay
+ * key secret + outbound SMTP credentials.
+ *
+ * We SELECT * (so the same code works against the mobile dump's
+ * extra columns + our schema's renamed ones) and then strip the
+ * sensitive fields below before serialising. Admin tooling
+ * (`/Admin/Settings`) keeps reading the full row because admins
+ * are authenticated + role-checked.
+ *
+ * Use `publicSettingsSafe(row)` anywhere you ship settings to an
+ * unauthenticated or non-admin caller — `/settings`, legacy
+ * `/customer/getSettings`, legacy `/vendor/getSettings`.
+ */
+const SENSITIVE_SETTINGS_FIELDS = new Set([
+  'payment_secret',
+  'razorpay_secret',
+  'razorpay_key_secret',
+  'razorpay_webhook_secret',
+  'smtp_password',
+  'smtp_username',     // SMTP usernames can be probed for spear-phishing — strip
+  'jwt_secret',
+  'staff_jwt_secret',
+  'two_factor_api_key',
+  'admin_api_key',
+  'secret',            // any column literally named "secret"
+  'password',          // any column literally named "password"
+]);
+
+export function publicSettingsSafe<T extends Record<string, unknown>>(row: T | null | undefined): Partial<T> {
+  if (!row || typeof row !== 'object') return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (SENSITIVE_SETTINGS_FIELDS.has(k.toLowerCase())) continue;
+    // Also strip anything whose name CONTAINS "secret" or "password".
+    if (/secret|password/i.test(k)) continue;
+    out[k] = v;
+  }
+  return out as Partial<T>;
+}
+
 commonRouter.get('/settings', async (_req, res, next) => {
-  try { ok(res, { settings: await query('SELECT * FROM settings LIMIT 1') }); } catch (err) { next(err); }
+  try {
+    const rows = await query<any>('SELECT * FROM settings LIMIT 1');
+    const safe = rows.map((r: any) => publicSettingsSafe(r));
+    ok(res, { settings: safe });
+  } catch (err) { next(err); }
 });

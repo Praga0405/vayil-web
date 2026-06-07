@@ -1,5 +1,97 @@
 # Release Notes
 
+## v4.5.23 — Security audit fixes: fail-closed config, ownership checks, settings deny-list, CORS allow-list, admin bcrypt-only, OTP plaintext removed, idempotency scoping, Swiper CVE (2026-06-07)
+
+Closes the P0 and most of the P1 items from the production-readiness security audit. **OTP and payment-verify bypass flags intentionally remain on per the user's directive** (needed for the leadership demo) — but every code path that previously made those bypasses risky in production now refuses to enter the bypass branch when `NODE_ENV === 'production'`. Result: when you flip the bypass flags to `false` before launch, the rest of the system is already in a fail-closed posture.
+
+### `backend/src/config.ts` — production fail-closed startup
+
+Refactored to a two-phase init: read env + apply dev defaults, then assert critical security knobs in production. **Throws at startup** (Vercel build log) if any of these are missing/weak in production:
+
+- `CORS_ORIGIN` unset OR contains `*`
+- `DB_HOST` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` missing or default
+- `DB_SSL` not `true` (plaintext DB credentials over the wire would be a CVE)
+- `JWT_SECRET` / `STAFF_JWT_SECRET` missing or shorter than 32 chars
+- `RAZORPAY_KEY_ID` + `RAZORPAY_KEY_SECRET` not both set
+- `TWO_FACTOR_API_KEY` missing AND `OTP_BYPASS` not explicitly `true`
+
+Also exports `config.isProd` and `config.paymentVerifyBypass`. `paymentVerifyBypass` is hard-ANDed with `!isProd`, so a stale `PAYMENT_VERIFY_BYPASS=true` env var on the deployment cannot accidentally open up signature verification on a real launch. `JWT_EXPIRES_IN` default narrows from `30d` to `7d` in production.
+
+### `backend/src/utils/razorpay.ts` — payment verification fail-closed
+
+`createRazorpayOrder()`: in production, missing keys now throw rather than mint a fake `order_dev_*` ID the customer's browser would then "pay" for.
+
+`verifyRazorpaySignature()`: in production, missing key throws rather than accepting any non-empty signature; `config.paymentVerifyBypass` (already disabled in prod by `config.ts`) is the only bypass path and it's now impossible in production.
+
+### `backend/src/routes/common.ts` — public settings deny-list
+
+New exported `publicSettingsSafe()` helper strips any field whose name matches `secret|password|*_secret|*_key_secret` or is in an explicit deny-list (`payment_secret`, `razorpay_secret`, `razorpay_webhook_secret`, `smtp_password`, `smtp_username`, `jwt_secret`, `staff_jwt_secret`, `two_factor_api_key`, etc.) before serialising.
+
+Wired through `/settings`, `/customer/getSettings`, `/vendor/getSettings`. Verified: `curl http://localhost:9090/settings` no longer leaks `payment_secret`, `smtp_password`, `smtp_username`. Admin endpoints (`/Admin/Settings`) unchanged — admins are authenticated + role-checked.
+
+### `backend/src/index.ts` — CORS allow-list with mobile-safe fallback
+
+CORS rewritten as a callback so production-mode strictness coexists with dev convenience:
+
+- Mobile native clients (no `Origin` header) — always allowed (CORS doesn't apply).
+- Dev with `CORS_ORIGIN=*` — reflects any origin so localhost / preview URLs work.
+- Production — only origins from the explicit `config.corsOrigins` allow-list pass. Anything else rejected with `CORS: origin <x> not in allow-list`.
+
+`config.ts` refuses to boot in production with `CORS_ORIGIN` unset or `*`, so by the time control reaches this callback in prod, the allow-list is non-empty and explicit.
+
+### Ownership checks — closed two authorization holes
+
+- `customer/projects/:id/milestones/:mid/approve` — previously the UPDATE matched on `plan_id + order_id` without verifying the order belongs to the calling customer. A customer who knew (or guessed) another customer's order_id + plan_id could approve milestones on someone else's project. Now SELECTs ownership first.
+- `vendor/enquiries/:id/quotes` (POST) — previously the INSERT used the calling vendor's id as the new quote's `vendor_id` but didn't verify the enquiry was addressed to that vendor. A vendor knowing another vendor's `enquiry_id` could post a quote on it. Now verifies enquiry ownership AND rejects quoting on `rejected`/`cancelled`/`completed` enquiries.
+
+### `backend/src/routes/adminMobile.ts` — admin login bcrypt-only in prod
+
+`loginAdmin` previously did `bcrypt-or-plain` (tried bcrypt then fell back to `row.password === password`). The plaintext fallback was added during mobile-team integration when their tooling was inserting unhashed passwords; that ship-it-fast accommodation is now a real auth weakness — any admin row inserted directly with a plaintext password would still grant a JWT.
+
+Now in production: only bcrypt-hashed passwords (`/^\$2[aby]\$/`) are accepted. Dev still allows plaintext for local test fixtures. Any existing prod admin row with a plaintext password must be re-hashed before launch (process documented in `docs/RELEASE_READINESS.md`).
+
+### `backend/src/middleware/auth.ts` — header-only token transport in prod
+
+Previously `extractToken()` accepted tokens from header, body, AND query. `query.token` is a leak risk — shows up in access logs, Referer headers, CDN cache keys, browser history. `body.token` is less risky over HTTPS but the value lands in every request-body debug log.
+
+Now in production: only `Authorization: Bearer` and `x-access-token` headers are honoured. Dev keeps body/query fallback so existing local test fixtures and the legacy mobile app's Dio `FormData` continue to work mid-migration.
+
+### `backend/src/middleware/idempotency.ts` — cross-user replay protection
+
+Cache lookup was previously `WHERE id_key = :key` only. If user A made a payment with key `K1` and the response was cached, user B sending the same key would receive user A's payment confirmation. **Cross-user PII leak.**
+
+Now keyed on `(id_key, user_id, user_type, endpoint)`. Replays only hit the cache when every scope matches — same user, same role, same endpoint. Matches Stripe's idempotency semantics.
+
+### `backend/src/utils/otp.ts` — stop storing plaintext OTPs
+
+`storeOtp()` used to write `customers.otp = :otp` / `vendors.otp = :otp` so the mobile team's admin diagnostics could see active OTP values. **Plaintext storage of one-time-passwords is a clear security problem** — any DB read (backup, replica, staging dump shared in chat) exposed every active OTP for the lifetime of the bypass code.
+
+Removed the plaintext mirror. SHA2-hashed storage in `otp_codes` remains the source of truth for `verifyOtp()`. Metadata columns (`otp_expires_at`, `otp_attempts`, `last_otp_sent_at`) kept — those are useful diagnostics + rate-limit signals.
+
+### Dependency hygiene — Swiper CVE removed
+
+`npm audit` flagged Swiper 11.x for a critical prototype-pollution CVE. Grep confirmed **Swiper wasn't actually imported anywhere in `src/`** — it was a dead dependency. Removed entirely.
+
+Audit before: 1 critical + 4 high + 1 moderate = 6 advisories.
+Audit after: 0 critical + 4 high + 1 moderate = 5 advisories.
+
+The remaining 5 are the Next 14 → 16 chain (Next, eslint-config-next, postcss, glob). That's a 2-major-version jump including React 19 and async `params` — scoped as a separate post-demo upgrade with full regression testing. Detailed migration plan added to `docs/RELEASE_READINESS.md` § Dependency upgrade plan.
+
+### Out of scope for this release
+
+Per the user's directive, OTP and payment-verify dev bypass flags **stay enabled** on production until the leadership demo wraps. The code paths that previously made those risky in production are now fail-closed regardless of env-var state, so the bypass flags can be flipped to `false` with one Vercel env-var change and the system enters production posture immediately.
+
+Full P0/P1/P2 status table lives in `docs/RELEASE_READINESS.md` § Security audit follow-ups (v4.5.23).
+
+### Verified locally
+
+- Backend TypeScript clean (`tsc --noEmit`)
+- Backend boots cleanly with local dev env
+- `curl /settings` returns no `*secret*` or `*password*` fields
+- `npm audit` shows 0 critical (was 1) after Swiper removal
+
+---
+
 ## v4.5.22 — Lighthouse follow-up: security headers + font opt + 403 fix + WebP + contrast + CLS (2026-06-07)
 
 Closes every remaining Lighthouse finding flagged in the v4.5.21 audit. Expected post-deploy scores:

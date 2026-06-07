@@ -24,6 +24,17 @@ export async function createRazorpayOrder(args: CreateOrderArgs): Promise<{
   const amountPaise = Math.round(args.amount * 100);
 
   if (!keyId || !keySecret) {
+    // v4.5.23 — Fail-closed in production. config.ts already refuses to
+    // boot without Razorpay keys when NODE_ENV=production, so reaching
+    // this branch in prod would only happen if config.ts was bypassed
+    // (test harness, etc.) — better to throw than silently issue a
+    // fake order ID that the customer's browser will then "pay" for.
+    if (config.isProd) {
+      throw new Error(
+        'Razorpay keys missing in production — refusing to create a dev order. ' +
+        'Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the deployment.',
+      );
+    }
     // Dev fallback so the rest of the flow keeps working without keys.
     return {
       id: `order_dev_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
@@ -53,20 +64,33 @@ export async function createRazorpayOrder(args: CreateOrderArgs): Promise<{
 let warnedBypass = false;
 export function verifyRazorpaySignature(orderId: string, paymentId: string, signature: string): boolean {
   const keySecret = (config as any).razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET;
-  const explicitBypass = process.env.PAYMENT_VERIFY_BYPASS === 'true';
-  // Two ways to enter dev-bypass mode:
-  //   1. No RAZORPAY_KEY_SECRET configured (typical local dev)
-  //   2. PAYMENT_VERIFY_BYPASS=true explicitly set (smoke tests, staging
-  //      with no Razorpay test creds yet)
-  // Both routes accept any non-empty signature string. A clear warning
-  // is logged exactly once per process so this is impossible to enable
-  // accidentally in production without seeing it in the logs.
-  if (!keySecret || explicitBypass) {
+
+  // v4.5.23 — In production we never enter the bypass branches.
+  // config.paymentVerifyBypass is hard-AND-ed with !isProd in config.ts,
+  // so a stale PAYMENT_VERIFY_BYPASS=true env var on the deployment
+  // cannot accidentally open up signature verification on a real launch.
+  // A missing key in prod throws — an unverified payment must never be
+  // treated as verified.
+  if (!keySecret) {
+    if (config.isProd) {
+      throw new Error(
+        'Razorpay key secret missing in production — refusing to verify ' +
+        'payment signature. Set RAZORPAY_KEY_SECRET on the deployment.',
+      );
+    }
     if (!warnedBypass) {
       // eslint-disable-next-line no-console
-      console.warn('[razorpay] SIGNATURE VERIFICATION BYPASS ACTIVE — ' +
-        (explicitBypass ? 'PAYMENT_VERIFY_BYPASS=true' : 'RAZORPAY_KEY_SECRET is unset') +
-        '. Never run this configuration in production.');
+      console.warn('[razorpay] DEV bypass: RAZORPAY_KEY_SECRET unset — ' +
+        'returning true for any non-empty signature. NEVER use in production.');
+      warnedBypass = true;
+    }
+    return !!signature;
+  }
+  if (config.paymentVerifyBypass) {
+    if (!warnedBypass) {
+      // eslint-disable-next-line no-console
+      console.warn('[razorpay] DEV bypass: PAYMENT_VERIFY_BYPASS=true — ' +
+        'accepting any non-empty signature. config.ts forbids this in prod.');
       warnedBypass = true;
     }
     return !!signature;

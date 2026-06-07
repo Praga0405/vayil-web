@@ -53,11 +53,25 @@ adminMobileRouter.post('/loginAdmin', async (req, res, next) => {
     if (!email || !password) throw new ApiError(400, 'email and password required');
     const row = await one<any>(`SELECT * FROM admins WHERE email = :email AND status = 'active'`, { email });
     if (!row) throw new ApiError(401, 'Invalid credentials');
-    // bcrypt-or-plain — bootstrap row uses bcrypt, mobile-team API might
-    // insert plain. Try both safely.
+
+    // v4.5.23 — bcrypt-ONLY in production. The previous bcrypt-or-plain
+    // fallback (`row.password === password`) was added during mobile-team
+    // integration when their admin tooling was inserting unhashed passwords.
+    // That ship-it-fast accommodation is now a real auth weakness — any
+    // admin row inserted directly into the DB with a plaintext password
+    // would still grant a JWT.
+    //
+    // Dev keeps the plaintext fallback so existing local test fixtures
+    // don't break. Production rejects plaintext outright; any unhashed
+    // admin row in production must be re-hashed before launch (tracked
+    // in docs/RELEASE_READINESS.md).
     let okPass = false;
-    try { okPass = await bcrypt.compare(password, row.password || ''); } catch { /* ignore */ }
-    if (!okPass) okPass = row.password === password;
+    const looksBcrypted = typeof row.password === 'string' && /^\$2[aby]\$/.test(row.password);
+    if (looksBcrypted) {
+      try { okPass = await bcrypt.compare(password, row.password); } catch { /* ignore */ }
+    } else if (!config.isProd) {
+      okPass = row.password === password;     // dev / staging only
+    }
     if (!okPass) throw new ApiError(401, 'Invalid credentials');
     await exec(`UPDATE admins SET last_login = NOW() WHERE id = :id`, { id: row.id });
     const token = jwt.sign(

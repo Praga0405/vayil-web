@@ -20,6 +20,7 @@ import { ApiError } from '../utils/http';
 import { requireAuth, softAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { exec, one, query } from '../db';
+import { publicSettingsSafe } from './common';
 
 import * as authService from '../services/authService';
 import * as customerSvc from '../services/customerService';
@@ -417,9 +418,12 @@ legacyCustomerRouter.get('/_ping', softAuth(), (_req, res) => res.json({ ok: tru
 async function settingsHandler(_req: any, res: any, next: any) {
   try {
     const row = await one<any>('SELECT * FROM settings LIMIT 1');
+    // v4.5.23 — strip payment_secret / smtp_password / etc. before
+    // shipping to the mobile customer app. See publicSettingsSafe().
+    const safe = publicSettingsSafe(row);
     send(res, {
       data: {
-        ...row,
+        ...safe,
         razorpay_key: process.env.RAZORPAY_KEY_ID || null,
         currency: 'INR',
       },
