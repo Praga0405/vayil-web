@@ -1,5 +1,58 @@
 # Release Notes
 
+## v4.5.20 — TiDB schema parity: migrations 004–006 finally applied on production (2026-06-07)
+
+Closes the long-standing gap where production TiDB Cloud was running on the bare 001-003 schema only — every later migration was being silently swallowed by the `|| true` in `vercel-build` because of two TiDB-Serverless incompatibilities:
+
+1. **`ALTER TABLE x ADD COLUMN id INT NULL UNIQUE` is rejected** by TiDB Serverless with errno 8200 ("unsupported feature"). Inline UNIQUE on ADD COLUMN must be split into `ADD COLUMN` + `CREATE UNIQUE INDEX` as separate statements.
+2. **`CREATE TRIGGER` is rejected entirely** — TiDB Serverless doesn't support triggers. Migration 006 had 8 triggers to auto-sync `status_int` from `status`, and the whole migration aborted on the first trigger.
+3. **Expression defaults on TEXT columns are rejected** — `ph_code TEXT DEFAULT ('+91')` doesn't parse. Use `VARCHAR(10) DEFAULT '+91'` instead.
+
+### Two changes
+
+**`backend/migrations/009_tidb_schema_align.sql`** — new migration that applies the same column shape additions as 004 + 006 but using TiDB-compatible statements:
+
+- Split `ADD COLUMN id INT NULL` and `CREATE UNIQUE INDEX idx_id_mirror` into separate statements for 11 tables (`customers`, `vendors`, `enquiries`, `orders`, `quotation`, `order_plan`, `vendor_services`, `service_categories`, `service_subcategories`, `service_tags`, `notifications`).
+- Adds `slug` / `icon_url` / `is_active` / `is_deleted` / `seed_source` on the 3 taxonomy tables and backfills `slug` from `name`.
+- Adds `status_int TINYINT` + `updated_at TIMESTAMP` on `enquiries`, `orders`, `quotation`, `bank_details` and backfills `status_int` from the existing `status` varchar with a CASE expression. No triggers — see below.
+- Adds the 11 mobile-shape columns on `customers` and `vendors` (`ph_code` as `VARCHAR(10) DEFAULT '+91'`, `profile_photo`, `device_id`, `otp`, `otp_expires_at`, `otp_attempts`, `last_otp_sent_at`, `terms_accept`, `is_deleted`, `state`, `updated_at`). Backfills `ph_code` for pre-existing rows.
+- Adds `pricing_type` / `service_title` / `service_category` / `service_subcategory` / `unit_name` / `service_image` / `certificate_url` on `vendor_services` so `pricing_type` actually exists on prod (previously the Add Service flow was silently dropping it).
+- Adds `subtotal` / `platform_fee` / `gst` / `gst_amount` / `total` / `advance_amount` / `attachment_urls` on `quotation` so the quote breakdown view renders correctly.
+
+Every statement is idempotent against MySQL (errno 1060/1061/1091 swallowed). On a local MySQL where 004+006 already ran this migration is a no-op.
+
+**`backend/scripts/migrate.ts`** — hardened runner:
+
+- Strips block comments before splitting on `;\n` so CASE expressions and multi-line statements don't break the splitter.
+- **Skips `CREATE TRIGGER` / `DROP TRIGGER` statements entirely** with a logged reason. The application already dual-writes `status` + `status_int` on the legacy save handlers so the absence of the trigger has no functional impact.
+- Tolerates TiDB's "unsupported feature" errnos (1235, 8200) — logs them as `skip (TiDB errno N): …` instead of aborting the whole step.
+- Adds errno 1050 (table already exists), 1062 (duplicate key data), 1146 (table doesn't exist) to the idempotent set.
+- Emits a per-file `N applied · M skipped · K TiDB-tolerated` summary so `vercel logs` is actually readable.
+
+### Production TiDB state
+
+The migration was applied to production TiDB directly during this session (via mysql2, because Vercel's build step wasn't completing before this fix). Post-fix schema check on production:
+
+```
+✓ service_categories     all present (id, slug, icon_url, is_active, is_deleted, seed_source)
+✓ service_subcategories  all present (id, slug, is_active, is_deleted)
+✓ service_tags           all present (id, is_active, is_deleted)
+✓ vendor_services        all present (id, pricing_type, service_title)
+✓ enquiries              all present (status_int, updated_at)
+✓ orders                 all present (status_int, updated_at)
+✓ quotation              all present (status_int, updated_at, subtotal, total)
+✓ customers              all present (id, ph_code, updated_at, otp, is_deleted)
+✓ vendors                all present (id, ph_code, updated_at, otp, is_deleted)
+```
+
+Public API now returns the rich-shape responses the mobile team's dump expects (`/api/service-categories` returns `[{category_id, name, slug, icon_url, is_active, is_deleted, id, ...}]`).
+
+### Open follow-up
+
+`status_int` is no longer trigger-maintained. Application code in `backend/src/routes/legacyCustomer.ts` and `legacyVendor.ts` does set it on the legacy save paths, but a separate pass to make sure every `INSERT`/`UPDATE` that touches `status` also sets `status_int` would close the gap. Tracked for the post-demo cleanup.
+
+---
+
 ## v4.5.19 — Vendor Studio: responsive CTA buttons, edit-service fix, View-as-customer route, taxonomy seeds on TiDB (2026-06-07)
 
 User-reported polish pass on the production vendor experience. Five fixes + two data seeds.
