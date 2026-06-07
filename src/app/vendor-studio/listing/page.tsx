@@ -70,7 +70,13 @@ export default function VendorListingPage() {
     setSvcLoading(true)
     vendorApi.getMyServices()
       .then(r => {
-        const d = r.data?.data || r.data?.result || []
+        // Backend wraps: { data: { vendor, listings: [...] } } (legacy mobile)
+        // or { data: [...] } (canonical). Accept either, plus a top-level
+        // listings array for older builds.
+        const wrapper = r.data?.data ?? r.data?.result ?? {}
+        const d = Array.isArray(wrapper)
+          ? wrapper
+          : (wrapper.listings || wrapper.services || r.data?.listings || [])
         setServices(Array.isArray(d) ? d : [])
       })
       .finally(() => setSvcLoading(false))
@@ -103,7 +109,7 @@ export default function VendorListingPage() {
     const next = current === 'active' ? 'inactive' : 'active'
     try {
       await vendorApi.updateServiceStatus({ service_id: serviceId, status: next })
-      setServices(prev => prev.map(s => (s.id || s.service_id) === serviceId ? { ...s, status: next } : s))
+      setServices(prev => prev.map(s => (s.id || s.service_id || s.vendor_service_id) === serviceId ? { ...s, status: next } : s))
       toast.success(`Service ${next}`)
     } catch { toast.error('Failed to update status') }
   }
@@ -227,7 +233,7 @@ export default function VendorListingPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {services.map((s: any) => {
-                  const sid = s.id || s.service_id
+                  const sid = s.id || s.service_id || s.vendor_service_id
                   const active = s.status === 'active'
                   return (
                     <div key={sid} className="border border-gray-100 rounded-2xl p-4 hover:border-orange/30 hover:shadow-sm transition flex flex-col">

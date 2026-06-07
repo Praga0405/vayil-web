@@ -50,9 +50,18 @@ const nextConfig = {
   // routes Next.js doesn't know about (getSettings, logincustomerWithOTP,
   // vendorlistReviews, …) fall through to Express.
   async rewrites() {
+    // v4.5.19 — Constrain the rewrite to paths whose first segment after
+    // the prefix is non-numeric. App Router's dynamic-route matching for
+    // `[id]/page.tsx` happens AFTER `afterFiles` rewrites, so a numeric
+    // ID like /vendors/120001 was being eaten by the rewrite and routed
+    // to /api/vendors/120001 instead of hitting the Next.js public
+    // vendor profile page. Mobile-team API endpoints all start with a
+    // letter (getSettings, vendorlistReviews, sendEnquiry, …), so the
+    // letter-anchored regex keeps mobile traffic on the rewrite path
+    // while leaving numeric dynamic-route IDs to Next.js.
     const forward = (prefix) => ({
-      source: `/${prefix}/:path*`,
-      destination: `/api/${prefix}/:path*`,
+      source: `/${prefix}/:endpoint([A-Za-z_][^/]*):rest(/.*)?`,
+      destination: `/api/${prefix}/:endpoint:rest`,
     })
     return {
       afterFiles: [

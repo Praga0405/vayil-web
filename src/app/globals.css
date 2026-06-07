@@ -74,7 +74,9 @@ body {
   @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 px-5 py-2.5 text-sm;
 }
 .btn-sm  { @apply px-3 py-1.5 text-xs !important; }
-.btn-lg  { @apply px-7 py-3.5 text-base !important; }
+.btn-lg  { @apply px-6 py-2.5 text-sm !important; }
+/* Sit a row of CTAs (Save / Cancel / Send) so they right-align on tablet+ */
+.btn-row { @apply flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3; }
 .btn-full { @apply w-full; }
 
 /* ── Inputs ── */

@@ -59,8 +59,14 @@ export default function EditServicePage() {
       commonApi.getCategories(),
       commonApi.getTags?.() ?? Promise.resolve({ data: {} }),
     ]).then(([sr, cr, tr]: any[]) => {
-      const list = sr.data?.data || sr.data?.result || []
-      const s = list.find((x: any) => (x.id || x.service_id) === sid)
+      // Backend wraps the vendor's services as { data: { listings: [...] } }
+      // (legacy mobile shape) or { data: [...] } (canonical web). Accept both.
+      const wrapper = sr.data?.data ?? sr.data?.result ?? {}
+      const list = Array.isArray(wrapper)
+        ? wrapper
+        : (wrapper.listings || wrapper.services || sr.data?.listings || [])
+      // Row may use vendor_service_id (legacy), service_id (canonical), or id (mirror).
+      const s = list.find((x: any) => (x.id || x.service_id || x.vendor_service_id) === sid)
       if (!s) { toast.error('Service not found'); router.push('/vendor-studio/listing'); return }
       const cats = cr.data?.categories || cr.data?.data || cr.data?.result || []
       setCats(Array.isArray(cats) ? cats : [])

@@ -1,5 +1,29 @@
 # Release Notes
 
+## v4.5.19 — Vendor Studio: responsive CTA buttons, edit-service fix, View-as-customer route, taxonomy seeds on TiDB (2026-06-07)
+
+User-reported polish pass on the production vendor experience. Five fixes + two data seeds.
+
+### Frontend
+
+- **Buttons** (`src/components/ui/index.tsx` + `src/app/globals.css`) — `<Button full>` is now responsive: full-width on mobile (correct stacked-CTA pattern), auto-width with `min-w-[180px]` on tablet+ so it doesn't visually dominate forms. Tightened `btn-lg` from `px-7 py-3.5 text-base` → `px-6 py-2.5 text-sm` so the Send Quote / Save Materials / Send Payment Request / Submit for Verification / Save Materials / Save Changes / Add Service CTAs all land at the same comfortable size. Added a `.btn-row` helper class for stacked-on-mobile, right-aligned-on-tablet+ button groups.
+- **Edit Service infinite-load** (`src/app/vendor-studio/services/[id]/page.tsx`) — the response shape from `/vendor/getVendorServiceList` is `{success, message, data: { vendor, listings: [...] }}` (legacy mobile shape, dictated by the Flutter app). Page was reading `r.data?.data || r.data?.result` and getting the `{vendor, listings}` object then trying to `.find()` on it — silent fail. Now unwraps `wrapper.listings || wrapper.services || r.data?.listings`. Same fix applied to the My Listing services tab.
+- **`vendor_service_id` matched** — listing service rows on production use `vendor_service_id` as the PK (no `id` mirror column on prod TiDB), so the lookup `(x.id || x.service_id) === sid` always missed. Now matches `x.id || x.service_id || x.vendor_service_id`.
+- **"View as customer" → JSON instead of page** (`next.config.js`) — v4.5.18 rewrote `/vendors/:path*` → `/api/vendors/:path*`. Next.js's App Router defers `[id]/page.tsx` matching to *after* `afterFiles` rewrites in some cases, so `/vendors/120001` was being routed to the API serverless function instead of the Next.js public vendor profile page. Rewrite source now constrains the first segment to start with a letter or underscore (`:endpoint([A-Za-z_][^/]*)`). Mobile-team endpoints (all alphabetic like `getSettings`, `vendorlistReviews`) keep working; numeric IDs (vendor and enquiry PKs) fall through to Next.js page routing.
+
+### Production TiDB seeds (run directly via mysql2; not a migration file because TiDB doesn't have migrations 004+)
+
+- **`master_proof_types`** — table created + 8 rows: Aadhaar Card, PAN Card, Driving License, Passport, Voter ID, Trade License, GST Registration, Shop Establishment Certificate. The KYC page's `<Select label="Proof type">` dropdown now populates instead of being empty.
+- **`states`** — table created + 36 Indian states & UTs (Tamil Nadu, Karnataka, Maharashtra, Kerala, … Ladakh) with `state_code` and `country_id=101` (India). All `country_code='IN'`.
+- **`city`** — table created + 46 cities seeded for the 5 most-popular states for the demo region: Tamil Nadu (18: Coimbatore, Chennai, Madurai, Salem, Tiruchirappalli, Erode, Tirunelveli, Tiruppur, Vellore, Thanjavur, Dindigul, Karur, Sivakasi, Hosur, Pollachi, Nagercoil, Kanchipuram, Cuddalore), Karnataka (9), Maharashtra (9), Kerala (8), Delhi (2). Cities for other states can be added incrementally as the demo expands.
+
+### Still open / partially addressed
+
+- The full **mobile + tablet responsive pass** (item #7 from the user's list) is partially covered by the button changes. A full audit of every page's `max-w-*` and grid breakpoints is a follow-up.
+- The **Jobs page** uses `max-w-5xl mx-auto` already — its perceived "mobile layout" comes from the wide-viewport ratio. Cards inside the job detail need width-adaptive padding next.
+
+---
+
 ## v4.5.18 — Legacy mobile URL compatibility (bare `/customer/*` and `/vendor/*` paths) (2026-06-04)
 
 The mobile team reported hitting `https://vayil-web.vercel.app/customer/getSettings` and getting back the Next.js HTML 404 page instead of JSON. Root cause: the Flutter app was built against `https://app.vayil.in/customer/...` — bare paths, no `/api` prefix. Our Vercel catch-all `pages/api/[...all].ts` only handles requests under `/api/*`, so any request to `/customer/getSettings`, `/vendor/vendorlistReviews`, `/auth/otp/send`, `/Admin/Settings` etc. fell through to the Next.js App Router which served its built-in 404 page.

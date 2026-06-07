@@ -21,7 +21,12 @@ export function Button({ variant='primary', size='md', loading, full, children, 
   const s = { sm: 'btn-sm', md: '', lg: 'btn-lg' }[size]
   return (
     <button
-      className={cn('btn', v, s, full && 'w-full', className)}
+      // v4.5.19 — `full` is now responsive: spans the container only on
+      // mobile (where stacked CTAs are the right pattern), then snaps to
+      // an auto-width, min-width-anchored button on tablet+ so it doesn't
+      // visually dominate the form. `lg` size kept for back-compat but
+      // toned down a notch (handled in globals.css btn-lg).
+      className={cn('btn', v, s, full && 'w-full sm:w-auto sm:min-w-[180px]', className)}
       disabled={disabled || loading}
       {...p}
     >
