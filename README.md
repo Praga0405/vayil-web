@@ -139,13 +139,13 @@ Idempotency: every state-mutating POST that originates from the customer/vendor 
 
 ## What's new since v4.5.1 (May 27 → June 7, 2026)
 
-The README was last refreshed at v4.5.1. Since then 20 versions shipped, several of which changed the deployment topology, the runtime DB, the OTP path, and the SEO posture. This section is a one-stop catch-up — every detailed entry lives in [`RELEASE_NOTES.md`](./RELEASE_NOTES.md).
+The README was last refreshed at v4.5.1. Since then 24 versions shipped, several of which changed the deployment topology, the runtime DB, the OTP path, the SEO posture, and the security model. This section is a one-stop catch-up — every detailed entry lives in [`RELEASE_NOTES.md`](./RELEASE_NOTES.md).
 
 ### Production hosting moved to all-Vercel + TiDB Cloud
 
 Up through v4.5.4 the production setup was "Vercel frontend + Render backend + Render MySQL." From **v4.5.6** onward Vayil ships as a single Vercel deployment with the backend mounted as a serverless function — no separate backend host.
 
-| Layer                | Before (v4.5.1)            | Now (v4.5.21)                                                                                                          |
+| Layer                | Before (v4.5.1)            | Now (v4.5.25)                                                                                                          |
 |----------------------|-----------------------------|------------------------------------------------------------------------------------------------------------------------|
 | Frontend             | Vercel                      | Vercel (unchanged)                                                                                                     |
 | Backend              | Render `vayil-backend` service | Vercel serverless function via `pages/api/[...all].ts` catch-all that imports the Express app                          |
@@ -272,6 +272,73 @@ For the leadership demo phase these are intentionally **on**. Flip them off befo
 | `PAYMENT_VERIFY_BYPASS` | `true` | `false` | Razorpay payment-verify signature check skipped so demo flows don't need a live Razorpay session |
 
 The full list of pre-launch flips lives in `docs/RELEASE_READINESS.md`.
+
+### Lighthouse + security sprint (v4.5.22 → v4.5.25, all 2026-06-07)
+
+After v4.5.21's SEO upgrade pushed Lighthouse to 95/86/96/100 (Perf/A11y/BP/SEO), the next four releases tackled the remaining audit findings and the broader production security posture.
+
+**v4.5.22** — Lighthouse follow-up + production polish:
+
+- **Strict security headers** on every HTML route in `next.config.js`: full Content-Security-Policy (Razorpay, 2Factor, Google Fonts, Unsplash, S3 explicitly allow-listed), Cross-Origin-Opener-Policy, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy (camera/mic/USB denied; Razorpay payment iframe allowed), HSTS 2yr preload-eligible. CORS-only headers kept on `/api/*` so the mobile app's Dio client keeps working.
+- **Inter font self-hosted via `next/font/google`** — eliminates ~580 ms of render-blocking fetch to `fonts.googleapis.com`. `--font-inter` CSS variable wired through `<html className={inter.variable}>`.
+- **`next/image` WebP/AVIF** — `images.formats: ['image/avif', 'image/webp']` + 30-day CDN cache. Lighthouse estimated 101 KiB savings.
+- **Homepage CLS regression** (0.023 → 0.102 after v4.5.21) closed by adding explicit `width`/`height` HTML attrs to the quick-link card thumbnails.
+- **403 console error** from `/api/customer/enquiryList` fixed: the home page's "recent enquiries" widget now requires `user.type === 'customer'` AND a token in localStorage before firing. Interceptor handles 403 the same way as 401.
+- **Colour-contrast override** in `globals.css` (single source of truth): `text-orange` → 5.27:1, `text-orange-600` → 7.0:1, `text-navy/60` → 5.5:1, `text-gray-400` → 7.2:1. WCAG AA passes without touching 39 component files.
+
+**v4.5.23** — Production security audit fixes (P0 + most P1 from the audit):
+
+- **`config.ts` production guards** — refuses to boot in production (originally) when CORS_ORIGIN is unset/`*`, DB_PASSWORD blank, DB_SSL off, JWT secrets weak (<32 chars), Razorpay keys missing. *(v4.5.24 made this opt-in — see below.)*
+- **`razorpay.ts` fail-closed** — `createRazorpayOrder()` and `verifyRazorpaySignature()` both throw in production when keys are missing. `config.paymentVerifyBypass` is hard-ANDed with `!isProd` so a stale `PAYMENT_VERIFY_BYPASS=true` env var can't open up signature checks at runtime.
+- **`/settings` deny-list** — new `publicSettingsSafe()` helper strips any field whose name matches `secret|password` or sits in an explicit deny-list (`payment_secret`, `smtp_password`, `smtp_username`, `two_factor_api_key`, etc.). Wired through `/settings`, `/customer/getSettings`, `/vendor/getSettings`. Admin endpoints unchanged.
+- **Ownership checks** — customer milestone approval (`/customer/projects/:id/milestones/:mid/approve`) and vendor quote creation (`/vendor/enquiries/:id/quotes`) now SELECT ownership before mutating. Closes two authz holes where a customer/vendor knowing another user's project/enquiry ID could mutate it.
+- **Admin login bcrypt-only in production** — the previous `bcrypt-or-plaintext` fallback rejected. Dev keeps plaintext for local fixtures.
+- **Header-only token transport in production** — `extractToken()` ignores `body.token`/`body.access_token`/`query.token` in prod. Query tokens leak via access logs / Referer headers. Dev keeps the fallback for legacy mobile FormData.
+- **Idempotency cross-user scoping** — cache lookup keyed by `(id_key, user_id, user_type, endpoint)`. Was bare `id_key`, leading to cross-user response leaks.
+- **OTP plaintext mirror removed** — `storeOtp()` no longer writes `customers.otp = :otp` / `vendors.otp = :otp`. Metadata columns (`otp_expires_at`, `otp_attempts`, `last_otp_sent_at`) kept. Source of truth remains SHA2-hashed `otp_codes.otp_hash`.
+- **Swiper CVE removed** — was a dead dependency (no source usages). npm audit: 1 critical → 0 critical. Remaining 4 high + 1 moderate are the Next 14 → 16 chain; full migration plan in `docs/RELEASE_READINESS.md`.
+
+**v4.5.24** — Hotfix: relaxed v4.5.23's startup throws to warnings, gated behind a new `STRICT_PROD_CONFIG=true` opt-in:
+
+v4.5.23's "refuse to start in production" checks hard-stopped the live demo because the existing Vercel env had `CORS_ORIGIN` unset and JWT secrets shorter than 32 chars. The serverless function threw at module-load time and every API request returned 500. Symptom: "Failed to send OTP" in the LoginModal.
+
+v4.5.24 routes every check through a `reportProdIssue()` helper:
+
+- **`STRICT_PROD_CONFIG=true`** in env → throws at startup (v4.5.23 behaviour, opt-in)
+- **Default (flag unset)** → logs `[config] WARNING (production, lenient mode): ...` and continues
+
+Per-request safety from v4.5.23 is preserved: `verifyRazorpaySignature()` still throws in prod when key missing, `/settings` still strips secrets, ownership checks still enforced, etc. Only the boot-time gate is now opt-in. The intent: keep the demo running, flip `STRICT_PROD_CONFIG=true` on Vercel right before the `vayil.in` launch so any misconfig surfaces in the build log.
+
+**v4.5.25** — Hotfix: CORS regression in v4.5.23 broke browser OTP requests:
+
+v4.5.23 rewrote the CORS middleware with a `!config.isProd && config.corsOrigins.includes('*')` guard. In production with `CORS_ORIGIN` unset on Vercel (the demo state), `corsOrigins` defaulted to `['*']`, but the `!isProd` half of the guard was false, so the wildcard branch never fired. Every browser preflight got rejected → "Failed to send OTP." Mobile (Dio, no `Origin` header) kept working via the `!origin` early-return.
+
+Fix in `backend/src/index.ts`:
+
+```diff
+- if (!config.isProd && config.corsOrigins.includes('*')) return cb(null, true);
++ if (config.corsOrigins.includes('*')) return cb(null, true);
+```
+
+Net behaviour:
+
+| `CORS_ORIGIN` env | Mode | Browser request |
+|---|---|---|
+| unset OR `*` | lenient | Reflects any origin (v4.5.22 behaviour) |
+| `https://vayil.in,https://admin.vayil.in` | strict | Only listed origins pass; attackers get a quiet refusal (no log spam) |
+
+Also switched the reject path from `cb(new Error, false)` → `cb(null, false)` (the cors package's quiet-reject contract) so attacker scans don't dump stack traces to the logs.
+
+Every other v4.5.23 hardening is unchanged — v4.5.25 brings working CORS forward without losing any security work.
+
+### Two new env vars introduced in this sprint
+
+| Env var | Default | When to flip |
+|---|---|---|
+| `STRICT_PROD_CONFIG` | unset (lenient) | Set to `true` on Vercel right before the `vayil.in` launch. Boot will then refuse to serve if any required prod env var is missing or weak. |
+| `NEXT_PUBLIC_OTP_BYPASS_CODE` | `123456` (with bypass on) | Drives the dev banner copy. Cosmetic. |
+
+Both are documented in `docs/RELEASE_READINESS.md § Security audit follow-ups (v4.5.23)`.
 
 ---
 
@@ -575,7 +642,18 @@ RAZORPAY_KEY_SECRET=...
 RAZORPAY_WEBHOOK_SECRET=...
 # v4.5.12+ — payment-verify signature bypass for demo / smoke tests. Skip the
 # HMAC check on /payments/verify so demos don't need a live Razorpay session.
+# v4.5.23+: this flag is hard-ANDed with !isProd in config.ts — even a stale
+# PAYMENT_VERIFY_BYPASS=true on a production Vercel deploy cannot open the
+# verification bypass at runtime.
 PAYMENT_VERIFY_BYPASS=true
+
+# v4.5.24+ — Production startup hardening. Default (unset/false): missing or
+# weak production env vars log [config] WARNING but the app boots. When set
+# to "true" on Vercel, the same checks THROW at startup, hard-failing the
+# build so misconfigured env vars surface in the build log. Flip this on
+# right before the public launch — never during the demo phase, because
+# warnings are intentional with OTP_BYPASS=true / CORS_ORIGIN=*.
+STRICT_PROD_CONFIG=false
 ```
 
 > `.env` / `.env.local` are git-ignored. Never commit real secrets.
@@ -724,6 +802,7 @@ Frontend and backend ship from one Vercel project. Express is bundled into a ser
    - `PAYMENT_VERIFY_BYPASS=true` for the demo phase
    - `NEXT_PUBLIC_RAZORPAY_KEY_ID` = matches `RAZORPAY_KEY_ID`
    - `NEXT_PUBLIC_SITE_URL` = `https://vayil-web.vercel.app` (or final custom domain)
+   - `STRICT_PROD_CONFIG` = leave **unset** during the demo (lenient mode). Set to `true` only right before the public launch — see "Pre-launch hardening" below.
 4. **Trigger a deploy** — Vercel auto-runs `npm run vercel-build`. The migrate step applies all 9 migrations to TiDB. The build outputs the Next.js app + the serverless function.
 5. **Verify:**
    ```bash
@@ -735,6 +814,25 @@ Frontend and backend ship from one Vercel project. Express is bundled into a ser
 When live, set Razorpay's webhook URL in the Razorpay dashboard to `https://vayil-web.vercel.app/api/payments/webhooks/razorpay` and put the signing secret in `RAZORPAY_WEBHOOK_SECRET`.
 
 **Custom domain:** when `vayil.in` is ready, point it at the Vercel project and update `NEXT_PUBLIC_SITE_URL` to match. The `x-robots-tag: noindex` header that Vercel auto-applies to deployment-style URLs disappears the moment you use a custom (or aliased) domain — Lighthouse SEO score jumps automatically.
+
+### Pre-launch hardening (when flipping to `vayil.in` for real users)
+
+This is the launch-day checklist that activates every v4.5.23 security knob. Run it in this order on Vercel → Settings → Environment Variables:
+
+1. **`CORS_ORIGIN`** — set to an explicit allow-list, no wildcard:
+   `https://vayil.in,https://admin.vayil.in,https://www.vayil.in`
+2. **`JWT_SECRET`** and **`STAFF_JWT_SECRET`** — rotate to fresh 32+ char values:
+   `openssl rand -base64 32`
+3. **`DB_SSL=true`** — already set on TiDB; verify it's there.
+4. **`RAZORPAY_KEY_ID`** / **`RAZORPAY_KEY_SECRET`** / **`RAZORPAY_WEBHOOK_SECRET`** — switch from `rzp_test_*` to live keys.
+5. **`TWO_FACTOR_API_KEY`** — real live key from 2Factor's dashboard (with `TWO_FACTOR_SENDER_ID=VAYILO` and DLT-approved `TWO_FACTOR_TEMPLATE_NAME`).
+6. **Flip the demo bypasses off:**
+   - `OTP_BYPASS=false`
+   - `NEXT_PUBLIC_OTP_BYPASS=false`
+   - `PAYMENT_VERIFY_BYPASS=false`
+7. **Finally, set `STRICT_PROD_CONFIG=true`** and trigger a redeploy. If any required env var is missing or weak, the Vercel build log will show a `[config] Refusing to start in production: <VAR> — <reason>` error and the deployment won't ship. Fix the env var and redeploy.
+
+The full pre-launch checklist (with smoke-test commands, admin-password re-hashing script, and dependency-upgrade plan) lives in `docs/RELEASE_READINESS.md § Security audit follow-ups (v4.5.23)`.
 
 ### Render — backend (fallback, v4.5.5 and earlier)
 
