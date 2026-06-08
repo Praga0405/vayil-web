@@ -27,26 +27,46 @@ app.set('trust proxy', 1);
 app.use(helmet());
 
 /* v4.5.23 — CORS hardening.
+ * v4.5.24 — Lenient-prod mode (boot warns instead of throws).
+ * v4.5.25 — Fix regression: wildcard CORS_ORIGIN now reflects in BOTH
+ *           lenient prod and dev, matching v4.5.22 behaviour. Previously
+ *           the `!config.isProd && includes('*')` guard meant production
+ *           with the default `CORS_ORIGIN=*` (or unset) rejected every
+ *           browser request, including same-origin POSTs from
+ *           vayil-web.vercel.app. Symptom: "Failed to send OTP" on the
+ *           web LoginModal. Mobile (no Origin header) kept working
+ *           because it short-circuits at the `!origin` line above.
  *
- * Before: `origin: true` (reflect any origin) + `credentials: true`
- * combined with broad mobile-shim mounts meant that ANY website could
- * read authed responses if the user visited it while logged in.
+ * Decision matrix:
  *
- * Now:
- *   - Dev: still reflects any origin so localhost / preview URLs work.
- *   - Production: strict allow-list. config.ts already refuses to boot
- *     with CORS_ORIGIN unset or containing "*", so by the time we hit
- *     this line in prod, config.corsOrigins is a non-empty array of
- *     exact origins.
- *   - Mobile-app callers send NO Origin header at all (native Dio
- *     client doesn't set one), so `!origin` is allowed unconditionally
- *     — mobile traffic isn't restricted by CORS regardless.
+ *   ┌──────────────────────────────┬──────────────────────────────┐
+ *   │ CORS_ORIGIN env              │ Behaviour                    │
+ *   ├──────────────────────────────┼──────────────────────────────┤
+ *   │ unset / "*"                  │ Reflect any origin (lenient) │
+ *   │ "https://vayil.in,…"         │ Strict allow-list — only     │
+ *   │                              │ exact-match origins pass     │
+ *   └──────────────────────────────┴──────────────────────────────┘
+ *
+ * In strict mode (CORS_ORIGIN explicitly listed + STRICT_PROD_CONFIG=true
+ * on launch), the wildcard branch never fires because corsOrigins won't
+ * contain '*'. The config.ts warning surfaces if production is still
+ * running on `*`.
+ *
+ * Mobile-app callers send NO Origin header at all (native Dio client
+ * doesn't set one), so `!origin` is allowed unconditionally — mobile
+ * traffic isn't restricted by CORS regardless of the env setting.
  */
 const corsAllowFn = (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
   if (!origin) return cb(null, true);                          // mobile / server-to-server / Postman
-  if (!config.isProd && config.corsOrigins.includes('*')) return cb(null, true);
-  if (config.corsOrigins.includes(origin)) return cb(null, true);
-  return cb(new Error(`CORS: origin ${origin} not in allow-list`), false);
+  if (config.corsOrigins.includes('*')) return cb(null, true); // wildcard reflects any origin (lenient mode)
+  if (config.corsOrigins.includes(origin)) return cb(null, true); // strict allow-list match
+  // v4.5.25 — `cb(null, false)` (not `cb(new Error, false)`) is the cors
+  // package's quiet-reject path: the response has no Access-Control-Allow-Origin
+  // header so the browser blocks the request, but we don't dump a stack trace
+  // to the logs for every disallowed origin (which would happen on every
+  // attacker scan in production). Failed preflight = browser refuses the
+  // subsequent real request. Safe.
+  return cb(null, false);
 };
 app.use(cors({ origin: corsAllowFn, credentials: true }));
 

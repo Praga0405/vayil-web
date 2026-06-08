@@ -1,5 +1,80 @@
 # Release Notes
 
+## v4.5.25 — Hotfix: CORS regression in v4.5.23 broke browser OTP requests (2026-06-07)
+
+### The bug
+
+v4.5.23 rewrote the CORS middleware to enforce a strict allow-list in production. The new `corsAllowFn` returned `cb(null, true)` only when:
+
+```
+!origin                                              // mobile (no Origin header)
+!config.isProd && config.corsOrigins.includes('*')   // dev with wildcard
+config.corsOrigins.includes(origin)                  // origin in explicit allow-list
+```
+
+In production with `CORS_ORIGIN` unset on Vercel (the demo setup), `config.corsOrigins` defaults to `['*']`. Then:
+
+- `!origin` → false (browser sends Origin)
+- `!isProd && includes('*')` → **false** (we're in prod)
+- `corsOrigins.includes(origin)` → `['*'].includes('https://vayil-web.vercel.app')` → false
+- → `cb(new Error('CORS: origin … not in allow-list'), false)`
+
+The cors package then sent a 500 error response for every browser preflight. The frontend's axios saw a network failure (no body, no status), the LoginModal's catch block fired, and the user saw **"Failed to send OTP"**.
+
+**Mobile (Flutter / Dio) kept working** — Dio doesn't send an `Origin` header, so the `!origin` early-return allowed all mobile traffic through. The bug was browser-only.
+
+### Why v4.5.24 didn't catch it
+
+v4.5.24 only relaxed the **startup-time throws** in `config.ts`. The CORS middleware's reject-by-default happens at **request-time** in `index.ts`, completely separate from config startup. v4.5.24 made the boot succeed but every browser request still got CORS-rejected.
+
+### The fix
+
+One line in `backend/src/index.ts`: drop the `!config.isProd &&` guard so wildcard reflects in any mode.
+
+```diff
+ const corsAllowFn = (origin, cb) => {
+   if (!origin) return cb(null, true);
+-  if (!config.isProd && config.corsOrigins.includes('*')) return cb(null, true);
++  if (config.corsOrigins.includes('*')) return cb(null, true);
+   if (config.corsOrigins.includes(origin)) return cb(null, true);
+-  return cb(new Error(`CORS: origin ${origin} not in allow-list`), false);
++  return cb(null, false);   // quiet reject — no ACAO header, no log spam
+ };
+```
+
+Also switched the reject path from `cb(new Error(...))` to `cb(null, false)`. The cors package's quiet-reject contract: no `Access-Control-Allow-Origin` header is set → the browser blocks the request → but no error stack is dumped to the logs (which would have been one stack per disallowed origin scan in production).
+
+### Behaviour matrix after this hotfix
+
+| `CORS_ORIGIN` env | Mode | Browser origin | Result |
+|---|---|---|---|
+| unset OR `*` | lenient | any | ✅ Reflected (v4.5.22 behaviour restored) |
+| `https://vayil.in,https://admin.vayil.in` | strict | `vayil.in` | ✅ Allowed |
+| `https://vayil.in,https://admin.vayil.in` | strict | `evil.com` | ❌ Rejected (quietly) |
+| any value | any | (no Origin — mobile) | ✅ Allowed |
+
+The intent from v4.5.23 is preserved: when you set an explicit `CORS_ORIGIN` allow-list for launch (paired with `STRICT_PROD_CONFIG=true` to surface env-var misconfig at boot), the strict reject behaviour kicks in. Until then, wildcard reflect keeps the demo running.
+
+### How the bug was confirmed
+
+Two reproductions:
+1. **Unit-level simulation** of the v4.5.23 `corsAllowFn` with `isProd=true, corsOrigins=['*']`, every browser origin → REJECTED. Same simulation with the v4.5.25 fix → all allowed via the wildcard branch.
+2. **Live local backend** booted with `NODE_ENV=production CORS_ORIGIN='*' OTP_BYPASS=true`:
+   - Before fix: `OPTIONS /auth/otp/send` with `Origin: https://vayil-web.vercel.app` → 500
+   - After fix: same request → 204 with `Access-Control-Allow-Origin: https://vayil-web.vercel.app`
+
+### Verified in strict mode too
+
+Booted with `CORS_ORIGIN=https://vayil.in,https://admin.vayil.in`:
+- Origin `https://vayil.in` → 204 + ACAO header (allowed)
+- Origin `https://evil.com` → 200 + NO ACAO header (browser refuses; no error log)
+
+### What everyone else in v4.5.23 did right
+
+This was the **only** OTP-path regression in v4.5.23. Every other v4.5.23 hardening (fail-closed payment verify, settings deny-list, ownership checks, admin bcrypt-only, header-only token transport, idempotency key scoping, OTP plaintext removal, Swiper CVE) is unchanged and still in effect. v4.5.25 brings the working CORS behavior forward without losing any of it.
+
+---
+
 ## v4.5.24 — Hotfix: relax v4.5.23 startup throws to warnings (gated behind STRICT_PROD_CONFIG) (2026-06-07)
 
 v4.5.23 introduced strict throw-at-startup checks for every missing production security knob (CORS_ORIGIN, DB_SSL, JWT_SECRET length, Razorpay keys, …). That immediately hard-stopped the live demo: the user's existing Vercel env had CORS_ORIGIN unset and JWT secrets shorter than 32 chars, so the serverless function threw at module-load time and every request returned a generic 500. Symptom: "Failed to send OTP" in the LoginModal.
