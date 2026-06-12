@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { adminMobileRouter } from './routes/adminMobile';
 import { legacyCustomerRouter } from './routes/legacyCustomer';
 import { legacyVendorRouter } from './routes/legacyVendor';
+import { bareMobileRouter } from './routes/bareMobile';
 
 const app = express();
 
@@ -150,6 +151,26 @@ app.use('/vendor',   legacyMultipart, legacyVendorRouter);
 // don't try to consume the multipart twice — the requireAuth on
 // /CustomerupdatePlan still gates it.
 app.use('/', legacyMultipart, legacyCustomerRouter);
+
+/* v4.5.26 — Bare-path public aliases for mobile team. The mobile team
+ * sends a handful of lookup calls without any prefix (no /customer, no
+ * /vendor). These all map to public handlers already implemented on the
+ * legacy routers. Mounted AFTER the prefixed routers so prefixed paths
+ * still resolve first.
+ *
+ * Routes exposed:
+ *   GET  /getLanguages, /getTools, /getToolList, /listStatus,
+ *        /get_states_by_country_id
+ *   POST /get_city, /listProofTypes, /upload_files
+ *
+ * Routes deliberately NOT exposed (admin-only mutations the mobile team
+ * listed but which require admin auth — kept behind the admin gate):
+ *   POST /service-category/toggle, /service-subcategory/toggle,
+ *        /service-tag/toggle, /ProofStatus
+ * The /service-categories, /service-subcategories, /service-tags READ
+ * endpoints are already public via the commonRouter mounted at '/'.
+ */
+app.use('/', legacyMultipart, bareMobileRouter);
 
 /* ─── Compatibility aliases (auth router already handled these) ─ */
 app.use('/', authRouter);

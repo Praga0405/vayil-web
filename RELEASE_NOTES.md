@@ -1,5 +1,56 @@
 # Release Notes
 
+## v4.5.26 — Mobile-team public-route pass: 17 endpoints no longer require Bearer auth (2026-06-12)
+
+### Why
+
+The mobile team reported that several browsing, lookup, and pre-login endpoints still demanded a Bearer token, blocking their pre-login flows (catalogue browse, vendor profile view, location pickers, settings, file upload). They sent three lists: 15 customer routes, 9 vendor routes, 14 common/bare routes. Of those 38 entries: 10 were already public (no change), 17 are now public after this release, 6 stay gated as security risks pending mobile-team clarification, and the rest were aliases / duplicates of the public set.
+
+### What moved above the `requireAuth()` wall
+
+**`backend/src/routes/legacyCustomer.ts`**
+- `POST /customer/ServiceList` — public category listing
+- `POST /customer/ServiceInfo` — category drill-down (vendors + sub-categories)
+- `POST /customer/vendorInfo` — vendor profile + listings (window-shopping)
+- `GET/POST /customer/ServiceCategories`, `POST /customer/ServiceSubcategories` — public catalogue lookup
+- `GET /customer/get_states_by_country_id`, `POST /customer/get_city` — location pickers (new aliases of vendor's identical handlers)
+- `GET/POST /customer/getSettings` — public settings (already deny-listed via `publicSettingsSafe`)
+- `POST /customer/upload_files` — now wrapped in `softAuth()`; S3 prefix falls back to `guest-<ip>` when no token is sent
+
+**`backend/src/routes/legacyVendor.ts`**
+- `GET /vendor/getToolList` — alias of the existing public `/getTools`
+- `POST /vendor/vendorlistReviews` — now takes `vendor_id` from the request body (not from the token) so customers can read reviews pre-login
+- `GET/POST /vendor/vendorGetSettings` — public settings (deny-listed)
+
+### New file: `backend/src/routes/bareMobile.ts`
+
+Bare-path (no `/customer` or `/vendor` prefix) aliases mounted at `app.use('/', bareMobileRouter)` AFTER the prefixed legacy routers so prefixed paths still resolve first:
+
+- `GET /getLanguages`, `/getTools`, `/getToolList`, `/listStatus`, `/get_states_by_country_id`, `/getSettings`
+- `POST /get_city`, `/listProofTypes`, `/upload_files`
+
+### Deliberately NOT made public
+
+These appeared in the mobile-team list but exposing them would be a security regression. They stay behind the existing auth gate; ping the mobile team to clarify intent before opening any of them:
+
+| Route | Reason held |
+|---|---|
+| `POST /customer/getCart` | Per-user cart — no user identity without a token. If mobile sends a `device_id` for guest carts, we'll add a guest-cart handler in v4.5.27. |
+| `POST /vendor/markNotificationRead` | Per-user state. Public access would let anyone mark anyone's notifications read. |
+| `POST /service-category/toggle` | Admin-only mutation. Public access would let anyone disable categories platform-wide. |
+| `POST /service-subcategory/toggle` | Same. |
+| `POST /service-tag/toggle` | Same. |
+| `POST /ProofStatus` | Admin-only mutation — toggles vendor KYC status. Public access would let anyone auto-approve any vendor's KYC. |
+
+### Verification
+
+- `backend $ npx tsc --noEmit` — clean.
+- All previously public routes (`/customer/register`, `/vendor/register`, `/service-categories`, etc.) unchanged.
+- Auth still enforced on every per-user route (`/sendEnquiry`, `/getCart`, `/saveServiceListing`, etc.).
+- `softAuth()` on the public `upload_files` path keeps the per-user S3 prefix when a token IS sent — no behaviour change for authenticated callers.
+
+---
+
 ## v4.5.25 — Hotfix: CORS regression in v4.5.23 broke browser OTP requests (2026-06-07)
 
 ### The bug

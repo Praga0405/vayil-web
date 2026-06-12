@@ -114,32 +114,15 @@ legacyCustomerRouter.post('/resendcustomerOTP', async (req, res, next) => {
 });
 
 /* ─────────────────────────────────────────────────────────────
- *  Authenticated customer endpoints from here down.
+ *  v4.5.26 — PUBLIC pre-login browsing endpoints.
+ *  Mobile team requested these be callable without a Bearer token so
+ *  customers can browse the catalogue, settings, location pickers, and
+ *  upload files before signing up. Must stay ABOVE the requireAuth
+ *  wall below. None of these handlers read req.user.
  * ───────────────────────────────────────────────────────────── */
-legacyCustomerRouter.use(requireAuth(['customer']));
 
-legacyCustomerRouter.post('/saveCustomerInfo', async (req: AuthRequest, res, next) => {
-  try {
-    const customer = await customerSvc.updateCustomer(req.user!.id, {
-      name: req.body?.name, email: req.body?.email, city: req.body?.city,
-      address: req.body?.address, pincode: req.body?.pincode,
-      profile_image: req.body?.profile_image, fcm_token: req.body?.fcm_token,
-    });
-    send(res, { message: 'Profile updated', data: customer });
-  } catch (err) { next(err); }
-});
-
-const handleGetCustomerInfo = async (req: AuthRequest, res: any, next: any) => {
-  try {
-    const customer = await customerSvc.getCustomer(req.user!.id);
-    send(res, { data: customer, customer_id: customer.customer_id });
-  } catch (err) { next(err); }
-};
-legacyCustomerRouter.get('/getCustomerInfo', handleGetCustomerInfo);
-legacyCustomerRouter.post('/getCustomerInfo', handleGetCustomerInfo);
-
-/* ───── Service browsing (catalogue + vendor detail) ───── */
-legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
+/* ---- Public service browsing ---- */
+legacyCustomerRouter.post('/ServiceList', async (_req, res, next) => {
   try {
     const cats = await query<any>(
       `SELECT category_id, name, icon FROM service_categories WHERE status = true ORDER BY category_id ASC`
@@ -169,6 +152,133 @@ legacyCustomerRouter.post('/vendorInfo', async (req, res, next) => {
     send(res, { data: out });
   } catch (err) { next(err); }
 });
+
+/* ---- Public catalogue lookups (aliases of vendor / common router) ---- */
+const publicServiceCategoriesHandler = async (_req: any, res: any, next: any) => {
+  try {
+    const cats = await query<any>(
+      `SELECT id, category_id, name, slug, icon, icon_url, COALESCE(is_active, status) AS is_active
+         FROM service_categories
+        WHERE COALESCE(is_deleted, 0) = 0
+        ORDER BY name ASC`,
+    );
+    send(res, { data: cats });
+  } catch (err) { next(err); }
+};
+legacyCustomerRouter.get('/ServiceCategories',  publicServiceCategoriesHandler);
+legacyCustomerRouter.post('/ServiceCategories', publicServiceCategoriesHandler);
+
+legacyCustomerRouter.post('/ServiceSubcategories', async (req, res, next) => {
+  try {
+    const cid = pickId(req.body, 'category_id', 'categoryId') || null;
+    const rows = cid
+      ? await query<any>(
+          `SELECT id, subcategory_id, category_id, name, slug
+             FROM service_subcategories
+            WHERE category_id = :id AND COALESCE(is_deleted, 0) = 0`,
+          { id: cid },
+        )
+      : await query<any>(
+          `SELECT id, subcategory_id, category_id, name, slug
+             FROM service_subcategories
+            WHERE COALESCE(is_deleted, 0) = 0`,
+        );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+
+/* ---- Public location pickers ---- */
+legacyCustomerRouter.get('/get_states_by_country_id', async (req, res, next) => {
+  try {
+    const cid = Number((req.query as any)?.country_id ?? 101);
+    const rows = await query<any>(
+      `SELECT id, name, country_id, country_code, state_code FROM states
+        WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
+      { cid } as any,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+
+legacyCustomerRouter.post('/get_city', async (req, res, next) => {
+  try {
+    const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
+    const rows = sid
+      ? await query<any>(
+          `SELECT city_id, city_name, city_state, city_state_id FROM city
+            WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
+          { sid },
+        )
+      : await query<any>(
+          `SELECT city_id, city_name, city_state, city_state_id FROM city
+            WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
+        );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+
+/* ---- Public settings (deny-listed via publicSettingsSafe) ---- */
+async function publicSettingsHandler(_req: any, res: any, next: any) {
+  try {
+    const row = await one<any>('SELECT * FROM settings LIMIT 1');
+    const safe = publicSettingsSafe(row);
+    send(res, {
+      data: {
+        ...safe,
+        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
+        currency: 'INR',
+      },
+    });
+  } catch (err) { next(err); }
+}
+legacyCustomerRouter.get('/getSettings', publicSettingsHandler);
+legacyCustomerRouter.post('/getSettings', publicSettingsHandler);
+
+/* ---- Public uploads (anonymous prefix; soft-auth tags the customer if a
+ *      token was sent, otherwise stores under guest/<ip>). v4.5.26.
+ *      NB: per-IP throttling lives in the global rate-limit middleware in
+ *      index.ts; if abuse becomes a problem we add a dedicated limiter here.
+ */
+legacyCustomerRouter.post('/upload_files',
+  softAuth(),
+  upload.any(),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const { uploadFiles } = await import('../utils/uploads');
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const prefix = req.user?.id ? `customer-${req.user.id}` : `guest-${(req.ip || 'anon').replace(/[^a-z0-9]/gi, '')}`;
+      const urls = await uploadFiles(files as any, { prefix });
+      send(res, { message: 'Uploaded', data: urls, urls });
+    } catch (err) { next(err); }
+  },
+);
+
+/* ─────────────────────────────────────────────────────────────
+ *  Authenticated customer endpoints from here down.
+ * ───────────────────────────────────────────────────────────── */
+legacyCustomerRouter.use(requireAuth(['customer']));
+
+legacyCustomerRouter.post('/saveCustomerInfo', async (req: AuthRequest, res, next) => {
+  try {
+    const customer = await customerSvc.updateCustomer(req.user!.id, {
+      name: req.body?.name, email: req.body?.email, city: req.body?.city,
+      address: req.body?.address, pincode: req.body?.pincode,
+      profile_image: req.body?.profile_image, fcm_token: req.body?.fcm_token,
+    });
+    send(res, { message: 'Profile updated', data: customer });
+  } catch (err) { next(err); }
+});
+
+const handleGetCustomerInfo = async (req: AuthRequest, res: any, next: any) => {
+  try {
+    const customer = await customerSvc.getCustomer(req.user!.id);
+    send(res, { data: customer, customer_id: customer.customer_id });
+  } catch (err) { next(err); }
+};
+legacyCustomerRouter.get('/getCustomerInfo', handleGetCustomerInfo);
+legacyCustomerRouter.post('/getCustomerInfo', handleGetCustomerInfo);
+
+/* ───── Service browsing endpoints moved to public block above (v4.5.26) ───── */
 
 /* ───── Enquiries ───── */
 legacyCustomerRouter.post('/sendEnquiry', async (req: AuthRequest, res, next) => {
@@ -396,42 +506,10 @@ legacyCustomerRouter.post('/clearCart', async (req: AuthRequest, res, next) => {
  *  storage adapter is plugged via utils/uploads in production; for now
  *  we return a data URL so the upload contract works locally.
  */
-legacyCustomerRouter.post('/upload_files',
-  upload.any(),
-  async (req: AuthRequest, res, next) => {
-    try {
-      const { uploadFiles } = await import('../utils/uploads');
-      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
-      const urls = await uploadFiles(files as any, { prefix: `customer-${req.user!.id}` });
-      // Mobile parses both `data` (array) and root-level `urls` for back-compat.
-      send(res, { message: 'Uploaded', data: urls, urls });
-    } catch (err) { next(err); }
-  },
-);
+/* upload_files + getSettings moved to public block above (v4.5.26) */
 
 /* Soft-auth-only utility — lets the app warm up without a token. */
 legacyCustomerRouter.get('/_ping', softAuth(), (_req, res) => res.json({ ok: true, t: Date.now() }));
-
-/* Settings — read-only, no auth. Web pages (account/profile, payment
- * sheets) call this on every render; returning the settings row + a
- * razorpay_key derived from env keeps them happy. */
-async function settingsHandler(_req: any, res: any, next: any) {
-  try {
-    const row = await one<any>('SELECT * FROM settings LIMIT 1');
-    // v4.5.23 — strip payment_secret / smtp_password / etc. before
-    // shipping to the mobile customer app. See publicSettingsSafe().
-    const safe = publicSettingsSafe(row);
-    send(res, {
-      data: {
-        ...safe,
-        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
-        currency: 'INR',
-      },
-    });
-  } catch (err) { next(err); }
-}
-legacyCustomerRouter.get('/getSettings', settingsHandler);
-legacyCustomerRouter.post('/getSettings', settingsHandler);
 
 /* ─────────────────────────────────────────────────────────────
  *  v4.5.2 — close out Option A gaps: 5 missing customer endpoints
@@ -439,40 +517,7 @@ legacyCustomerRouter.post('/getSettings', settingsHandler);
  *  mount.
  * ───────────────────────────────────────────────────────────── */
 
-/** GET/POST /customer/ServiceCategories — bare lookup of categories. */
-const serviceCategoriesHandler = async (_req: AuthRequest, res: any, next: any) => {
-  try {
-    const cats = await query<any>(
-      `SELECT id, category_id, name, slug, icon, icon_url, COALESCE(is_active, status) AS is_active
-         FROM service_categories
-        WHERE COALESCE(is_deleted, 0) = 0
-        ORDER BY name ASC`,
-    );
-    send(res, { data: cats });
-  } catch (err) { next(err); }
-};
-legacyCustomerRouter.get('/ServiceCategories',  serviceCategoriesHandler);
-legacyCustomerRouter.post('/ServiceCategories', serviceCategoriesHandler);
-
-/** POST /customer/ServiceSubcategories — lookup subcats, optionally by parent. */
-legacyCustomerRouter.post('/ServiceSubcategories', async (req: AuthRequest, res, next) => {
-  try {
-    const cid = pickId(req.body, 'category_id', 'categoryId') || null;
-    const rows = cid
-      ? await query<any>(
-          `SELECT id, subcategory_id, category_id, name, slug
-             FROM service_subcategories
-            WHERE category_id = :id AND COALESCE(is_deleted, 0) = 0`,
-          { id: cid },
-        )
-      : await query<any>(
-          `SELECT id, subcategory_id, category_id, name, slug
-             FROM service_subcategories
-            WHERE COALESCE(is_deleted, 0) = 0`,
-        );
-    send(res, { data: rows });
-  } catch (err) { next(err); }
-});
+/* ServiceCategories / ServiceSubcategories moved to public block above (v4.5.26) */
 
 /** POST /customer/sendQuotation — customer accepts/rejects vendor's quote.
  *  Mobile collection calls this the "Update Quote" action; semantically

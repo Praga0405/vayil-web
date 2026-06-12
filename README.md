@@ -145,7 +145,7 @@ The README was last refreshed at v4.5.1. Since then 24 versions shipped, several
 
 Up through v4.5.4 the production setup was "Vercel frontend + Render backend + Render MySQL." From **v4.5.6** onward Vayil ships as a single Vercel deployment with the backend mounted as a serverless function — no separate backend host.
 
-| Layer                | Before (v4.5.1)            | Now (v4.5.25)                                                                                                          |
+| Layer                | Before (v4.5.1)            | Now (v4.5.26)                                                                                                          |
 |----------------------|-----------------------------|------------------------------------------------------------------------------------------------------------------------|
 | Frontend             | Vercel                      | Vercel (unchanged)                                                                                                     |
 | Backend              | Render `vayil-backend` service | Vercel serverless function via `pages/api/[...all].ts` catch-all that imports the Express app                          |
@@ -330,6 +330,16 @@ Net behaviour:
 Also switched the reject path from `cb(new Error, false)` → `cb(null, false)` (the cors package's quiet-reject contract) so attacker scans don't dump stack traces to the logs.
 
 Every other v4.5.23 hardening is unchanged — v4.5.25 brings working CORS forward without losing any security work.
+
+**v4.5.26** — Mobile-team public-route pass:
+
+After the mobile team flagged that several pre-login flows (browse, vendor profile, location pickers, settings, file upload) were still demanding a Bearer token, 17 endpoints were lifted above the `requireAuth()` wall. The full list lives in `RELEASE_NOTES.md`; high-level summary:
+
+- **Customer (now public):** `ServiceList`, `ServiceInfo`, `vendorInfo`, `ServiceCategories`, `ServiceSubcategories`, `get_city`, `get_states_by_country_id`, `getSettings`, `upload_files` (soft-auth: guest prefix when anonymous).
+- **Vendor (now public):** `getToolList`, `vendorlistReviews` (takes `vendor_id` from body), `vendorGetSettings`.
+- **Bare-path aliases (new `backend/src/routes/bareMobile.ts`):** `/getLanguages`, `/getTools`, `/getToolList`, `/listStatus`, `/get_states_by_country_id`, `/getSettings`, `/get_city`, `/listProofTypes`, `/upload_files`.
+
+Six routes the mobile team listed were **kept gated** because public access would be a security regression: `/customer/getCart` (per-user data), `/vendor/markNotificationRead` (per-user state), and the four admin mutations `/service-category/toggle`, `/service-subcategory/toggle`, `/service-tag/toggle`, `/ProofStatus`. These need a clarification round with the mobile team before any change.
 
 ### Two new env vars introduced in this sprint
 

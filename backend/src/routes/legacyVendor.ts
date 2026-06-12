@@ -167,6 +167,48 @@ legacyVendorRouter.post('/listProofTypes', async (_req, res, next) => {
 });
 
 /* ─────────────────────────────────────────────────────────────
+ *  v4.5.26 — Additional public vendor endpoints requested by mobile.
+ *  - /getToolList: alias for /getTools (mobile naming variant).
+ *  - /vendorlistReviews: public vendor reviews (window-shopping; takes
+ *    vendor_id from body — does NOT use req.user).
+ *  - /vendorGetSettings: public settings (deny-listed).
+ * ───────────────────────────────────────────────────────────── */
+legacyVendorRouter.get('/getToolList', async (_req, res, next) => {
+  try {
+    const rows = await commonQuery<any>(
+      `SELECT id, tool_name, tool_slug, description FROM tools_master
+        WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY tool_name`,
+    );
+    send(res, { data: rows });
+  } catch (err) { next(err); }
+});
+
+legacyVendorRouter.post('/vendorlistReviews', async (req, res, next) => {
+  try {
+    const vendorId = pickId(req.body, 'vendor_id', 'vendorId', 'id');
+    if (!vendorId) throw new ApiError(400, 'vendor_id required');
+    const data = await reviewSvc.listVendorReviews(vendorId);
+    send(res, { data });
+  } catch (err) { next(err); }
+});
+
+async function publicVendorSettingsHandler(_req: any, res: any, next: any) {
+  try {
+    const row = await one<any>('SELECT * FROM settings LIMIT 1');
+    const safe = publicSettingsSafe(row);
+    send(res, {
+      data: {
+        ...safe,
+        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
+        currency: 'INR',
+      },
+    });
+  } catch (err) { next(err); }
+}
+legacyVendorRouter.get('/vendorGetSettings', publicVendorSettingsHandler);
+legacyVendorRouter.post('/vendorGetSettings', publicVendorSettingsHandler);
+
+/* ─────────────────────────────────────────────────────────────
  *  Authenticated vendor endpoints
  * ───────────────────────────────────────────────────────────── */
 legacyVendorRouter.use(requireAuth(['vendor']));
@@ -582,31 +624,9 @@ legacyVendorRouter.post('/vendorNotificationList', async (req: AuthRequest, res,
   } catch (err) { next(err); }
 });
 
-legacyVendorRouter.post('/vendorlistReviews', async (req: AuthRequest, res, next) => {
-  try {
-    const data = await reviewSvc.listVendorReviews(req.user!.id);
-    send(res, { data });
-  } catch (err) { next(err); }
-});
-
-/* ───── Settings (vendor view) ───── */
-async function vendorSettingsHandler(_req: any, res: any, next: any) {
-  try {
-    const row = await one<any>('SELECT * FROM settings LIMIT 1');
-    // v4.5.23 — strip payment_secret / smtp_password / etc. before
-    // shipping to the mobile vendor app. See publicSettingsSafe().
-    const safe = publicSettingsSafe(row);
-    send(res, {
-      data: {
-        ...safe,
-        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
-        currency: 'INR',
-      },
-    });
-  } catch (err) { next(err); }
-}
-legacyVendorRouter.get('/vendorGetSettings', vendorSettingsHandler);
-legacyVendorRouter.post('/vendorGetSettings', vendorSettingsHandler);
+/* vendorlistReviews + vendorGetSettings moved to public block above (v4.5.26).
+ * NB: vendorlistReviews now takes vendor_id from the request body rather than
+ * the auth token so the public-profile view works pre-login. */
 
 /* ───── Upload ───── */
 legacyVendorRouter.post('/upload_files',
