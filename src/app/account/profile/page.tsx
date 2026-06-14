@@ -29,7 +29,7 @@ export default function ProfilePage() {
     // bounce vendors to their own profile page. Avoids the cascade of
     // 403s + "Upload failed -- Access denied for this role" toasts that
     // happen when a vendor lands here from the wrong nav link.
-    if (user?.type === 'vendor') { router.replace('/vendor/profile'); return }
+    if (user?.type === 'vendor') { router.replace('/vendor-studio/profile'); return }
     setLoading(true)
     Promise.all([customerApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {

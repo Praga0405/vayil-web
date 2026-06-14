@@ -1,9 +1,2 @@
-'use client'
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-
-export default function LegacyVendorEnquiriesRedirect() {
-  const router = useRouter()
-  useEffect(() => { router.replace('/vendor-studio/enquiries') }, [])
-  return null
-}
+import { redirect } from "next/navigation"
+export default function VendorEnquiriesRedirect() { redirect("/vendor-studio/enquiries") }

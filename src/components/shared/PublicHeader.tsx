@@ -123,10 +123,10 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
                   {isVendor ? (
                     <>
                       <DropItem href="/vendor-studio/listing"      icon={Wrench}       label="My Listing" />
-                      <DropItem href="/account/enquiries"          icon={ClipboardList} label="Enquiries" />
+                      <DropItem href="/vendor-studio/enquiries"    icon={ClipboardList} label="Enquiries" />
                       <DropItem href="/vendor-studio/earnings"     icon={CreditCard}    label="Earnings" />
-                      <DropItem href="/account/notifications"      icon={Bell}          label="Notifications" />
-                      <DropItem href="/account/profile"            icon={User}          label="Profile" />
+                      <DropItem href="/vendor-studio/dashboard"    icon={Bell}          label="Notifications" />
+                      <DropItem href="/vendor-studio/profile"      icon={User}          label="Profile" />
                     </>
                   ) : (
                     <>
