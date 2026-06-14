@@ -1,7 +1,8 @@
 'use client'
-import React from 'react'
+import React, { useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useUserAuth } from '@/stores/auth'
 import PublicHeader from '@/components/shared/PublicHeader'
 import PublicFooter from '@/components/shared/PublicFooter'
 import {
@@ -16,8 +17,46 @@ const NAV = [
   { href: '/account/profile',      label: 'Profile',        icon: User },
 ]
 
+/* v4.5.30 — vendors should never see the "My Account" customer sidebar.
+ * One central role-guard here covers every /account/* page in the tree
+ * (/enquiries, /projects, /notifications, /payments, /profile) without
+ * each page having to re-implement the check. Customers fall through
+ * untouched. Mapping to the studio analog:
+ *
+ *   /account/enquiries     → /vendor-studio/enquiries
+ *   /account/projects      → /vendor-studio/jobs
+ *   /account/notifications → /vendor-studio/dashboard  (no notifications page yet)
+ *   /account/payments      → /vendor-studio/earnings
+ *   /account/profile       → /vendor-studio/listing    (Business Profile tab)
+ *
+ * Any not-listed path under /account/* falls back to the studio listing
+ * since that's the canonical vendor home (the "Business Profile" tab).
+ */
+const VENDOR_REDIRECTS: Record<string, string> = {
+  '/account/enquiries':     '/vendor-studio/enquiries',
+  '/account/projects':      '/vendor-studio/jobs',
+  '/account/notifications': '/vendor-studio/dashboard',
+  '/account/payments':      '/vendor-studio/earnings',
+  '/account/profile':       '/vendor-studio/listing',
+}
+
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
-  const path = usePathname()
+  const path   = usePathname()
+  const router = useRouter()
+  const { user } = useUserAuth()
+
+  useEffect(() => {
+    if (user?.type !== 'vendor') return
+    // Match exact route first, then prefix (for /account/foo/[id] etc.).
+    const target = VENDOR_REDIRECTS[path]
+      ?? Object.entries(VENDOR_REDIRECTS).find(([from]) => path.startsWith(from + '/'))?.[1]
+      ?? '/vendor-studio/listing'
+    router.replace(target)
+  }, [user?.type, path, router])
+
+  // Render nothing during the redirect tick so the customer sidebar
+  // doesn't flash for vendors.
+  if (user?.type === 'vendor') return null
 
   return (
     <div className="min-h-screen bg-[#F4F7FA]">
