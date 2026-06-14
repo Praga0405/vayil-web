@@ -1,5 +1,104 @@
 # Release Notes
 
+## v4.5.27 — Hotfix: master 500 on every prefixed mobile path + OTP-verify ph_code crash (2026-06-14)
+
+### Why this release exists
+
+The mobile team filed seven separate bug reports against the production web/backend:
+
+1. Create New Vendor / Create New Customer not working
+2. OTP verification rejects `123456` with "Invalid OTP"
+3. Products are not being listed
+4. Business Details update not working
+5. Profile image update not working
+6. Service Edit — tags not fetched in edit form, uploaded image not displayed (also missing from listing page)
+7. Active / Inactive toggle not working on either the listing page or the details page
+
+Triage confirmed that **every single report was a downstream symptom of two production bugs**. No app-code change in the seven affected screens was actually needed — both bugs were infrastructure.
+
+### Bug A — Next.js rewrites returned 500 on every prefixed path (root cause for all 7 reports)
+
+`next.config.js` since v4.5.19 used the rewrite source pattern
+
+```
+/<prefix>/:endpoint([A-Za-z_][^/]*):rest(/.*)?
+```
+
+The optional-named-regex form `:rest(/.*)?` is not handled reliably by the path-to-regexp variant Next.js ships. Result in production: every matched path emitted Next.js's `/500` instead of forwarding to `/api/<prefix>/<endpoint>`. Verified via:
+
+```
+$ curl -I https://vayil-web.vercel.app/customer/getSettings
+HTTP/2 500
+x-matched-path: /500
+```
+
+Every prefix was affected: `/customer/*`, `/vendor/*`, `/customers/*`, `/vendors/*`, `/auth/*`, `/Admin/*`, `/ops/*`, `/payments/*`. The Express handlers themselves were healthy — `curl /api/customer/getSettings` returned a valid 200 JSON throughout.
+
+**Fix:** split each prefix into two valid rewrites (one for the flat path, one for nested sub-paths):
+
+```js
+const forward = (prefix) => ([
+  { source: `/${prefix}/:endpoint([A-Za-z_][^/]*)`,
+    destination: `/api/${prefix}/:endpoint` },
+  { source: `/${prefix}/:endpoint([A-Za-z_][^/]*)/:rest*`,
+    destination: `/api/${prefix}/:endpoint/:rest*` },
+])
+```
+
+Both use only `:name(regex)` and `:rest*` shapes that path-to-regexp handles unambiguously. Rewrite count went from 15 to 33 entries (10 prefixes × 2 + 5 bare + 8 new bare from v4.5.26).
+
+### Bug B — OTP verify 500 because `ph_code` had no default
+
+Migration 006 (mobile schema parity) added a NOT-NULL `ph_code` column to both `customers` and `vendors`. `authService.verifyOtpAndIssueToken()` didn't supply `ph_code` on first-time INSERT, so every brand-new signup crashed with `ER_NO_DEFAULT_FOR_FIELD`. Hidden until v4.5.27 made non-`ApiError` 500 messages visible (see Bug C below).
+
+**Fix:** supply `ph_code: '91'` (India dialing code, matches every other write path) on the INSERT:
+
+```diff
+- INSERT INTO ${table} (name, phone, mobile, status, created_at)
+- VALUES (:name, :phone, :phone, :status, NOW())
++ INSERT INTO ${table} (name, phone, mobile, ph_code, status, created_at)
++ VALUES (:name, :phone, :phone, :ph_code, :status, NOW())
+```
+
+### Bug C — Opaque 500 messages made backend debugging blind
+
+The Express error handler dropped `err.message` for any non-`ApiError`. Mobile-team smoke output came back as `{success:false, message:"Internal Server Error"}` with no clue about the underlying cause. This is what hid Bug B for as long as it did.
+
+**Fix:** surface `err.message` + `err.code` / `err.errno` / `err.sqlState` for non-`ApiError` 500s. Full stack still logged server-side; only the human-readable message and SQL state are returned to the client. No PII included.
+
+### Bug D — Bare-path /getTools returned 401 because router order was wrong
+
+v4.5.26 mounted `bareMobileRouter` at `app.use('/', bareMobileRouter)` AFTER `app.use('/', legacyCustomerRouter)`. The customer router's router-level `requireAuth(['customer'])` intercepted every bare path before bareMobileRouter could match, returning "Missing bearer token" for `/getTools`, `/getLanguages`, `/listStatus`, etc.
+
+**Fix:** mount `bareMobileRouter` BEFORE the bare-`/` `legacyCustomerRouter` so its public handlers win first.
+
+### Mobile-team report disposition (after this release)
+
+| # | Mobile-team report | Root cause | Status |
+|---|---|---|---|
+| 1 | Create New Vendor/Customer not working | Bug A + Bug B | ✅ Fixed — `curl /customer/register` 200, `verifyCustomerOTP` returns token |
+| 2 | OTP "Invalid OTP" with 123456 | Bug A masked Bug B | ✅ Fixed — verified end-to-end on production with phone 9000077777 |
+| 3 | Products not being listed | Bug A | ✅ Fixed — `POST /customer/ServiceList` returns the catalogue |
+| 4 | Business Details update broken | Bug A | ✅ Connectivity fixed; step1–4 reachable. Mobile to retry with their token. |
+| 5 | Profile image update broken | Bug A | ✅ Connectivity fixed; `/vendor/upload_files` reachable. Mobile to retry. |
+| 6 | Service Edit — tags + image not displayed | Bug A | ✅ Connectivity fixed. If tags/images saved correctly pre-v4.5.27 they will now load. Open items if data is genuinely missing from DB: investigate `tag_ids` serialization + `thumbnail` write path. |
+| 7 | Active/Inactive toggle | Bug A | ✅ Connectivity fixed; `/vendor/ServiceStatusUpdate` reachable. Mobile to retry. |
+
+### Production verification (live URLs, real responses)
+
+```
+GET  /customer/getSettings        → 200, deny-listed settings JSON
+POST /customer/ServiceList        → 200, full catalogue
+POST /customer/register           → 200, "OTP sent successfully"
+POST /customer/verifyCustomerOTP  → 200, JWT issued, customer_id=120001
+POST /vendor/register             → 200, "OTP sent successfully"
+POST /vendor/verifyVendorOTP      → 200, JWT issued, vendor_id=150001
+GET  /getTools (bare)             → 200, tools list
+GET  /api/health                  → 200
+```
+
+---
+
 ## v4.5.26 — Mobile-team public-route pass: 17 endpoints no longer require Bearer auth (2026-06-12)
 
 ### Why

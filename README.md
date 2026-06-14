@@ -145,7 +145,7 @@ The README was last refreshed at v4.5.1. Since then 24 versions shipped, several
 
 Up through v4.5.4 the production setup was "Vercel frontend + Render backend + Render MySQL." From **v4.5.6** onward Vayil ships as a single Vercel deployment with the backend mounted as a serverless function — no separate backend host.
 
-| Layer                | Before (v4.5.1)            | Now (v4.5.26)                                                                                                          |
+| Layer                | Before (v4.5.1)            | Now (v4.5.27)                                                                                                          |
 |----------------------|-----------------------------|------------------------------------------------------------------------------------------------------------------------|
 | Frontend             | Vercel                      | Vercel (unchanged)                                                                                                     |
 | Backend              | Render `vayil-backend` service | Vercel serverless function via `pages/api/[...all].ts` catch-all that imports the Express app                          |
@@ -340,6 +340,18 @@ After the mobile team flagged that several pre-login flows (browse, vendor profi
 - **Bare-path aliases (new `backend/src/routes/bareMobile.ts`):** `/getLanguages`, `/getTools`, `/getToolList`, `/listStatus`, `/get_states_by_country_id`, `/getSettings`, `/get_city`, `/listProofTypes`, `/upload_files`.
 
 Six routes the mobile team listed were **kept gated** because public access would be a security regression: `/customer/getCart` (per-user data), `/vendor/markNotificationRead` (per-user state), and the four admin mutations `/service-category/toggle`, `/service-subcategory/toggle`, `/service-tag/toggle`, `/ProofStatus`. These need a clarification round with the mobile team before any change.
+
+**v4.5.27** — Production hotfix: master 500 on every prefixed mobile path + OTP-verify `ph_code` crash:
+
+After v4.5.26 deployed, the mobile team filed seven separate bug reports (Create New Vendor/Customer broken, OTP "Invalid", products not listed, business-details update broken, profile-image upload broken, service-edit tags/images missing, active/inactive toggle broken). Triage confirmed all seven shared a single root cause: the Next.js `afterFiles` rewrites added in v4.5.19 used the optional-named-regex form `:rest(/.*)?`, which the path-to-regexp variant Next.js ships rejects on the edge. Every `/customer/*`, `/vendor/*`, `/auth/*`, `/customers/*`, `/vendors/*`, `/Admin/*`, `/ops/*`, `/payments/*` request emitted Next.js's `/500` page instead of forwarding to `/api/...`. Direct `/api/...` calls were healthy throughout.
+
+Fix: split each prefix into two valid rewrites (`/:endpoint` flat path + `/:endpoint/:rest*` nested) using only the standard path-to-regexp shapes. Rewrite count went from 15 → 33 entries.
+
+A second bug surfaced once traffic was unblocked: `authService.verifyOtpAndIssueToken()` didn't supply `ph_code` on first-time INSERT (a NOT-NULL column added by migration 006 for mobile-team schema parity), so every brand-new signup crashed with `ER_NO_DEFAULT_FOR_FIELD`. The error was previously masked because the global error handler dropped `err.message` for non-`ApiError` 500s. v4.5.27 surfaces `err.message` + SQL state for those, and supplies `ph_code: '91'` on the customer/vendor INSERT.
+
+A router-order bug for the v4.5.26 bare-path mounts (`/getTools` returned 401 because `bareMobileRouter` was mounted at `'/'` AFTER `legacyCustomerRouter` whose `requireAuth` intercepted first) is also fixed.
+
+Production verification post-deploy: customer register + verify, vendor register + verify, settings, ServiceList, and bare `/getTools` all return proper JSON. Mobile team can now retry every item on their list.
 
 ### Two new env vars introduced in this sprint
 
