@@ -145,22 +145,47 @@ const nextConfig = {
     // letter (getSettings, vendorlistReviews, sendEnquiry, …), so the
     // letter-anchored regex keeps mobile traffic on the rewrite path
     // while leaving numeric dynamic-route IDs to Next.js.
-    const forward = (prefix) => ({
-      source: `/${prefix}/:endpoint([A-Za-z_][^/]*):rest(/.*)?`,
-      destination: `/api/${prefix}/:endpoint:rest`,
-    })
+    //
+    // v4.5.27 — CRITICAL FIX: the prior single-rewrite form
+    //   { source: `/${prefix}/:endpoint([A-Za-z_][^/]*):rest(/.*)?`,
+    //     destination: `/api/${prefix}/:endpoint:rest` }
+    // produced HTTP 500 on EVERY matched path in production. The
+    // `:rest(/.*)?` optional-named-regex pattern is rejected by the
+    // path-to-regexp variant Next.js ships, so the rewrite either
+    // throws at request time or emits a literal `:rest` token in the
+    // destination URL. Either way Vercel routes the request to /500
+    // (verified via `curl -I https://vayil-web.vercel.app/customer/getSettings`
+    // → `x-matched-path: /500`). Every mobile-team report about
+    // OTP/listings/upload/toggle being "broken" traces back to this.
+    //
+    // The fix: split into two rewrites per prefix.
+    //   1. Flat path  /<prefix>/<endpoint>            → /api/<prefix>/<endpoint>
+    //   2. Nested     /<prefix>/<endpoint>/<sub...>   → /api/<prefix>/<endpoint>/<sub...>
+    // Both use only the standard path-to-regexp shapes that Next.js
+    // supports unambiguously: `:name(regex)` for the letter-anchored
+    // first segment and `:rest*` for the optional remainder.
+    const forward = (prefix) => ([
+      {
+        source: `/${prefix}/:endpoint([A-Za-z_][^/]*)`,
+        destination: `/api/${prefix}/:endpoint`,
+      },
+      {
+        source: `/${prefix}/:endpoint([A-Za-z_][^/]*)/:rest*`,
+        destination: `/api/${prefix}/:endpoint/:rest*`,
+      },
+    ])
     return {
       afterFiles: [
-        forward('customer'),    // legacy mobile customer routes
-        forward('vendor'),      // legacy mobile vendor routes
-        forward('customers'),   // canonical customer API
-        forward('vendors'),     // canonical vendor API
-        forward('auth'),        // OTP send/verify
-        forward('Admin'),       // admin (camelCase legacy)
-        forward('admin'),       // admin (lowercase)
-        forward('payments'),    // Razorpay payment flows
-        forward('webhooks'),    // Razorpay webhooks
-        forward('ops'),         // internal ops endpoints
+        ...forward('customer'),    // legacy mobile customer routes
+        ...forward('vendor'),      // legacy mobile vendor routes
+        ...forward('customers'),   // canonical customer API
+        ...forward('vendors'),     // canonical vendor API
+        ...forward('auth'),        // OTP send/verify
+        ...forward('Admin'),       // admin (camelCase legacy)
+        ...forward('admin'),       // admin (lowercase)
+        ...forward('payments'),    // Razorpay payment flows
+        ...forward('webhooks'),    // Razorpay webhooks
+        ...forward('ops'),         // internal ops endpoints
         // Bare top-level mobile endpoints (no prefix). The legacy customer
         // app posts CustomerupdatePlan / logincustomerWithOTP / register
         // etc. without any prefix.
@@ -169,6 +194,16 @@ const nextConfig = {
         { source: '/vendor-login-otp', destination: '/api/vendor-login-otp' },
         { source: '/upload_files', destination: '/api/upload_files' },
         { source: '/health', destination: '/api/health' },
+        // v4.5.27 — bare-path forwards for the v4.5.26 public mobile endpoints.
+        // These mirror the routes mounted on bareMobileRouter in the backend.
+        { source: '/getLanguages',              destination: '/api/getLanguages' },
+        { source: '/getTools',                  destination: '/api/getTools' },
+        { source: '/getToolList',               destination: '/api/getToolList' },
+        { source: '/listStatus',                destination: '/api/listStatus' },
+        { source: '/get_states_by_country_id',  destination: '/api/get_states_by_country_id' },
+        { source: '/get_city',                  destination: '/api/get_city' },
+        { source: '/listProofTypes',            destination: '/api/listProofTypes' },
+        { source: '/getSettings',               destination: '/api/getSettings' },
       ],
     }
   },
