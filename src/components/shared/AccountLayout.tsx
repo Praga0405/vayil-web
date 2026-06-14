@@ -41,7 +41,7 @@ const VENDOR_REDIRECTS: Record<string, string> = {
 }
 
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
-  const path   = usePathname()
+  const path   = usePathname() || ''
   const router = useRouter()
   const { user } = useUserAuth()
 
