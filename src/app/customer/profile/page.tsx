@@ -26,7 +26,7 @@ export default function CustomerProfilePage() {
     if (!hydrated) return
     if (!token) { router.replace('/customer/login'); return }
     // v4.5.28 — role guard: vendors can't fetch /customers/me, send them home.
-    if (user?.type === 'vendor') { router.replace('/vendor-studio/profile'); return }
+    if (user?.type === 'vendor') { router.replace('/vendor/profile'); return }
     setLoading(true)
     Promise.all([customerApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
