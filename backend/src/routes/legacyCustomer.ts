@@ -245,7 +245,14 @@ legacyCustomerRouter.post('/upload_files',
   async (req: AuthRequest, res, next) => {
     try {
       const { uploadFiles } = await import('../utils/uploads');
+      const { validateProfileImage } = await import('../utils/imageValidation');
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      if (!files.length) throw new ApiError(400, 'no files in request');
+      // v4.5.28 — when kind=profile, enforce the same caps as the web
+      // ProfileImageUploader (JPG/PNG/WebP, <= 5 MB, 256..4096 px square-ish).
+      // Throws ApiError(400, ...) with a human-readable message that the
+      // mobile app can show verbatim.
+      if (req.body?.kind === 'profile') files.forEach(validateProfileImage);
       const prefix = req.user?.id ? `customer-${req.user.id}` : `guest-${(req.ip || 'anon').replace(/[^a-z0-9]/gi, '')}`;
       const urls = await uploadFiles(files as any, { prefix });
       send(res, { message: 'Uploaded', data: urls, urls });

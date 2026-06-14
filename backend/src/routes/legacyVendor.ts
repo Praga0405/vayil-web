@@ -634,7 +634,10 @@ legacyVendorRouter.post('/upload_files',
   async (req: AuthRequest, res, next) => {
     try {
       const { uploadFiles } = await import('../utils/uploads');
+      const { validateProfileImage } = await import('../utils/imageValidation');
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      if (!files.length) throw new ApiError(400, 'no files in request');
+      if (req.body?.kind === 'profile') files.forEach(validateProfileImage);
       const urls = await uploadFiles(files as any, { prefix: `vendor-${req.user!.id}` });
       send(res, { message: 'Uploaded', data: urls, urls });
     } catch (err) { next(err); }

@@ -3,8 +3,9 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
-import { Button, Input, Select, Textarea, Avatar } from '@/components/ui'
-import { LogOut, Camera } from 'lucide-react'
+import { Button, Input, Select, Textarea } from '@/components/ui'
+import { ProfileImageUploader } from '@/components/shared/ProfileImageUploader'
+import { LogOut } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function VendorProfilePage() {
@@ -68,12 +69,16 @@ export default function VendorProfilePage() {
       </div>
 
       <div className="card flex items-center gap-4">
-        <div className="relative">
-          <Avatar name={user?.name} src={user?.profile_image} size={16} />
-          <button className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-orange flex items-center justify-center">
-            <Camera className="w-3.5 h-3.5 text-white" />
-          </button>
-        </div>
+        <ProfileImageUploader
+          currentUrl={user?.profile_image}
+          name={user?.name}
+          size={16}
+          uploadFn={vendorApi.uploadFiles}
+          onUploaded={async (url) => {
+            await vendorApi.saveProfile({ profile_image: url })
+            if (user && token) setAuth({ ...user, profile_image: url }, token)
+          }}
+        />
         <div>
           <p className="font-bold text-navy">{user?.name || 'Vendor'}</p>
           <p className="text-sm text-[var(--text-secondary)]">+91 {user?.mobile}</p>

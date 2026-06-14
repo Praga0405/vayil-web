@@ -3,9 +3,9 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { customerApi, commonApi } from '@/lib/api/client'
-import { Button, Input, Select, Avatar } from '@/components/ui'
+import { Button, Input, Select } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
-import { Camera } from 'lucide-react'
+import { ProfileImageUploader } from '@/components/shared/ProfileImageUploader'
 import toast from 'react-hot-toast'
 
 export default function ProfilePage() {
@@ -90,12 +90,16 @@ export default function ProfilePage() {
         left={
           <PageSection>
             <div className="flex flex-col items-center text-center">
-              <div className="relative">
-                <Avatar name={user?.name} src={user?.profile_image} size={24} />
-                <button className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-orange ring-4 ring-white flex items-center justify-center hover:bg-orange-600 transition">
-                  <Camera className="w-4 h-4 text-white" />
-                </button>
-              </div>
+              <ProfileImageUploader
+                currentUrl={user?.profile_image}
+                name={user?.name}
+                size={24}
+                uploadFn={customerApi.uploadFiles}
+                onUploaded={async (url) => {
+                  await customerApi.saveProfile({ profile_image: url })
+                  if (user && token) setAuth({ ...user, profile_image: url }, token)
+                }}
+              />
               <p className="font-bold text-navy text-lg mt-4">{user?.name || 'Customer'}</p>
               <p className="text-sm text-gray-500 mt-0.5">+91 {user?.mobile}</p>
               <span className="inline-flex items-center gap-1 mt-3 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-navy/10 text-navy">
