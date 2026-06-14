@@ -16,8 +16,12 @@
  *
  *   accepted types : image/jpeg, image/png, image/webp
  *   max file size  : 5 MB
- *   min dimensions : 256 × 256 px   (no pixelated thumbnails)
- *   max dimensions : 4096 × 4096 px (no absurdly large originals)
+ *
+ * Dimensions (min/max resolution) are intentionally NOT enforced — the
+ * camera roll on a low-end phone or a screenshot crop should both be
+ * allowed. Avatars are rendered at fixed CSS sizes so a small upload
+ * just renders crisply at that size; a huge upload is rate-capped by
+ * the byte limit above.
  *
  * Usage:
  *   <ProfileImageUploader
@@ -36,8 +40,6 @@ import { normalizeUploadedUrls } from '@/lib/api/client'
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
 const MAX_BYTES      = 5 * 1024 * 1024
-const MIN_DIMENSION  = 256
-const MAX_DIMENSION  = 4096
 
 type UploadFn = (formData: FormData) => Promise<{ data: any }>
 
@@ -90,28 +92,8 @@ export function ProfileImageUploader({
       return
     }
 
-    // 3. Resolution check — load into <Image> to read intrinsic dimensions.
-    let dims: { width: number; height: number }
-    try {
-      dims = await readImageDimensions(file)
-    } catch {
-      toast.error('Could not read this image. The file may be corrupted.')
-      return
-    }
-    if (dims.width < MIN_DIMENSION || dims.height < MIN_DIMENSION) {
-      toast.error(
-        `Image is too small — ${dims.width}×${dims.height}. Minimum is ${MIN_DIMENSION}×${MIN_DIMENSION} px.`,
-      )
-      return
-    }
-    if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION) {
-      toast.error(
-        `Image is too large — ${dims.width}×${dims.height}. Maximum is ${MAX_DIMENSION}×${MAX_DIMENSION} px.`,
-      )
-      return
-    }
-
-    // 4. All good — upload.
+    // 3. All good — upload. Resolution is intentionally NOT validated;
+    //    avatars render at fixed CSS sizes so any usable image works.
     setBusy(true)
     const t = toast.loading('Uploading profile photo…')
     try {
@@ -167,30 +149,9 @@ export function ProfileImageUploader({
   )
 }
 
-/** Promise wrapper around HTMLImageElement so we can read intrinsic
- *  width/height of the file the user just picked. */
-function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file)
-    const img = new window.Image()
-    img.onload = () => {
-      const dims = { width: img.naturalWidth, height: img.naturalHeight }
-      URL.revokeObjectURL(url)
-      resolve(dims)
-    }
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('not an image'))
-    }
-    img.src = url
-  })
-}
-
 // Re-export the rule constants so the rest of the app + mobile docs can
 // reference exact values.
 export const PROFILE_IMAGE_RULES = {
   acceptedTypes: ACCEPTED_TYPES,
   maxBytes:      MAX_BYTES,
-  minDimension:  MIN_DIMENSION,
-  maxDimension:  MAX_DIMENSION,
 } as const
