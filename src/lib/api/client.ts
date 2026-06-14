@@ -18,7 +18,34 @@
 import axios, { AxiosError, type AxiosInstance } from 'axios'
 import type { ApiResponse } from '@/types'
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'https://app.vayil.in'
+/* v4.5.27 — default API base to SAME-ORIGIN (empty string) instead of the
+ * stale `https://app.vayil.in` host. Reasoning:
+ *
+ *   - Production (vayil-web.vercel.app) and every Vercel preview deploy
+ *     serve the backend at /api/* on the same host as the frontend.
+ *   - The Next.js `afterFiles` rewrites in next.config.js forward bare
+ *     /customer/*, /vendor/*, /auth/*, etc. to /api/<same> on that same
+ *     host. So a same-origin call from the browser is always correct,
+ *     regardless of which preview URL the deploy is at.
+ *   - `NEXT_PUBLIC_API_URL` is still honoured if explicitly set
+ *     (e.g. for local dev pointing at a remote backend, or for the
+ *     vayil.in custom domain wiring post-launch).
+ *
+ * Previously: preview deploys (which don't inherit production env vars
+ * by default) tried to hit https://app.vayil.in which serves the old
+ * stack — every browser OTP request died with "Failed to send OTP".
+ *
+ * On the server (SSR/RSC), `window` is undefined so we still need a
+ * concrete host. Fall back to the deployment's own URL via Vercel's
+ * VERCEL_URL build-time env var if available, otherwise localhost.
+ */
+const BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined'
+    ? ''                                                       // browser → same-origin
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`                    // SSR on Vercel → self
+      : 'http://localhost:9090')                               // SSR locally
 
 /* ── Token getters ─────────────────────────────────────────────── */
 const getToken    = () => typeof window !== 'undefined' ? localStorage.getItem('vayil_token')     : null
