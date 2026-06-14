@@ -93,26 +93,38 @@ app.use(rateLimit({ windowMs: 60_000, limit: 240 }));
 const legacyForm = multer().none();
 function legacyMultipart(req: Request, res: Response, next: NextFunction) {
   const ct = req.headers['content-type'] || '';
-  if (typeof ct === 'string' && ct.startsWith('multipart/form-data')) {
-    // multer.none() rejects file fields. Routes that explicitly need
-    // file uploads (upload_files) install upload.any() themselves —
-    // by routing them BEFORE this middleware via the legacyVendorRouter /
-    // legacyCustomerRouter instances we avoid the conflict.
-    return legacyForm(req, res, (err) => {
-      if (!err) return next();
-      const code = (err as any).code;
-      const msg  = (err as any).message || '';
-      // Pass through if the handler installs its own multer.
-      if (code === 'LIMIT_UNEXPECTED_FILE') return next();
-      // Empty / truncated bodies (e.g. axios + form-data with no fields)
-      // produce "Unexpected end of form" from busboy. Treat it as an
-      // empty body rather than a 500 — the route's pickId/pickPhone
-      // helpers default to '' anyway.
-      if (msg.includes('Unexpected end of form')) { req.body = {}; return next(); }
-      return next(err);
-    });
-  }
-  next();
+  if (typeof ct !== 'string' || !ct.startsWith('multipart/form-data')) return next();
+
+  // v4.5.28 — Skip file-upload paths entirely. Stacking two multer
+  // instances on the same request doesn't work: the outer multer.none()
+  // calls busboy which starts consuming the stream, then throws
+  // LIMIT_UNEXPECTED_FILE on the first file field; even though we catch
+  // that and call next(), the stream has already been partially read,
+  // so the route's own upload.any() sees a truncated body and busboy
+  // raises "Unexpected end of form" — surfaced to the user as
+  // "Upload failed -- Unexpected end of form".
+  //
+  // Routes that handle files install their own multer; let the request
+  // through untouched so they get the full unparsed stream.
+  if (/\/upload_files(\/|$)/.test(req.path)) return next();
+
+  // multer.none() rejects file fields. Routes that explicitly need
+  // file uploads (upload_files) install upload.any() themselves —
+  // by routing them BEFORE this middleware via the legacyVendorRouter /
+  // legacyCustomerRouter instances we avoid the conflict.
+  return legacyForm(req, res, (err) => {
+    if (!err) return next();
+    const code = (err as any).code;
+    const msg  = (err as any).message || '';
+    // Pass through if the handler installs its own multer.
+    if (code === 'LIMIT_UNEXPECTED_FILE') return next();
+    // Empty / truncated bodies (e.g. axios + form-data with no fields)
+    // produce "Unexpected end of form" from busboy. Treat it as an
+    // empty body rather than a 500 — the route's pickId/pickPhone
+    // helpers default to '' anyway.
+    if (msg.includes('Unexpected end of form')) { req.body = {}; return next(); }
+    return next(err);
+  });
 }
 
 /* ─── Canonical routes — JSON only ────────────────────────────── */
