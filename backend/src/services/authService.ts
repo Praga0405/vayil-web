@@ -50,12 +50,18 @@ export async function verifyOtpAndIssueToken(opts: {
         `This phone is already registered as a ${otherRole}. Sign in with that role instead, or use a different phone for the new ${userType} account.`,
       );
     }
+    // v4.5.27 — supply ph_code on INSERT. Migration 006 added a NOT-NULL
+    // `ph_code` column (country dialing code) to both customers + vendors
+    // for mobile-team schema parity. Without it the INSERT throws
+    // ER_NO_DEFAULT_FOR_FIELD on every signup. Default '91' (India) matches
+    // every other code path that writes these tables.
     const result: any = await exec(
-      `INSERT INTO ${table} (name, phone, mobile, status, created_at)
-       VALUES (:name, :phone, :phone, :status, NOW())`,
+      `INSERT INTO ${table} (name, phone, mobile, ph_code, status, created_at)
+       VALUES (:name, :phone, :phone, :ph_code, :status, NOW())`,
       {
         name: name || defaultName,
         phone,
+        ph_code: '91',
         status: userType === 'vendor' ? 'pending' : 'approved',
       },
     );
