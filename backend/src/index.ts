@@ -143,6 +143,24 @@ app.use('/admin', adminRouter);
  *  prefix, expose those individually here. */
 app.use('/customer', legacyMultipart, legacyCustomerRouter);
 app.use('/vendor',   legacyMultipart, legacyVendorRouter);
+
+/* v4.5.26 — Bare-path public aliases for mobile team. The mobile team
+ * sends a handful of lookup calls without any prefix (no /customer, no
+ * /vendor). All handlers here are public; mounted BEFORE the bare-/
+ * legacyCustomerRouter so its requireAuth() middleware doesn't intercept
+ * these paths first (v4.5.27 fix — was 401 for /getTools etc.).
+ *
+ * Routes exposed:
+ *   GET  /getLanguages, /getTools, /getToolList, /listStatus,
+ *        /get_states_by_country_id, /getSettings
+ *   POST /get_city, /listProofTypes, /upload_files
+ *
+ * Routes deliberately NOT exposed (admin-only mutations — kept behind
+ * the admin gate): /service-category/toggle, /service-subcategory/toggle,
+ *                  /service-tag/toggle, /ProofStatus.
+ */
+app.use('/', legacyMultipart, bareMobileRouter);
+
 // v4.5.2 — the customer Flutter app posts /CustomerupdatePlan as a
 // BARE path (no /customer prefix). Mount the same router under '/' so
 // `legacyCustomerRouter.post('/CustomerupdatePlan')` resolves at both
@@ -152,33 +170,26 @@ app.use('/vendor',   legacyMultipart, legacyVendorRouter);
 // /CustomerupdatePlan still gates it.
 app.use('/', legacyMultipart, legacyCustomerRouter);
 
-/* v4.5.26 — Bare-path public aliases for mobile team. The mobile team
- * sends a handful of lookup calls without any prefix (no /customer, no
- * /vendor). These all map to public handlers already implemented on the
- * legacy routers. Mounted AFTER the prefixed routers so prefixed paths
- * still resolve first.
- *
- * Routes exposed:
- *   GET  /getLanguages, /getTools, /getToolList, /listStatus,
- *        /get_states_by_country_id
- *   POST /get_city, /listProofTypes, /upload_files
- *
- * Routes deliberately NOT exposed (admin-only mutations the mobile team
- * listed but which require admin auth — kept behind the admin gate):
- *   POST /service-category/toggle, /service-subcategory/toggle,
- *        /service-tag/toggle, /ProofStatus
- * The /service-categories, /service-subcategories, /service-tags READ
- * endpoints are already public via the commonRouter mounted at '/'.
- */
-app.use('/', legacyMultipart, bareMobileRouter);
-
 /* ─── Compatibility aliases (auth router already handled these) ─ */
 app.use('/', authRouter);
 
 app.use((_req, _res, next) => next(new ApiError(404, 'Route not found')));
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   const status = err instanceof ApiError ? err.status : 500;
-  const message = err instanceof ApiError ? err.message : 'Internal Server Error';
+  // v4.5.27 — surface the underlying error message for non-ApiError 500s so
+  // mobile-team integration smoke is debuggable. Previously these all came
+  // back as the opaque "Internal Server Error", which hid real causes
+  // (missing DB column, SQL state, JWT signing failure, …). The full stack
+  // is still logged server-side; only the human-readable .message + .code
+  // are exposed to the client. No PII is included.
+  let message: string;
+  if (err instanceof ApiError) {
+    message = err.message;
+  } else {
+    const code = err?.code || err?.errno || err?.sqlState;
+    const base = err?.message || 'Internal Server Error';
+    message = code ? `${base} (${code})` : base;
+  }
   if (status >= 500) console.error(err);
   fail(res, status, message, err?.details || err?.issues);
 });
