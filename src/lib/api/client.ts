@@ -428,18 +428,34 @@ export const legacyMobileApi = {
   paymentUpdate:    (data: Record<string, unknown>) => customerClient.post('/payment_update', data),
 }
 
-/* Normalise uploads regardless of backend response shape. */
+/* Normalise uploads regardless of backend response shape.
+ *
+ * v4.5.28 — handle the case where the body's `.data` already IS the
+ * array of file descriptors. Previously the helper unwrapped `body.data`
+ * once to get the URL array, then kept looking for `.data` / `.files`
+ * ON the array and found nothing, so the caller saw "Server returned
+ * no image URL" on a perfectly valid response. The backend's
+ * /upload_files returns `{ success, message, data: [{url, ...}], urls: [...] }`.
+ */
 export function normalizeUploadedUrls(res: any): string[] {
-  const d = res?.data ?? res ?? {}
+  // Accept either the raw response body or an axios response.
+  const body = res?.data && typeof res.data === 'object' && !Array.isArray(res.data) && res.data.success !== undefined
+    ? res.data       // looks like axios response: { data: { success, ... } }
+    : res ?? {};     // already the body
+
+  // Try every known shape, in priority order.
   const candidates =
-    d.uploadedUrls?.files ??
-    d.data?.uploadedUrls?.files ??
-    d.files ??
-    d.data ??
-    d.result ??
-    []
-  if (!Array.isArray(candidates)) return []
+    body.uploadedUrls?.files ??
+    body.data?.uploadedUrls?.files ??
+    body.files ??
+    (Array.isArray(body.data) ? body.data : null) ??
+    (Array.isArray(body.urls) ? body.urls : null) ??
+    body.data ??
+    body.result ??
+    [];
+
+  if (!Array.isArray(candidates)) return [];
   return candidates
     .map((f: any) => (typeof f === 'string' ? f : f?.url || f?.location || f?.file_url))
-    .filter(Boolean)
+    .filter(Boolean);
 }
