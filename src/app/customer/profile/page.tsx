@@ -25,6 +25,8 @@ export default function CustomerProfilePage() {
   useEffect(() => {
     if (!hydrated) return
     if (!token) { router.replace('/customer/login'); return }
+    // v4.5.28 — role guard: vendors can't fetch /customers/me, send them home.
+    if (user?.type === 'vendor') { router.replace('/vendor/profile'); return }
     setLoading(true)
     Promise.all([customerApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
@@ -46,7 +48,7 @@ export default function CustomerProfilePage() {
         }
       })
       .finally(() => setLoading(false))
-  }, [token])
+  }, [token, hydrated, user?.type])
 
   const save = async () => {
     setSaving(true)

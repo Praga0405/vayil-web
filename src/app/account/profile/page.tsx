@@ -25,6 +25,11 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!hydrated) return
     if (!token) { router.replace('/'); return }
+    // v4.5.28 — role guard. A vendor token can't fetch /customers/me;
+    // bounce vendors to their own profile page. Avoids the cascade of
+    // 403s + "Upload failed -- Access denied for this role" toasts that
+    // happen when a vendor lands here from the wrong nav link.
+    if (user?.type === 'vendor') { router.replace('/vendor/profile'); return }
     setLoading(true)
     Promise.all([customerApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
@@ -46,7 +51,7 @@ export default function ProfilePage() {
         }
       })
       .finally(() => setLoading(false))
-  }, [hydrated, token])
+  }, [hydrated, token, user?.type])
 
   const save = async () => {
     setSaving(true)

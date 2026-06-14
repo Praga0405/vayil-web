@@ -24,6 +24,9 @@ export default function VendorProfilePage() {
   useEffect(() => {
     if (!hydrated) return
     if (!token) { router.replace('/vendor/login'); return }
+    // v4.5.28 — role guard (mirrors /account/profile). A customer token
+    // can't fetch /vendors/me; bounce customers to their profile page.
+    if (user?.type === 'customer') { router.replace('/account/profile'); return }
     Promise.all([vendorApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
         const p = pr.data?.data || pr.data?.result || {}
@@ -37,7 +40,7 @@ export default function VendorProfilePage() {
         const s = sr.data?.data || sr.data?.result || []
         setStates(Array.isArray(s) ? s : [])
       })
-  }, [token])
+  }, [token, hydrated, user?.type])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
