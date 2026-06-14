@@ -66,7 +66,22 @@ const nextConfig = {
       "img-src 'self' data: blob: https://*.razorpay.com https://*.amazonaws.com https://images.unsplash.com https://placehold.co https://vayil.in https://app.vayil.in",
       // Razorpay (api + checkout), 2Factor SMS, our own API, and the WebSocket
       // upgrade Vercel uses for live HMR in preview.
-      "connect-src 'self' https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://2factor.in wss://*.pusher.com",
+      //
+      // v4.5.27 — allow the Vayil API hosts on connect-src. Previously the
+      // CSP only allowed `'self'`, which silently blocked every
+      // cross-origin XHR from a local dev frontend (http://localhost:3000)
+      // to the live API (https://vayil-web.vercel.app). The browser logged
+      // "(blocked:csp)" in the network panel and the LoginModal surfaced
+      // it as the generic "Failed to send OTP" — making it look like a
+      // backend bug when it was actually a CSP gap.
+      //
+      // Hosts allowed:
+      //   - https://vayil-web.vercel.app — current production
+      //   - https://*.vercel.app          — preview deploys (this branch
+      //                                     + future PR previews)
+      //   - https://vayil.in              — post-launch custom domain
+      //   - https://app.vayil.in          — legacy mobile API host
+      "connect-src 'self' https://vayil-web.vercel.app https://*.vercel.app https://vayil.in https://app.vayil.in https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://2factor.in wss://*.pusher.com",
       "frame-src 'self' https://api.razorpay.com https://*.razorpay.com",
       "worker-src 'self' blob:",
       "manifest-src 'self'",
