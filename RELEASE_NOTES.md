@@ -1,5 +1,207 @@
 # Release Notes
 
+## v4.5.31 — Settings response: dual-shape bridge for unmigrated mobile builds (2026-06-15)
+
+### What the mobile team reported
+
+Tester (Venkat, 15-06-2026):
+
+> Previous URL `https://app.vayil.in/customer/getSettings` returned
+> `{ success, categories: [row] }` with `payment_secret`, `payment_key`,
+> `smtp_host`, `smtp_password`, `tax_option`, `site_logo`, `platform_fee`,
+> `payout_fee`. The mobile app's JSON model was built on this shape.
+>
+> New URL `https://vayil-web.vercel.app/customer/getSettings` returns
+> `{ success, message, data: row }` with several fields removed or `null`
+> and new fields (`platform_fee_percentage`, `premium_fee_percentage`,
+> `tds_percentage`, `gst_percentage`, `vendor_rebate_period_days`,
+> `razorpay_key`, `currency`) introduced. Mobile mappings fail, payment
+> + settings flows break.
+>
+> Why are we not able to have one thing consistently?
+
+### Honest accounting of what actually changed
+
+Two changes were rolled together in v4.5.23, and only one of them was
+communicated:
+
+1. **Secrets stripped from the response (deliberate, stays this way).**
+   `app.vayil.in` was shipping `payment_secret` (the Razorpay key
+   secret) and `smtp_password` to every unauthenticated browser hitting
+   `/customer/getSettings`. That's a P0 leak — anyone who could load the
+   page could pull the live secret out of the network tab. v4.5.23
+   added `publicSettingsSafe()` to deny-list every field whose name
+   matches `secret` or `password`. These will not come back; if the
+   mobile app needs to reach Razorpay it does so via the backend with
+   the public `payment_key` / `razorpay_key`.
+
+2. **Envelope shape changed from `categories: [row]` to `data: row`
+   (correct long-term, but shipped without a bridge — that was our miss).**
+   Every other endpoint in the new stack returns `{ success, message,
+   data }`. Standardising the settings endpoint was the right call, but
+   we should have kept the legacy `categories` key alive in parallel so
+   the unmigrated mobile build wouldn't break.
+
+### The fix
+
+`/customer/getSettings` and `/vendor/vendorGetSettings` now emit BOTH
+shapes in one response, pointing at the same payload:
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data":        { "id": 1, "site_name": "Vayil", "razorpay_key": "rzp_test_...", "...": "..." },
+  "categories": [{ "id": 1, "site_name": "Vayil", "razorpay_key": "rzp_test_...", "...": "..." }]
+}
+```
+
+- Existing mobile builds reading `categories[0].payment_key` keep working.
+- New clients read `data.razorpay_key` (the public Razorpay key, same value).
+- `payment_secret`, `smtp_password`, `smtp_username`, and anything
+  matching `/secret|password/i` stay stripped from both arrays — no
+  exposure regression.
+- Mobile team can migrate to `data` at their own pace. Don't drop the
+  `categories` mirror until every shipped build is confirmed updated.
+
+### Field reference for the mobile team
+
+| Field | Status | Notes |
+|---|---|---|
+| `payment_key`        | present  | Razorpay public key. Safe to expose. |
+| `razorpay_key`       | added    | Same value as `payment_key`. Canonical name going forward. |
+| `payment_secret`     | **removed** | Server-only. Never returned again. |
+| `smtp_password`      | **removed** | Server-only. Never returned again. |
+| `smtp_username`      | **removed** | Spear-phishing surface. |
+| `smtp_host`, `smtp_port`, `smtp_encryption`, `smtp_from_email`, `smtp_from_name` | present | Public bits of the mail config. |
+| `tax_option`         | present  | Currently `null` in the new DB seed; populate via admin. |
+| `site_logo`          | present  | Currently `null`; populate via admin. |
+| `platform_fee_percentage`, `premium_fee_percentage`, `tds_percentage`, `gst_percentage`, `vendor_rebate_period_days` | added | New platform pricing fields. |
+| `currency`           | added    | Always `"INR"` today. |
+| `payout_fee`, `platform_fee`, `convenience_fee_percentage` | present | unchanged semantics. |
+
+### Why this happened, in one sentence
+
+The new stack at `vayil-web.vercel.app` is a different codebase from
+the old `app.vayil.in` stack. We rewrote the settings endpoint for the
+v4.5.23 security audit and forgot to ship a compat envelope for the
+mobile build that depended on the old shape. v4.5.31 closes that gap.
+
+---
+
+## v4.5.30 — AccountLayout: block vendor tokens from every `/account/*` route (2026-06-15)
+
+### Why
+
+v4.5.28 added a role guard only on `/account/profile` and
+`/customer/profile`. Vendors landing on `/account/payments`,
+`/account/enquiries`, `/account/notifications`, or `/account/projects`
+still saw the customer "MY ACCOUNT" sidebar — and any data fetch
+(e.g. `GET /customers/me`) returned 403 because the JWT had
+`userType=vendor`. Multiple cascading "Access denied for this role"
+toasts followed.
+
+### Fix
+
+Single role-guard in `src/components/shared/AccountLayout.tsx` covers
+the whole `/account/*` tree:
+
+```
+/account/enquiries     → /vendor-studio/enquiries
+/account/projects      → /vendor-studio/jobs
+/account/notifications → /vendor-studio/dashboard   (no studio notifications page yet)
+/account/payments      → /vendor-studio/earnings
+/account/profile       → /vendor-studio/listing     (Business Profile tab)
+/account/anything-else → /vendor-studio/listing     (catch-all)
+```
+
+The layout returns `null` during the redirect tick so the customer
+sidebar never flashes for a vendor mid-navigation.
+
+### Note on v4.5.29 (reverted)
+
+v4.5.29 attempted to consolidate by turning every `/vendor/*` page into
+a server-side redirect to its `/vendor-studio/*` equivalent. The user
+preferred to keep the `/vendor/*` tree intact and gate access from the
+customer side instead — that commit was reverted (`13d26042`) and v4.5.30
+ships the alternative.
+
+---
+
+## v4.5.28 — Profile-image upload: real file picker, validation, error handling (2026-06-14)
+
+### Reported by user
+
+Clicking the camera icon on the customer / vendor profile cards did
+nothing — no file picker, no upload. Root cause: the camera button was
+a purely cosmetic `<button>` with no `onClick`, no `<input type="file">`,
+and no upload logic on any of the three profile pages.
+
+### What shipped
+
+Five separate fixes landed under v4.5.28 (every one is a real bug the
+release surfaced):
+
+1. **`fff01d1b` — real upload component.** New
+   `src/components/shared/ProfileImageUploader.tsx` wraps Avatar + a
+   camera button + a hidden file input. On click → native picker. On
+   select → client-side validation → upload → save → optimistic
+   preview. Wired into `/account/profile`, `/customer/profile`, and
+   `/vendor/profile`.
+
+2. **`6272debe` — dropped the resolution checks.** Initial release
+   enforced 256×256 min and 4096×4096 max. Per user feedback, only
+   type (JPG / PNG / WebP) and 5 MB size cap are enforced now — phone-
+   camera and screenshot crops should both be allowed.
+
+3. **`ebbf8dea` — "Unexpected end of form" was a multer collision.**
+   The app-level `legacyMultipart` middleware uses `multer().none()`
+   to parse the Flutter app's text-only multipart bodies. When the
+   request DID contain a file (e.g. `/customer/upload_files`),
+   `multer.none()` started consuming the stream, threw
+   `LIMIT_UNEXPECTED_FILE` on the first file field, and we passed
+   through to the route — but the stream was already partially read,
+   so the route's own `upload.any()` saw a truncated body and busboy
+   raised "Unexpected end of form". Fix: `legacyMultipart` now skips
+   any path ending in `/upload_files`.
+
+4. **`cef0cad9` — "Server returned no image URL" was a parser bug.**
+   The backend's `/upload_files` returns `{ success, message, data: [{url, ...}], urls: [...] }`.
+   The `normalizeUploadedUrls()` helper was written for an older
+   `{ uploadedUrls: { files: [...] } }` shape and the `??` chain
+   unwrapped `body.data` once to get the file array, then kept looking
+   for `.data` / `.files` ON the array itself, found nothing, and
+   returned `[]`. Caller surfaced "no image URL" despite the upload
+   succeeding. Helper now detects axios-response vs raw-body up front
+   and adds an explicit array-detection branch.
+
+5. **`64fb552b` — page-level role guard on `/account/profile`,
+   `/customer/profile`, `/vendor/profile`.** A vendor landing on
+   `/account/profile` was hitting `GET /customers/me 403`,
+   `POST /customer/upload_files 403`, `PUT /customers/me 403` — every
+   call rejected because the JWT had `userType=vendor` and the
+   customer router is `requireAuth(['customer'])`. Each profile page
+   now bounces mismatched roles to the role-correct profile. (Replaced
+   by the layout-level guard in v4.5.30.)
+
+### Client + server validation rules
+
+Client (instant, before any network round-trip) and server (catches
+mobile uploads that bypass the React component) both enforce:
+
+| Rule | Value |
+|---|---|
+| Accepted types | `image/jpeg`, `image/png`, `image/webp` |
+| Max file size  | 5 MB |
+| Min/Max resolution | not enforced |
+
+Mobile contract: append `kind=profile` to the multipart body when
+uploading a profile photo. Backend reads it and applies the same caps
+with the same error messages. Service-gallery uploads omit the field
+and skip the cap.
+
+---
+
 ## v4.5.27 — Hotfix: master 500 on every prefixed mobile path + OTP-verify ph_code crash (2026-06-14)
 
 ### Why this release exists
