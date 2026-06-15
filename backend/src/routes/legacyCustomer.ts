@@ -217,17 +217,43 @@ legacyCustomerRouter.post('/get_city', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/* ---- Public settings (deny-listed via publicSettingsSafe) ---- */
+/* ---- Public settings (deny-listed via publicSettingsSafe) ----
+ *
+ * v4.5.31 — dual-shape compatibility bridge.
+ *
+ * The OLD app.vayil.in stack returned `{ success, categories: [row] }`
+ * with secrets exposed. The NEW stack returned `{ success, message, data }`
+ * with secrets stripped (v4.5.23). That envelope change broke the
+ * existing mobile build, which reads `categories[0].payment_key` etc.
+ *
+ * This handler now emits BOTH shapes in a single response:
+ *   - `data: row`           — canonical envelope used by /settings,
+ *                             new mobile builds, the web client
+ *   - `categories: [row]`   — back-compat for the unmigrated mobile
+ *                             app's existing JSON model
+ *
+ * Both arrays/objects point at the same `enriched` payload, so a value
+ * read via either path always agrees. Secrets stay stripped in both
+ * (publicSettingsSafe runs before the row is reused).
+ *
+ * The mobile team can keep its existing decoder for now and migrate to
+ * the canonical shape at their own pace. Eventually we can drop the
+ * `categories` mirror — but only after they confirm every shipped build
+ * has been updated. Don't add a deprecation timer here; coordinate
+ * before removing.
+ */
 async function publicSettingsHandler(_req: any, res: any, next: any) {
   try {
     const row = await one<any>('SELECT * FROM settings LIMIT 1');
     const safe = publicSettingsSafe(row);
+    const enriched = {
+      ...safe,
+      razorpay_key: process.env.RAZORPAY_KEY_ID || null,
+      currency: 'INR',
+    };
     send(res, {
-      data: {
-        ...safe,
-        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
-        currency: 'INR',
-      },
+      data: enriched,            // new shape
+      categories: [enriched],    // legacy mobile shape (v4.5.31 bridge)
     });
   } catch (err) { next(err); }
 }

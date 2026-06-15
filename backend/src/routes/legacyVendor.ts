@@ -196,12 +196,17 @@ async function publicVendorSettingsHandler(_req: any, res: any, next: any) {
   try {
     const row = await one<any>('SELECT * FROM settings LIMIT 1');
     const safe = publicSettingsSafe(row);
+    const enriched = {
+      ...safe,
+      razorpay_key: process.env.RAZORPAY_KEY_ID || null,
+      currency: 'INR',
+    };
+    // v4.5.31 — see legacyCustomer.ts publicSettingsHandler for the
+    // dual-shape rationale. Same bridge here so the vendor mobile app's
+    // existing JSON model keeps working.
     send(res, {
-      data: {
-        ...safe,
-        razorpay_key: process.env.RAZORPAY_KEY_ID || null,
-        currency: 'INR',
-      },
+      data: enriched,
+      categories: [enriched],
     });
   } catch (err) { next(err); }
 }
