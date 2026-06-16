@@ -196,14 +196,18 @@ async function publicVendorSettingsHandler(_req: any, res: any, next: any) {
   try {
     const row = await one<any>('SELECT * FROM settings LIMIT 1');
     const safe = publicSettingsSafe(row);
+    // v4.5.32 — see legacyCustomer.ts publicSettingsHandler for the
+    // env-fallback rationale. Mirrors the same payment_key / razorpay_key
+    // / payment_name / currency aliasing so the vendor mobile app gets
+    // non-null values even on a freshly-seeded prod DB.
+    const razorpayPublicKey = (safe as any).payment_key || process.env.RAZORPAY_KEY_ID || null;
     const enriched = {
       ...safe,
-      razorpay_key: process.env.RAZORPAY_KEY_ID || null,
-      currency: 'INR',
+      payment_key:  razorpayPublicKey,
+      razorpay_key: razorpayPublicKey,
+      payment_name: (safe as any).payment_name || 'Razorpay',
+      currency:     (safe as any).currency || 'INR',
     };
-    // v4.5.31 — see legacyCustomer.ts publicSettingsHandler for the
-    // dual-shape rationale. Same bridge here so the vendor mobile app's
-    // existing JSON model keeps working.
     send(res, {
       data: enriched,
       categories: [enriched],

@@ -246,10 +246,27 @@ async function publicSettingsHandler(_req: any, res: any, next: any) {
   try {
     const row = await one<any>('SELECT * FROM settings LIMIT 1');
     const safe = publicSettingsSafe(row);
+    // v4.5.32 — fill in legacy field aliases from env so the mobile app
+    // gets a non-null value at the old field names even though the new
+    // TiDB Cloud `settings` row has them as NULL (the old MySQL DB at
+    // app.vayil.in had years of admin-populated values; the freshly
+    // seeded prod DB doesn't, yet).
+    //
+    // Without this, the mobile build reads `categories[0].payment_key`
+    // and gets null -> Razorpay checkout init fails -> "payment broken".
+    // The values come from the same env vars the backend already trusts
+    // (RAZORPAY_KEY_ID is the *public* key — never the secret).
+    //
+    // Once the production settings row is populated via admin, the DB
+    // values win automatically (the `||` chain prefers a truthy DB
+    // value over the env fallback).
+    const razorpayPublicKey = (safe as any).payment_key || process.env.RAZORPAY_KEY_ID || null;
     const enriched = {
       ...safe,
-      razorpay_key: process.env.RAZORPAY_KEY_ID || null,
-      currency: 'INR',
+      payment_key:  razorpayPublicKey,                     // legacy alias
+      razorpay_key: razorpayPublicKey,                     // canonical name
+      payment_name: (safe as any).payment_name || 'Razorpay',
+      currency:     (safe as any).currency || 'INR',
     };
     send(res, {
       data: enriched,            // new shape
