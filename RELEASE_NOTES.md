@@ -1,5 +1,139 @@
 # Release Notes
 
+## v4.5.33 — Auto-seed production `settings` row on every deploy (2026-06-15)
+
+### Why
+
+After v4.5.31 fixed the response envelope and v4.5.32 filled the
+critical Razorpay fields from env, the mobile team correctly observed
+that several cosmetic/optional fields were still `null` in the
+response:
+
+```
+site_logo     : null     (was the S3 URL on old app.vayil.in)
+tax_option    : null     (was {"tax_options":[SGST/CGST/IGST]})
+smtp_host     : null     (was "smtp.gmail.com")
+smtp_port     : null
+support_email : null
+site_url      : null
+meta_title    : null
+meta_description : null
+payout_fee    : null
+```
+
+These weren't a code bug — the production TiDB Cloud `settings` row
+was freshly seeded with only the `*_percentage` and
+`vendor_rebate_period_days` columns populated (per migration 001
+`CREATE TABLE` defaults). The old `app.vayil.in` MySQL DB had years of
+admin-populated values; the new one didn't yet.
+
+### Fix
+
+New script `backend/scripts/seed-prod-settings.ts` writes sensible
+defaults into the row, wired into `vercel-build` so it runs after every
+deploy:
+
+```diff
+- "vercel-build": "cd backend && npx tsx scripts/migrate.ts || true && cd .. && next build"
++ "vercel-build": "cd backend && (npx tsx scripts/migrate.ts || true) && (npx tsx scripts/seed-prod-settings.ts || true) && cd .. && next build"
+```
+
+Idempotent and non-destructive — the UPDATE uses
+`COALESCE(<column>, :default)` so any value the admin has already set
+(or any later admin edit via the admin panel) wins over the script's
+default. Safe to re-run on every deploy.
+
+Secrets (`payment_secret`, `smtp_password`) are **not** written —
+they live in Vercel env vars and would be stripped by
+`publicSettingsSafe()` on read anyway.
+
+### Defaults written
+
+| Field | Default |
+|---|---|
+| `site_name` | `"Vayil"` |
+| `site_logo` | `"https://vayil.in/logo.png"` |
+| `site_url` | `"https://vayil.in"` |
+| `support_email` | `"support@vayil.in"` |
+| `meta_title` | `"Vayil — Home Services Marketplace"` |
+| `meta_description` | brand one-liner |
+| `payment_name` | `"Razorpay"` |
+| `payment_key` | env `RAZORPAY_KEY_ID` |
+| `payout_fee` | `"5.00"` |
+| `tax_option` | Indian GST split (SGST 9 / CGST 9 / IGST 18) — matches the old `app.vayil.in` value |
+| `smtp_host` | env `SMTP_HOST` or `"smtp.gmail.com"` |
+| `smtp_port` | env `SMTP_PORT` or `587` |
+| `smtp_encryption` | `"tls"` |
+| `smtp_from_email` | env `SMTP_FROM_EMAIL` or `"noreply@vayil.in"` |
+| `smtp_from_name` | env `SMTP_FROM_NAME` or `"Vayil Support"` |
+
+### Verification
+
+```
+GET https://vayil-web.vercel.app/customer/getSettings
+{
+  "data": {
+    ...
+    "site_logo":     "https://vayil.in/logo.png",
+    "tax_option":    "{\"tax_options\":[{\"tax_name\":\"SGST\",...},...]}",
+    "smtp_host":     "smtp.gmail.com",
+    "support_email": "support@vayil.in",
+    "payout_fee":    "5.00",
+    ...
+  },
+  "categories": [{ ...same fields... }]
+}
+```
+
+The "fields are null" complaint from the 2026-06-15 mobile-tester
+report is now objectively closed.
+
+---
+
+## v4.5.32 — Settings response: env fallback for `payment_key` / `payment_name` (2026-06-15)
+
+### Why
+
+v4.5.31's dual-shape bridge put `categories` back at the top level, but
+the mobile build still couldn't initialise Razorpay because
+`categories[0].payment_key` was returning `null`. Reason: the new TiDB
+production `settings` row had `payment_key` as NULL even though the
+public Razorpay key was sitting in `process.env.RAZORPAY_KEY_ID` (the
+same value the legacy `app.vayil.in` row had populated).
+
+### Fix
+
+Read the row, then fall back to env when the DB column is null. Same
+pattern as the existing `razorpay_key` field. Applied to both
+`/customer/getSettings` and `/vendor/vendorGetSettings`:
+
+```ts
+const razorpayPublicKey = (safe as any).payment_key || process.env.RAZORPAY_KEY_ID || null;
+const enriched = {
+  ...safe,
+  payment_key:  razorpayPublicKey,   // legacy alias
+  razorpay_key: razorpayPublicKey,   // canonical name
+  payment_name: (safe as any).payment_name || 'Razorpay',
+  currency:     (safe as any).currency || 'INR',
+};
+```
+
+The `||` chain prefers a truthy DB value over the env default, so
+once the admin populates the row via the admin panel (or after v4.5.33's
+auto-seed runs), the DB wins automatically. Razorpay's secret
+(`RAZORPAY_KEY_SECRET`) is never exposed — only the public key.
+
+### Verification
+
+```
+"payment_key":  "rzp_test_SGoCvCYBwqFk9G"   ← was null
+"razorpay_key": "rzp_test_SGoCvCYBwqFk9G"
+"payment_name": "Razorpay"                  ← was null
+"currency":     "INR"
+```
+
+---
+
 ## v4.5.31 — Settings response: dual-shape bridge for unmigrated mobile builds (2026-06-15)
 
 ### What the mobile team reported
