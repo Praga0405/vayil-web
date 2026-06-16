@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "vercel-build": "cd backend && npx tsx scripts/migrate.ts || true && cd .. && next build"
+    "vercel-build": "cd backend && (npx tsx scripts/migrate.ts || true) && (npx tsx scripts/seed-prod-settings.ts || true) && cd .. && next build"
   },
   "dependencies": {
     "axios": "^1.7.7",
