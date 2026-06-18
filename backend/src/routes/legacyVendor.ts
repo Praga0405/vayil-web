@@ -192,21 +192,29 @@ legacyVendorRouter.post('/vendorlistReviews', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/* ⚠️ SECURITY-SENSITIVE HANDLER — see legacyCustomer.ts publicSettingsHandler
+ * for the full decision record. This mirror handler intentionally exposes
+ * payment_secret / smtp_password / smtp_username in the unauthenticated
+ * vendor response per the user authorisation on 2026-06-17 (RELEASE_NOTES
+ * v4.5.34). If you revert this, also rotate credentials — they are
+ * compromised the moment this endpoint went live.
+ */
 async function publicVendorSettingsHandler(_req: any, res: any, next: any) {
   try {
-    const row = await one<any>('SELECT * FROM settings LIMIT 1');
-    const safe = publicSettingsSafe(row);
-    // v4.5.32 — see legacyCustomer.ts publicSettingsHandler for the
-    // env-fallback rationale. Mirrors the same payment_key / razorpay_key
-    // / payment_name / currency aliasing so the vendor mobile app gets
-    // non-null values even on a freshly-seeded prod DB.
-    const razorpayPublicKey = (safe as any).payment_key || process.env.RAZORPAY_KEY_ID || null;
-    const enriched = {
-      ...safe,
-      payment_key:  razorpayPublicKey,
-      razorpay_key: razorpayPublicKey,
-      payment_name: (safe as any).payment_name || 'Razorpay',
-      currency:     (safe as any).currency || 'INR',
+    const row: Record<string, any> = (await one<any>('SELECT * FROM settings LIMIT 1')) || {};
+    const razorpayPublicKey = row.payment_key    || process.env.RAZORPAY_KEY_ID     || null;
+    const razorpaySecret    = row.payment_secret || process.env.RAZORPAY_KEY_SECRET || null;
+    const smtpPwd           = row.smtp_password  || process.env.SMTP_PASSWORD       || null;
+    const smtpUser          = row.smtp_username  || process.env.SMTP_USERNAME       || row.smtp_from_email || null;
+    const enriched: Record<string, any> = {
+      ...row,                                                // ⚠ raw row -- NOT denylisted (intentional)
+      payment_key:    razorpayPublicKey,
+      razorpay_key:   razorpayPublicKey,
+      payment_secret: razorpaySecret,                        // ⚠ Razorpay merchant secret — exposed by design
+      payment_name:   row.payment_name || 'Razorpay',
+      smtp_username:  smtpUser,                              // ⚠ mail username — exposed by design
+      smtp_password:  smtpPwd,                               // ⚠ mail password — exposed by design
+      currency:       row.currency || 'INR',
     };
     send(res, {
       data: enriched,

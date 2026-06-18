@@ -217,60 +217,62 @@ legacyCustomerRouter.post('/get_city', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/* ---- Public settings (deny-listed via publicSettingsSafe) ----
+/* ---- Public settings — v4.5.34 ----
  *
- * v4.5.31 — dual-shape compatibility bridge.
+ * ⚠️ SECURITY-SENSITIVE HANDLER — READ BEFORE EDITING ⚠️
  *
- * The OLD app.vayil.in stack returned `{ success, categories: [row] }`
- * with secrets exposed. The NEW stack returned `{ success, message, data }`
- * with secrets stripped (v4.5.23). That envelope change broke the
- * existing mobile build, which reads `categories[0].payment_key` etc.
+ * This endpoint INTENTIONALLY exposes `payment_secret`, `smtp_password`,
+ * and `smtp_username` in the public, unauthenticated response. The v4.5.23
+ * security audit had stripped these via `publicSettingsSafe()`; the user
+ * (Praga) re-authorised re-exposure on 2026-06-17 to match the legacy
+ * `app.vayil.in` Postman collection contract that the production mobile
+ * builds depend on. See:
  *
- * This handler now emits BOTH shapes in a single response:
- *   - `data: row`           — canonical envelope used by /settings,
- *                             new mobile builds, the web client
- *   - `categories: [row]`   — back-compat for the unmigrated mobile
- *                             app's existing JSON model
+ *   - RELEASE_NOTES.md v4.5.34 (this commit) — full decision record
+ *   - memory/vayil-sensitive-fields.md       — updated policy
  *
- * Both arrays/objects point at the same `enriched` payload, so a value
- * read via either path always agrees. Secrets stay stripped in both
- * (publicSettingsSafe runs before the row is reused).
+ * The authorisation was: "Lets go with option 3 and full revert it and
+ * have the exact same as the collection." — chat 2026-06-17, after the
+ * risks were spelled out (Razorpay automated-scanner revocation, SMTP
+ * reputation damage, permanent-leak-via-archives, no cyber-insurance
+ * coverage). The user accepted the trade and asked to ship.
  *
- * The mobile team can keep its existing decoder for now and migrate to
- * the canonical shape at their own pace. Eventually we can drop the
- * `categories` mirror — but only after they confirm every shipped build
- * has been updated. Don't add a deprecation timer here; coordinate
- * before removing.
+ * If you are reverting this and putting publicSettingsSafe() back in
+ * place, ALSO rotate the credentials immediately — they are considered
+ * compromised the moment this endpoint went live (Vercel commit
+ * timestamp). Steps:
+ *   1. Generate new RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET in Razorpay
+ *      dashboard; update Vercel env; redeploy.
+ *   2. Generate new SMTP password; update Vercel env; coordinate with
+ *      mail provider.
+ *   3. Force-expire any cached `/customer/getSettings` response (Vercel
+ *      edge cache, Cloudflare, etc).
+ *
+ * Dual-shape envelope kept (data + categories) from v4.5.31 so both old
+ * and new clients parse the same payload.
  */
 async function publicSettingsHandler(_req: any, res: any, next: any) {
   try {
-    const row = await one<any>('SELECT * FROM settings LIMIT 1');
-    const safe = publicSettingsSafe(row);
-    // v4.5.32 — fill in legacy field aliases from env so the mobile app
-    // gets a non-null value at the old field names even though the new
-    // TiDB Cloud `settings` row has them as NULL (the old MySQL DB at
-    // app.vayil.in had years of admin-populated values; the freshly
-    // seeded prod DB doesn't, yet).
-    //
-    // Without this, the mobile build reads `categories[0].payment_key`
-    // and gets null -> Razorpay checkout init fails -> "payment broken".
-    // The values come from the same env vars the backend already trusts
-    // (RAZORPAY_KEY_ID is the *public* key — never the secret).
-    //
-    // Once the production settings row is populated via admin, the DB
-    // values win automatically (the `||` chain prefers a truthy DB
-    // value over the env fallback).
-    const razorpayPublicKey = (safe as any).payment_key || process.env.RAZORPAY_KEY_ID || null;
-    const enriched = {
-      ...safe,
-      payment_key:  razorpayPublicKey,                     // legacy alias
-      razorpay_key: razorpayPublicKey,                     // canonical name
-      payment_name: (safe as any).payment_name || 'Razorpay',
-      currency:     (safe as any).currency || 'INR',
+    const row: Record<string, any> = (await one<any>('SELECT * FROM settings LIMIT 1')) || {};
+    // Env fallbacks for fields that may be NULL in the freshly-seeded
+    // TiDB row. DB column wins if set (`||` prefers truthy DB value).
+    const razorpayPublicKey = row.payment_key    || process.env.RAZORPAY_KEY_ID     || null;
+    const razorpaySecret    = row.payment_secret || process.env.RAZORPAY_KEY_SECRET || null;
+    const smtpPwd           = row.smtp_password  || process.env.SMTP_PASSWORD       || null;
+    const smtpUser          = row.smtp_username  || process.env.SMTP_USERNAME       || row.smtp_from_email || null;
+    const enriched: Record<string, any> = {
+      ...row,                                                // ⚠ raw row -- NOT denylisted (intentional, see header)
+      payment_key:    razorpayPublicKey,                     // legacy alias
+      razorpay_key:   razorpayPublicKey,                     // canonical name
+      payment_secret: razorpaySecret,                        // ⚠ Razorpay merchant secret — exposed by design
+      payment_name:   row.payment_name || 'Razorpay',
+      smtp_username:  smtpUser,                              // ⚠ mail server username — exposed by design
+      smtp_password:  smtpPwd,                               // ⚠ mail server password — exposed by design
+      currency:       row.currency || 'INR',
     };
     send(res, {
-      data: enriched,            // new shape
-      categories: [enriched],    // legacy mobile shape (v4.5.31 bridge)
+      data: enriched,            // new envelope
+      categories: [enriched],    // legacy mobile envelope (v4.5.31 bridge)
     });
   } catch (err) { next(err); }
 }
