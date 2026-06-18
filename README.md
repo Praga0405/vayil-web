@@ -38,6 +38,8 @@ This repo contains both deployable surfaces in one place:
 ├── docs/                    ← Reference + internal contracts
 │   ├── API_CANONICAL.md          # REST surface the web app uses
 │   ├── API_MOBILE_LEGACY.md      # /customer/* + /vendor/* shim contract
+│   ├── VAYIL_API_COMPAT_AUDIT.md # v4.5.35 — proactive endpoint-by-endpoint audit (mobile ↔ backend)
+│   ├── MOBILE_MIGRATION_v4.5.md  # Mobile team migration guide (app.vayil.in → vayil-web.vercel.app)
 │   ├── PAYMENT_FLOW.md           # Escrow lifecycle + Razorpay protocol
 │   ├── DB_SCHEMA.md              # Per-table column reference
 │   ├── DEPLOYMENT.md             # Render + Vercel + Razorpay + S3/R2/GCS
