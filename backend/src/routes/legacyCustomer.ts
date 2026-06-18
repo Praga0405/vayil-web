@@ -148,8 +148,15 @@ legacyCustomerRouter.post('/vendorInfo', async (req, res, next) => {
   try {
     const vendorId = pickId(req.body, 'vendor_id', 'vendorId', 'id');
     if (!vendorId) throw new ApiError(400, 'vendor_id required');
-    const out = await customerSvc.getVendorWithListings(vendorId);
-    send(res, { data: out });
+    const out: any = await customerSvc.getVendorWithListings(vendorId);
+    // v4.5.35 — mobile bridge: customer's vendor-profile page reads
+    // category, service, review at top level (NOT inside data).
+    send(res, {
+      data:     out,
+      category: out?.categories ?? out?.category ?? [],
+      service:  out?.services   ?? out?.listings ?? out?.service ?? [],
+      review:   out?.reviews    ?? out?.review   ?? [],
+    });
   } catch (err) { next(err); }
 });
 
@@ -354,8 +361,12 @@ legacyCustomerRouter.post('/sendEnquiry', async (req: AuthRequest, res, next) =>
 
 legacyCustomerRouter.post('/enquiryList', async (req: AuthRequest, res, next) => {
   try {
-    const enquiries = await enquirySvc.listCustomerEnquiries(req.user!.id);
-    send(res, { data: enquiries });
+    const enquiries: any[] = await enquirySvc.listCustomerEnquiries(req.user!.id);
+    // v4.5.35 — mobile bridge: Quotelist_Ongoinglist_Model reads `ordersteps`
+    // nested inside each order. For the top-level `ordersteps` field that
+    // some screens reference, expose a flat aggregate.
+    const ordersteps = enquiries.flatMap((e: any) => Array.isArray(e?.ordersteps) ? e.ordersteps : []);
+    send(res, { data: enquiries, ordersteps });
   } catch (err) { next(err); }
 });
 
@@ -448,8 +459,17 @@ legacyCustomerRouter.post('/orderDetails', async (req: AuthRequest, res, next) =
     const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const out = await projectSvc.getProject(orderId);
-    send(res, { data: out });
+    const out: any = await projectSvc.getProject(orderId);
+    // v4.5.35 — mobile bridge (same as vendorOrderDetails):
+    // workflow timeline reads `steps`, header reads `ordersMain`, plan reads `order_plan`.
+    const project = out?.project ?? {};
+    const plan    = out?.plan    ?? [];
+    send(res, {
+      data:       out,
+      steps:      plan,
+      ordersMain: project,
+      order_plan: plan,
+    });
   } catch (err) { next(err); }
 });
 
@@ -457,8 +477,26 @@ legacyCustomerRouter.post('/getPaymentDetails', async (req: AuthRequest, res, ne
   try {
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
-    const out = await paymentSvc.getOrderPaymentSummary(req.user!.id, orderId);
-    send(res, { data: out });
+    const out: any = await paymentSvc.getOrderPaymentSummary(req.user!.id, orderId);
+    // v4.5.35 — mobile bridge (mirrors vendorPaymentSummary):
+    // Customer_Payment_Details_Model reads the same 9 top-level keys.
+    const intents: any[] = out?.intents ?? [];
+    const servicePayment  = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('service') || !i.purpose);
+    const materialPayment = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('material'));
+    const totalMaterialAmount = materialPayment.reduce((s, i) => s + Number(i.amount), 0);
+    const totalPlanAmount     = servicePayment.reduce((s, i) => s + Number(i.amount), 0);
+    const base = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://vayil-web.vercel.app'}/invoice`;
+    send(res, {
+      data:                out,
+      TotalAmount:         Number(out?.total ?? 0),
+      TotalPaidAmount:     Number(out?.paid ?? 0),
+      TotalMaterialAmount: totalMaterialAmount,
+      TotalPlanAmount:     totalPlanAmount,
+      servicePayment,
+      materialPayment,
+      invoice_url:         `${base}/`,
+      https:               base.startsWith('https'),
+    });
   } catch (err) { next(err); }
 });
 
@@ -592,8 +630,26 @@ legacyCustomerRouter.post('/getPlan', async (req: AuthRequest, res, next) => {
     const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const out = await projectSvc.getProject(orderId);
-    send(res, { data: out });
+    const out: any = await projectSvc.getProject(orderId);
+    // v4.5.35 — mobile bridge: Customer_Get_Plan_Model reads
+    // steps, ordermaterials, ordersMain, review at top level.
+    const project = out?.project ?? {};
+    const plan    = out?.plan    ?? [];
+    const materials = await query<any>(
+      `SELECT * FROM order_materials WHERE order_id = :id ORDER BY material_id ASC`,
+      { id: orderId },
+    ).catch(() => []);
+    const reviews = await query<any>(
+      `SELECT * FROM customer_reviews WHERE order_id = :id ORDER BY review_id ASC`,
+      { id: orderId },
+    ).catch(() => []);
+    send(res, {
+      data:           out,
+      steps:          plan,
+      ordermaterials: materials,
+      ordersMain:     project,
+      review:         reviews,
+    });
   } catch (err) { next(err); }
 });
 
@@ -609,5 +665,21 @@ legacyCustomerRouter.post('/CustomerupdatePlan', async (req: AuthRequest, res, n
       ? await projectSvc.setPlanStatusByCustomer(orderId, 'reject', req.body?.reason)
       : await projectSvc.setPlanStatusByCustomer(orderId, 'approve');
     send(res, { message: `Plan ${out.status}`, data: out });
+  } catch (err) { next(err); }
+});
+
+/* ─────────────────────────────────────────────────────────────
+ *  v4.5.35 — Phase 2 missing customer endpoints from old backend.
+ * ───────────────────────────────────────────────────────────── */
+
+/** POST /customer/listReviews — customer browses reviews for a vendor.
+ *  Body: { vendor_id }. Public-style (vendor_id from body, not token)
+ *  but kept under customer auth since the screen lives inside login. */
+legacyCustomerRouter.post('/listReviews', async (req: AuthRequest, res, next) => {
+  try {
+    const vendorId = pickId(req.body, 'vendor_id', 'vendorId', 'id');
+    if (!vendorId) throw new ApiError(400, 'vendor_id required');
+    const data = await reviewSvc.listVendorReviews(vendorId);
+    send(res, { data });
   } catch (err) { next(err); }
 });
