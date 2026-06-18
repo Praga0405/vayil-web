@@ -1,5 +1,92 @@
 # Release Notes
 
+## v4.5.34 — Settings: re-expose `payment_secret` / `smtp_password` / `smtp_username` (AUTHORISED, 2026-06-17)
+
+### ⚠️ Security-relevant change — read this section before reverting
+
+This release **deliberately re-exposes** three credential-bearing fields in the
+public `/customer/getSettings` and `/vendor/vendorGetSettings` responses, which
+v4.5.23's security audit had stripped:
+
+- `payment_secret` — Razorpay merchant secret
+- `smtp_password` — Mail server password
+- `smtp_username` — Mail server username
+
+The change was authorised by the user (Praga) in chat on 2026-06-17 after
+multiple rounds of explicitly spelling out the trade-off:
+
+> "Lets go with option 3 and full revert it and have the exact same as the
+> collection."
+
+Quoted in full so the decision is auditable. The user owns the codebase,
+the Razorpay account, the mail domain, and the resulting risk; this commit
+records their decision.
+
+### What the user was warned about, in writing, before authorising
+
+1. **Razorpay merchant-account revocation risk.** Razorpay runs automated
+   scanners for exposed merchant secrets and emails offenders a 24–72h
+   deadline to rotate before suspending the account.
+2. **SMTP reputation damage.** Anyone with the credentials can send mail
+   from `@vayil.in`. Gmail/Outlook will flag the domain. Real transactional
+   mail (OTPs, payouts) goes to spam. Recovery takes 6+ months.
+3. **Permanent leakability.** Once the response is captured by any crawler /
+   archive / customer screenshot, the leaked values stay searchable forever
+   even if we re-strip later.
+4. **Insurance + compliance.** Cyber insurance explicitly excludes
+   self-inflicted leaks. Instant audit failure for PCI-DSS / SOC2 / ISO27001.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `backend/src/routes/legacyCustomer.ts` — `publicSettingsHandler` | No longer calls `publicSettingsSafe(row)`. Reads raw `settings` row. Explicitly sets `payment_secret`, `smtp_password`, `smtp_username` (with env-var fallback when DB column is NULL). |
+| `backend/src/routes/legacyVendor.ts` — `publicVendorSettingsHandler` | Same change, mirrored. |
+
+### What did NOT change
+
+- `publicSettingsSafe()` helper itself in `backend/src/routes/common.ts` is
+  unchanged and still available for any other endpoint that needs deny-list
+  filtering.
+- Canonical `/settings` on `commonRouter` (which is auth-gated downstream)
+  is unchanged.
+- All other endpoints in the codebase that touch the settings row are
+  unchanged.
+- Dual-shape envelope (`data` + `categories`) from v4.5.31 is preserved —
+  both envelopes now carry the secrets.
+
+### Verification
+
+```
+GET https://vayil-web.vercel.app/customer/getSettings  →  200
+{
+  "data":        { "payment_secret": "NW2TDytMJG9cxOXhDHHN3sW2", "smtp_password": null, "smtp_username": "noreply@vayil.in", "payment_key": "rzp_test_SGoCvCYBwqFk9G", ... },
+  "categories": [{ "payment_secret": "NW2TDytMJG9cxOXhDHHN3sW2", "smtp_password": null, "smtp_username": "noreply@vayil.in", "payment_key": "rzp_test_SGoCvCYBwqFk9G", ... }]
+}
+```
+
+### Rollback plan (if anyone reverts this commit later)
+
+The exposed credentials are considered compromised from the v4.5.34 deploy
+timestamp forward. Reverting in code is necessary but NOT sufficient — you
+must also rotate credentials:
+
+1. Revert commit `86b2b3d5` (put `publicSettingsSafe()` back in both
+   handlers).
+2. **Rotate Razorpay keys** in the Razorpay dashboard → generate new
+   `RAZORPAY_KEY_ID` + `RAZORPAY_KEY_SECRET` → update Vercel env → redeploy.
+3. **Rotate SMTP password** with the mail provider → update Vercel env →
+   coordinate with mail provider.
+4. **Force-expire any cached `/customer/getSettings` response** at the
+   Vercel edge / any CDN in front.
+5. **Audit Razorpay payment history** for unauthorised activity since the
+   v4.5.34 deploy.
+
+This rollback path is documented again in code as a comment block at the
+top of `publicSettingsHandler`.
+
+---
+
 ## v4.5.33 — Auto-seed production `settings` row on every deploy (2026-06-15)
 
 ### Why
