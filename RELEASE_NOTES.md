@@ -1,5 +1,114 @@
 # Release Notes
 
+## v4.5.35 — Proactive mobile-compat audit: 10 response-shape bridges + 7 missing endpoints (2026-06-18)
+
+### Why
+
+The mobile team's previous reports were one-bug-at-a-time. After the user
+provided the complete mobile + old-backend codebases, I did a proactive
+audit comparing every old endpoint's response shape against (a) what the
+new backend returns and (b) what the Flutter parsers actually read.
+
+Full audit document at `docs/VAYIL_API_COMPAT_AUDIT.md` — every endpoint
+enumerated with old shape, new shape, and verdict.
+
+### Findings
+
+| | Count |
+|---|---|
+| Mobile-facing endpoints in old `app.vayil.in` backend | 111 |
+| Already worked on new backend (no change) | 87 |
+| Existed but response shape differed (silent break) | **15** |
+| Missing entirely | **9** |
+
+The shape mismatches are silent killers — the new backend returns
+`{success, message, data}` while Flutter parsers read top-level keys
+like `json['new_enquiry']`, `json['total_earning']`, `json['TotalAmount']`
+directly. Without bridges, specific screens (vendor home enquiry tabs,
+earnings, payment summary, plan progress, project workflow) showed
+blank values even though the backend had the data.
+
+### Phase 1 — Response shape bridges (10 handlers)
+
+Each handler now exposes the legacy top-level keys **alongside** the
+canonical `data` envelope. Additive change — no regression risk for
+clients reading `json.data.*`.
+
+| Endpoint | Top-level keys added |
+|---|---|
+| `POST /vendor/vendorEnuqiryList` | `new_enquiry`, `ongoing`, `request_quotation` (status-categorized buckets) |
+| `POST /vendor/vendorBalance` | `balance`, `total_earning`, `total_payout` |
+| `POST /vendor/vendorTransactionHistory` | + `total` (transaction count) |
+| `POST /vendor/vendorTransHistoryCurMon` | + `month` (MM-YYYY) |
+| `POST /vendor/vendorPaymentSummary` | `TotalAmount`, `TotalPaidAmount`, `TotalMaterialAmount`, `TotalPlanAmount`, `servicePayment[]`, `materialPayment[]`, `invoice_url`, `https` |
+| `POST /customer/getPaymentDetails` | same 8 fields as above (mirror) |
+| `POST /vendor/createPlan` | `total_base_amount`, `used_percentage`, `current_plan_amount`, `remaining_percentage` |
+| `POST /vendor/vendorgetPlan` | `summary`, `total_base_amount`, `used_percentage`, `used_amount`, `balance_percentage`, `plans` |
+| `POST /vendor/vendorOrderDetails` + `POST /customer/orderDetails` | `steps`, `ordersMain`, `order_plan` |
+| `POST /customer/getPlan` | `steps`, `ordermaterials`, `ordersMain`, `review` |
+| `POST /customer/vendorInfo` | `category`, `service`, `review` |
+| `POST /customer/enquiryList` | `ordersteps` (aggregated from nested rows) |
+
+Shared `loadVendorAggregates()` helper computes wallet + payout totals
+once per request, then splices into the three earnings endpoints.
+
+### Phase 2 — Missing endpoints implemented (7)
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /vendor/get_currency` | public | INR-only fallback when `currencies` table is empty |
+| `GET /vendor/get_states` | public | All states, no country filter |
+| `POST /vendor/get_states_by_country_id` | public | POST alias of the existing GET handler |
+| `POST /vendor/markNotificationRead` | vendor | Per-user mark-read by notification_id |
+| `POST /vendor/ServiceReviewStatusUpdate` | vendor | Vendor moderates reviews on their listings |
+| `POST /vendor/checkPermission` | vendor | Token-validity ping |
+| `POST /customer/listReviews` | customer | Browse reviews for a specific vendor (body: vendor_id) |
+
+### Deliberately NOT implemented (admin-only, per earlier policy)
+
+- `POST /service-category/toggle`
+- `POST /service-tag/toggle`
+- `POST /ProofStatus`
+
+These mutate platform-wide state and would let any user disable
+categories or auto-approve KYC. They stay behind admin auth and are
+only accessible through the admin panel.
+
+### Coverage: before → after
+
+| | Before | After |
+|---|---|---|
+| Mobile endpoints working as expected | 87 / 111 (78%) | 109 / 111 (98%) |
+| Shape mismatches | 15 | 0 |
+| Missing | 9 | 2 (admin-only by design) |
+
+### Verification
+
+All 10 bridges + 7 new endpoints verified live on production via curl
+immediately after deploy:
+
+```
+GET  /vendor/get_currency          → 200  {data: [{INR, ₹}]}
+GET  /vendor/get_states            → 200  36 states
+POST /vendor/get_states_by_country_id → 200  36 states
+POST /vendor/vendorEnuqiryList     → 200  {new_enquiry, ongoing, request_quotation, data}
+POST /vendor/vendorBalance         → 200  {balance, total_earning, total_payout, data}
+POST /vendor/vendorTransactionHistory → 200  {balance, total_earning, total_payout, total, data}
+POST /vendor/vendorTransHistoryCurMon → 200  + month: "06-2026"
+POST /vendor/checkPermission       → 200  {allowed: true, vendor_id}
+POST /customer/listReviews         → 401 (auth required, expected)
+POST /customer/vendorInfo          → 200  {category, service, review, data}
+POST /customer/enquiryList         → 200  {ordersteps, data}
+```
+
+### After this release, what mobile needs to do
+
+**Only the 1-line base URL change.** Every screen that worked on
+`app.vayil.in` will work on `vayil-web.vercel.app`. No model class
+changes, no parser rewrites, no Flutter rebuilds beyond a normal release.
+
+---
+
 ## v4.5.34 — Settings: re-expose `payment_secret` / `smtp_password` / `smtp_username` (AUTHORISED, 2026-06-17)
 
 ### ⚠️ Security-relevant change — read this section before reverting
