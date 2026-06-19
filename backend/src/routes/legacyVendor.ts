@@ -377,30 +377,64 @@ legacyVendorRouter.post('/ServiceDetails', async (req: AuthRequest, res, next) =
 });
 
 /* ───── Enquiries ───── */
-/* v4.5.35 — mobile compat bridge.
- * Mobile parser at vendor-app/lib/Models/vendor_New_Enquire_List.dart reads
- * json['new_enquiry'], json['ongoing'], json['request_quotation'] at TOP
- * LEVEL of the response. Without these buckets the vendor home screen
- * shows three empty tabs. We categorize by enquiry.status:
- *   new_enquiry       — anything still un-handled (not accepted/rejected/quoted)
- *   ongoing           — accepted/in_progress
- *   request_quotation — quote-related statuses (revision, change request)
+/* v4.5.36 — mobile compat bridge, now using the EXACT categorization
+ * logic from the old app.vayil.in vendorEnuqiryList handler (verified
+ * against the April 12 source archive). The original logic is:
+ *
+ *   request_quotation = enquiry has NO matching order
+ *   new_enquiry       = enquiry has an order whose order_step_logs.step === 1
+ *   ongoing           = enquiry has an order whose order_step_logs.step === 2
+ *
+ * Each item carries `quotations` + `orders` arrays nested inside so the
+ * mobile UI can render the timeline / quote chips. v4.5.35's initial
+ * status-string heuristic was wrong; this replaces it with the real query.
  */
 legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next) => {
   try {
-    const data = await enquirySvc.listVendorEnquiries(req.user!.id);
-    const arr: any[] = Array.isArray(data) ? data : [];
-    const ONGOING_STATUSES = new Set(['accepted', 'ongoing', 'in_progress', 'quote_accepted']);
-    const QUOTE_STATUSES   = new Set(['quote_requested', 'quotation_requested', 'revision_requested', 'quote_sent']);
-    const isOngoing  = (e: any) => ONGOING_STATUSES.has(String(e?.status ?? '').toLowerCase());
-    const isQuoteReq = (e: any) => QUOTE_STATUSES.has(String(e?.status ?? '').toLowerCase());
-    const isNew      = (e: any) => !isOngoing(e) && !isQuoteReq(e) && String(e?.status ?? '').toLowerCase() !== 'rejected';
-    send(res, {
-      data,
-      new_enquiry:       arr.filter(isNew),
-      ongoing:           arr.filter(isOngoing),
-      request_quotation: arr.filter(isQuoteReq),
-    });
+    const vendorId = req.user!.id;
+    const enquiries: any[] = await enquirySvc.listVendorEnquiries(vendorId);
+    if (!enquiries.length) {
+      return send(res, { data: enquiries, new_enquiry: [], ongoing: [], request_quotation: [] });
+    }
+    const enquiryIds = enquiries.map((e) => e.enquiry_id).filter(Boolean);
+    const [orders, quotations, stepLogs, plans] = await Promise.all([
+      query<any>(`SELECT * FROM orders WHERE enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
+      query<any>(`SELECT * FROM enquiry_quotations WHERE enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
+      query<any>(`SELECT * FROM order_step_logs WHERE order_id IN (
+                    SELECT id FROM orders WHERE enquiry_id IN (:ids)
+                  )`, { ids: enquiryIds }).catch(() => []),
+      query<any>(`SELECT * FROM order_plan WHERE order_id IN (
+                    SELECT id FROM orders WHERE enquiry_id IN (:ids)
+                  )`, { ids: enquiryIds }).catch(() => []),
+    ]);
+    const new_enquiry: any[] = [];
+    const ongoing: any[] = [];
+    const request_quotation: any[] = [];
+    for (const enquiry of enquiries) {
+      const enquiryOrders   = orders.filter((o: any)     => o.enquiry_id === enquiry.enquiry_id);
+      const enquiryQuotes   = quotations.filter((q: any) => q.enquiry_id === enquiry.enquiry_id);
+      if (enquiryOrders.length === 0) {
+        request_quotation.push({ ...enquiry, quotations: enquiryQuotes, orders: [] });
+        continue;
+      }
+      for (const order of enquiryOrders) {
+        const stepLog = stepLogs.find((s: any) => s.order_id === order.id);
+        const item = {
+          ...enquiry,
+          quotations: enquiryQuotes,
+          orders: [{
+            ...order,
+            plans:           plans.filter((p: any)    => p.order_id === order.id),
+            order_step_logs: stepLogs.filter((s: any) => s.order_id === order.id),
+          }],
+        };
+        if (stepLog?.step === 1)      new_enquiry.push(item);
+        else if (stepLog?.step === 2) ongoing.push(item);
+        // step 3+ (completed) intentionally falls into none of the three
+        // visible buckets — matches old behaviour.
+      }
+    }
+    send(res, { data: enquiries, new_enquiry, ongoing, request_quotation });
   } catch (err) { next(err); }
 });
 
@@ -658,17 +692,22 @@ legacyVendorRouter.post('/vendorPaymentSummary', async (req: AuthRequest, res, n
     const materialPayment = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('material'));
     const totalMaterialAmount = materialPayment.reduce((s, i) => s + Number(i.amount), 0);
     const totalPlanAmount     = servicePayment.reduce((s, i) => s + Number(i.amount), 0);
-    const base = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://vayil-web.vercel.app'}/invoice`;
+    // v4.5.36 — invoice_url matches the OLD app.vayil.in literal exactly.
+    // Mobile concatenates `${invoiceUrl}${order_id}/${intent_id}` to open
+    // the invoice in a webview. We preserve the string so existing builds
+    // get the same URL they did pre-migration. Override via env if you
+    // ever host the invoice page somewhere new.
+    const invoiceBase = process.env.INVOICE_URL_BASE || 'https://app.vayil.in/admin/invoice/';
     send(res, {
       data: { intents, held, released },
-      TotalAmount:         totalAmount,
-      TotalPaidAmount:     released,
-      TotalMaterialAmount: totalMaterialAmount,
-      TotalPlanAmount:     totalPlanAmount,
+      TotalAmount:         totalAmount.toFixed(2),
+      TotalPaidAmount:     released.toFixed(2),
+      TotalMaterialAmount: totalMaterialAmount.toFixed(2),
+      TotalPlanAmount:     totalPlanAmount.toFixed(2),
       servicePayment,
       materialPayment,
-      invoice_url:         `${base}/`,
-      https:               base.startsWith('https'),
+      invoice_url:         invoiceBase,
+      https:               invoiceBase.startsWith('https'),
     });
   } catch (err) { next(err); }
 });

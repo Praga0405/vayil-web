@@ -485,17 +485,18 @@ legacyCustomerRouter.post('/getPaymentDetails', async (req: AuthRequest, res, ne
     const materialPayment = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('material'));
     const totalMaterialAmount = materialPayment.reduce((s, i) => s + Number(i.amount), 0);
     const totalPlanAmount     = servicePayment.reduce((s, i) => s + Number(i.amount), 0);
-    const base = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://vayil-web.vercel.app'}/invoice`;
+    // v4.5.36 — see legacyVendor.ts vendorPaymentSummary for URL rationale.
+    const invoiceBase = process.env.INVOICE_URL_BASE || 'https://app.vayil.in/admin/invoice/';
     send(res, {
       data:                out,
-      TotalAmount:         Number(out?.total ?? 0),
-      TotalPaidAmount:     Number(out?.paid ?? 0),
-      TotalMaterialAmount: totalMaterialAmount,
-      TotalPlanAmount:     totalPlanAmount,
+      TotalAmount:         Number(out?.total ?? 0).toFixed(2),
+      TotalPaidAmount:     Number(out?.paid ?? 0).toFixed(2),
+      TotalMaterialAmount: totalMaterialAmount.toFixed(2),
+      TotalPlanAmount:     totalPlanAmount.toFixed(2),
       servicePayment,
       materialPayment,
-      invoice_url:         `${base}/`,
-      https:               base.startsWith('https'),
+      invoice_url:         invoiceBase,
+      https:               invoiceBase.startsWith('https'),
     });
   } catch (err) { next(err); }
 });
