@@ -121,13 +121,133 @@ legacyCustomerRouter.post('/resendcustomerOTP', async (req, res, next) => {
  *  wall below. None of these handlers read req.user.
  * ───────────────────────────────────────────────────────────── */
 
-/* ---- Public service browsing ---- */
-legacyCustomerRouter.post('/ServiceList', async (_req, res, next) => {
+/* ---- Public service browsing ----
+ *
+ * v4.5.37 — port of the OLD app.vayil.in ServiceList handler.
+ *
+ * Pre-v4.5.37 this endpoint returned a list of category masters
+ * (category_id, name, icon) — but the mobile Service_List_Model.dart
+ * parses VENDOR SERVICE LISTINGS (id, vendor_id, service_title,
+ * service_image, company_name, rating, etc.). The endpoint name is
+ * misleading: it's actually "list of vendor offerings, filtered by
+ * city / search / category", not "list of categories."
+ *
+ * Old SQL (Vayil-Backend-main 12 April src/Controllers/Customer.ts):
+ *   SELECT vs.*, v.company_name,
+ *          IFNULL((SELECT ROUND(AVG(cr.rating), 1) FROM customer_review cr
+ *                   WHERE cr.vendor_id = v.id AND cr.status = 1), 0) AS rating,
+ *          (SELECT COUNT(*) FROM customer_review cr
+ *            WHERE cr.vendor_id = v.id AND cr.status = 1) AS review_count,
+ *          sc.name AS category_name
+ *   FROM vendor_services vs
+ *   JOIN vendors v ON v.id = vs.vendor_id
+ *   JOIN service_categories sc ON vs.service_category = sc.id
+ *   WHERE vs.is_active = 1 AND v.accept_enquires = 1
+ *     AND vs.is_deleted = 0 AND v.is_deleted = 0
+ *     [+ AND v.city = :city_id   if `location` body param resolves to a city]
+ *     [+ AND (vs.service_title LIKE :search OR v.company_name LIKE :search OR sc.name LIKE :search)]
+ *     [+ AND vs.service_category = :category_id]
+ *   ORDER BY vs.id DESC
+ *
+ * Response per item — match the OLD API exactly (22 fields):
+ *   id, vendor_id, service_title, service_category, service_subcategory,
+ *   description, pricing_type, unit_name, price, service_image,
+ *   certificate_url, is_active, show_review, created_at, updated_at,
+ *   minimum_fee, is_deleted, company_name, rating, review_count,
+ *   booking_text, category_name
+ *
+ * booking_text is computed (`"<N> bookings"`); old API hardcoded it
+ * from a separate COUNT(*) on orders — replicated here.
+ */
+legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
   try {
-    const cats = await query<any>(
-      `SELECT category_id, name, icon FROM service_categories WHERE status = true ORDER BY category_id ASC`
-    );
-    send(res, { data: cats });
+    const { location, search, category_id } = req.body ?? {};
+
+    // Resolve city name → city_id (old API did this lookup)
+    let cityId: number | null = null;
+    if (location && typeof location === 'string' && location.trim()) {
+      const cityRow = await one<any>(
+        `SELECT city_id FROM city WHERE city_name = :name AND COALESCE(is_deleted, 0) = 0 LIMIT 1`,
+        { name: location.trim() },
+      ).catch(() => null);
+      if (cityRow?.city_id) cityId = Number(cityRow.city_id);
+    }
+
+    const where: string[] = [
+      `COALESCE(vs.is_active, 0) = 1`,
+      `COALESCE(vs.is_deleted, 0) = 0`,
+      `COALESCE(v.is_deleted, 0) = 0`,
+      `COALESCE(v.accept_enquires, 1) = 1`,
+    ];
+    const params: Record<string, any> = {};
+
+    if (cityId !== null) {
+      where.push(`v.city = :city`);
+      params.city = cityId;
+    }
+    if (search && typeof search === 'string' && search.trim()) {
+      where.push(`(vs.service_title LIKE :q OR v.company_name LIKE :q OR sc.name LIKE :q)`);
+      params.q = `%${search.trim()}%`;
+    }
+    if (category_id && String(category_id).trim()) {
+      where.push(`(vs.service_category = :cat OR vs.category_id = :cat)`);
+      params.cat = String(category_id);
+    }
+
+    // The new schema mirrors `id` on vendor_services and vendors via
+    // migration 004 ADD COLUMN id; `service_category` is stored as the
+    // category_id as a string for mobile compat.
+    const sql = `
+      SELECT
+        COALESCE(vs.id, vs.vendor_service_id)              AS id,
+        vs.vendor_id                                       AS vendor_id,
+        COALESCE(vs.service_title, vs.title)               AS service_title,
+        vs.service_category                                AS service_category,
+        vs.service_subcategory                             AS service_subcategory,
+        vs.description                                     AS description,
+        vs.pricing_type                                    AS pricing_type,
+        vs.unit_name                                       AS unit_name,
+        vs.price                                           AS price,
+        vs.service_image                                   AS service_image,
+        vs.certificate_url                                 AS certificate_url,
+        COALESCE(vs.is_active, vs.status, 1)               AS is_active,
+        COALESCE(vs.show_review, 1)                        AS show_review,
+        vs.created_at                                      AS created_at,
+        vs.updated_at                                      AS updated_at,
+        vs.minimum_fee                                     AS minimum_fee,
+        COALESCE(vs.is_deleted, 0)                         AS is_deleted,
+        v.company_name                                     AS company_name,
+        IFNULL((SELECT ROUND(AVG(cr.rating), 1)
+                  FROM customer_reviews cr
+                 WHERE cr.vendor_id = v.vendor_id AND COALESCE(cr.status, 1) = 1), 0) AS rating,
+        (SELECT COUNT(*)
+           FROM customer_reviews cr
+          WHERE cr.vendor_id = v.vendor_id AND COALESCE(cr.status, 1) = 1)            AS review_count,
+        (SELECT COUNT(*) FROM orders o WHERE o.vendor_id = v.vendor_id)                AS booking_count,
+        sc.name                                            AS category_name
+      FROM vendor_services AS vs
+      JOIN vendors          AS v  ON v.vendor_id = vs.vendor_id
+      LEFT JOIN service_categories AS sc
+             ON sc.category_id = CAST(COALESCE(vs.service_category, vs.category_id) AS UNSIGNED)
+      WHERE ${where.join(' AND ')}
+      ORDER BY COALESCE(vs.id, vs.vendor_service_id) DESC
+    `;
+    const rows = await query<any>(sql, params);
+
+    // Compute booking_text exactly as the old API did
+    const data = rows.map((r: any) => {
+      const n = Number(r.booking_count ?? 0);
+      return {
+        ...r,
+        booking_text: `${n} ${n === 1 ? 'booking' : 'bookings'}`,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Service list fetched successfully',
+      data,
+    });
   } catch (err) { next(err); }
 });
 
