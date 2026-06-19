@@ -58,6 +58,31 @@ function send(res: any, payload: { message?: string; data?: any; result?: any; t
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
 }
 
+async function fetchLegacyCustomerServiceList(body: any): Promise<any[] | null> {
+  const endpoint = process.env.LEGACY_CUSTOMER_SERVICE_LIST_URL || 'https://app.vayil.in/customer/ServiceList';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4500);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        search: body?.search ?? '',
+        category_id: body?.category_id ?? '',
+        location: body?.location ?? '',
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const json = await response.json() as any;
+    return Array.isArray(json?.data) ? json.data : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────
  *  AUTH — register / OTP / login (mounted before requireAuth).
  * ───────────────────────────────────────────────────────────── */
@@ -238,13 +263,21 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
     const rows = await query<any>(sql, params);
 
     // Compute booking_text exactly as the old API did
-    const data = rows.map((r: any) => {
+    let data = rows.map((r: any) => {
       const n = Number(r.booking_count ?? 0);
+      const { booking_count, ...item } = r;
       return {
-        ...r,
+        ...item,
+        rating: Number(r.rating ?? 0).toFixed(1),
         booking_text: `${n} ${n === 1 ? 'booking' : 'bookings'}`,
       };
     });
+
+    // Temporary compatibility bridge for the mobile cutover: the TiDB
+    // seed may not yet contain the same Coimbatore listings as app.vayil.in.
+    if (!data.length) {
+      data = await fetchLegacyCustomerServiceList(req.body) ?? data;
+    }
 
     res.status(200).json({
       success: true,
