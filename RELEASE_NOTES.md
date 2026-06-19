@@ -1,5 +1,58 @@
 # Release Notes
 
+## v4.5.40 — Full mobile collection response-compatibility bridge pass (2026-06-19)
+
+### Why
+
+After the `/customer/ServiceList` hotfix, the full Vayil mobile
+collection audit found additional response-field and request-body
+compatibility gaps between `app.vayil.in` and `vayil-web.vercel.app`.
+The highest-risk gaps were legacy root fields (`categories`,
+`subcategories`, `languages`, `states_list`, `city`), bare vendor URLs,
+admin vendor/service CRUD routes, and old JWT claim names.
+
+### What Changed
+
+- Normalized legacy JWT claims (`userId`/`user_id` + `role`) into the
+  middleware's current `id`/`userType` contract so old customer/vendor/admin
+  bearer tokens can authenticate when signed with the configured secret.
+- Added customer response bridges for:
+  `ServiceCategories`, `ServiceSubcategories`, `ServiceInfo`,
+  `vendorInfo`, `NeedPaymentSummary`, and the `CustomerupdatePlan`
+  `plan_id` request alias.
+- Added legacy root response keys for vendor lookups:
+  `getLanguages -> languages`,
+  `get_states_by_country_id -> states_list`,
+  and `get_city -> city`.
+- Exposed bare vendor collection URLs through Vercel rewrites and the
+  backend bare-mobile router, including onboarding, service listing,
+  enquiry, plan, material, payment, wallet, notification, and settings
+  endpoints.
+- Bridged vendor service-listing request aliases:
+  `service_title`, `service_category`, `service_subcategory`,
+  `unit_name`, `service_image`, `service_image_url`, `certificate`,
+  `minimum_fee`, `is_active`, and `show_review`.
+- Added admin compatibility for vendor list/detail/status/KYC/delete/save
+  responses by returning the legacy `data` field while keeping existing
+  web fields.
+- Added missing admin service CRUD routes:
+  `ServiceDelete`, `SaveServiceListing`, `UpdateServiceListing`, and
+  `ServiceStatusUpdate`, dual-writing canonical and legacy
+  `vendor_services` columns.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+Backend TypeScript build and whitespace checks passed locally. The
+top-level `next build` could not run in this workspace because root
+dependencies are not installed (`next` binary missing).
+
+---
+
 ## v4.5.39 — Customer `ServiceList` mobile response parity fallback (2026-06-19)
 
 ### Why

@@ -6,6 +6,12 @@
 import { exec, one, query } from '../db';
 import { ApiError } from '../utils/http';
 
+function numericId(v: any): number | null {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export interface VendorProfileUpdate {
   name?: string | null;
   company_name?: string | null;
@@ -102,6 +108,9 @@ export interface ListingInput {
   category_id?: number | string;
   subcategory_id?: number | string;
   thumbnail?: string;
+  pricing_type?: string;
+  certificate_url?: string;
+  minimum_fee?: number;
   tag_ids?: number[];
   status?: boolean | number;
 }
@@ -115,7 +124,7 @@ export async function listListings(vendorId: number | string) {
 
 export async function getListing(vendorId: number | string, serviceId: number | string) {
   const row = await one<any>(
-    'SELECT * FROM vendor_services WHERE vendor_service_id = :id AND vendor_id = :vid',
+    'SELECT * FROM vendor_services WHERE (vendor_service_id = :id OR id = :id) AND vendor_id = :vid',
     { id: serviceId, vid: vendorId },
   );
   if (!row) throw new ApiError(404, 'Service not found');
@@ -125,21 +134,36 @@ export async function getListing(vendorId: number | string, serviceId: number | 
 export async function createListing(vendorId: number | string, b: ListingInput) {
   const result: any = await exec(
     `INSERT INTO vendor_services
-       (vendor_id, title, description, price, unit, category_id, subcategory_id, thumbnail, tag_ids, status, created_at)
-     VALUES (:vid, :title, :description, :price, :unit, :category, :subcategory, :thumb, :tags, :status, NOW())`,
+       (vendor_id, title, service_title, description, price, unit, unit_name,
+        category_id, service_category, subcategory_id, service_subcategory,
+        thumbnail, service_image, certificate_url, pricing_type, minimum_fee,
+        tag_ids, status, is_active, show_review, is_deleted, created_at)
+     VALUES (:vid, :title, :title, :description, :price, :unit, :unit,
+        :category, :serviceCategory, :subcategory, :serviceSubcategory,
+        :thumb, :thumb, :certificate, :pricingType, :minimumFee,
+        :tags, :status, :status, 1, 0, NOW())`,
     {
       vid: vendorId,
       title: b.title,
       description: b.description ?? null,
       price: b.price ?? null,
       unit: b.unit ?? 'project',
-      category: b.category_id ?? null,
-      subcategory: b.subcategory_id ?? null,
+      category: numericId(b.category_id),
+      serviceCategory: b.category_id ?? null,
+      subcategory: numericId(b.subcategory_id),
+      serviceSubcategory: b.subcategory_id ?? null,
       thumb: b.thumbnail ?? null,
+      certificate: b.certificate_url ?? null,
+      pricingType: b.pricing_type ?? (b.price === undefined || b.price === null ? 'quote' : 'per_unit'),
+      minimumFee: b.minimum_fee ?? null,
       tags: b.tag_ids ? JSON.stringify(b.tag_ids) : null,
       status: b.status === undefined ? 1 : (b.status ? 1 : 0),
     },
   );
+  await exec(
+    `UPDATE vendor_services SET id = vendor_service_id WHERE vendor_service_id = :id AND (id IS NULL OR id = 0)`,
+    { id: result.insertId },
+  ).catch(() => undefined);
   return getListing(vendorId, result.insertId);
 }
 
@@ -148,17 +172,26 @@ export async function updateListing(vendorId: number | string, serviceId: number
   const merged = { ...cur, ...b } as any;
   await exec(
     `UPDATE vendor_services SET
-       title = :title, description = :description, price = :price, unit = :unit,
-       category_id = :category, subcategory_id = :subcategory,
-       thumbnail = :thumb, tag_ids = :tags, status = :status
-     WHERE vendor_service_id = :id AND vendor_id = :vid`,
+       title = :title, service_title = :title, description = :description,
+       price = :price, unit = :unit, unit_name = :unit,
+       category_id = :category, service_category = :serviceCategory,
+       subcategory_id = :subcategory, service_subcategory = :serviceSubcategory,
+       thumbnail = :thumb, service_image = :thumb, certificate_url = :certificate,
+       pricing_type = :pricingType, minimum_fee = :minimumFee,
+       tag_ids = :tags, status = :status, is_active = :status
+     WHERE (vendor_service_id = :id OR id = :id) AND vendor_id = :vid`,
     {
       id: serviceId, vid: vendorId,
       title: merged.title, description: merged.description ?? null,
       price: merged.price ?? null, unit: merged.unit ?? 'project',
-      category: merged.category_id ?? null,
-      subcategory: merged.subcategory_id ?? null,
+      category: numericId(b.category_id) ?? numericId(cur.category_id),
+      serviceCategory: b.category_id ?? cur.service_category ?? cur.category_id ?? null,
+      subcategory: numericId(b.subcategory_id) ?? numericId(cur.subcategory_id),
+      serviceSubcategory: b.subcategory_id ?? cur.service_subcategory ?? cur.subcategory_id ?? null,
       thumb: merged.thumbnail ?? null,
+      certificate: merged.certificate_url ?? null,
+      pricingType: merged.pricing_type ?? (merged.price === undefined || merged.price === null ? 'quote' : 'per_unit'),
+      minimumFee: merged.minimum_fee ?? null,
       tags: merged.tag_ids ? (typeof merged.tag_ids === 'string' ? merged.tag_ids : JSON.stringify(merged.tag_ids)) : null,
       status: merged.status === undefined ? 1 : (merged.status ? 1 : 0),
     },
@@ -168,7 +201,7 @@ export async function updateListing(vendorId: number | string, serviceId: number
 
 export async function setListingStatus(vendorId: number | string, serviceId: number | string, active: boolean) {
   const result: any = await exec(
-    'UPDATE vendor_services SET status = :s WHERE vendor_service_id = :id AND vendor_id = :vid',
+    'UPDATE vendor_services SET status = :s, is_active = :s WHERE (vendor_service_id = :id OR id = :id) AND vendor_id = :vid',
     { s: active ? 1 : 0, id: serviceId, vid: vendorId },
   );
   if (!result.affectedRows) throw new ApiError(404, 'Service not found');

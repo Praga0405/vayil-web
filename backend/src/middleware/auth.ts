@@ -57,7 +57,13 @@ export function requireAuth(allowed?: UserType[]) {
       } catch {
         decoded = jwt.verify(token, config.staffJwtSecret);
       }
-      req.user = decoded as AuthUser;
+      const legacyRole = decoded?.userType || decoded?.role || decoded?.user_role;
+      const legacyId = decoded?.id || decoded?.userId || decoded?.user_id || decoded?.customer_id || decoded?.vendor_id || decoded?.admin_id;
+      req.user = {
+        ...decoded,
+        id: legacyId,
+        userType: legacyRole,
+      } as AuthUser;
       if (allowed?.length && !allowed.includes(req.user.userType)) {
         throw new ApiError(403, 'Access denied for this role');
       }
@@ -88,7 +94,13 @@ export function softAuth() {
       let decoded: any;
       try { decoded = jwt.verify(token, config.jwtSecret); }
       catch { decoded = jwt.verify(token, config.staffJwtSecret); }
-      req.user = decoded as AuthUser;
+      const legacyRole = decoded?.userType || decoded?.role || decoded?.user_role;
+      const legacyId = decoded?.id || decoded?.userId || decoded?.user_id || decoded?.customer_id || decoded?.vendor_id || decoded?.admin_id;
+      req.user = {
+        ...decoded,
+        id: legacyId,
+        userType: legacyRole,
+      } as AuthUser;
     } catch { /* ignore invalid token in soft mode */ }
     next();
   };

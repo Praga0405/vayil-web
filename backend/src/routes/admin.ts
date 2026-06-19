@@ -26,19 +26,36 @@ import { ApiError, ok } from '../utils/http';
 export const adminRouter = Router();
 adminRouter.use(requireAuth(['staff', 'admin']));
 
+function send(res: any, payload: any = {}, status = 200) {
+  return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
+}
+
+function pickId(b: any, ...keys: string[]): string {
+  for (const k of keys) if (b && b[k] !== undefined && b[k] !== null && b[k] !== '') return String(b[k]);
+  return '';
+}
+
+function intParam(v: any, fallback: number, max = 200): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(Math.floor(n), max);
+}
+
+function boolish(v: any): boolean | null {
+  if (v === undefined || v === null || v === '') return null;
+  return v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true';
+}
+
 /* ── Vendor list with optional filters ─────────────────────── */
 adminRouter.post('/GetVendorList', async (req, res, next) => {
   try {
-    const body = z.object({
-      status:   z.string().optional(),      // 'pending'|'kyc_submitted'|'verified'|'rejected'|...
-      search:   z.string().optional(),
-      page:     z.number().int().min(1).default(1),
-      pageSize: z.number().int().min(1).max(200).default(50),
-    }).parse(req.body || {});
+    const body = req.body || {};
+    const page = intParam(body.page, 1);
+    const pageSize = intParam(body.pageSize ?? body.limit, 50);
 
-    const offset = (body.page - 1) * body.pageSize
+    const offset = (page - 1) * pageSize
     const where: string[] = []
-    const params: Record<string, any> = { limit: body.pageSize, offset }
+    const params: Record<string, any> = { limit: pageSize, offset }
     if (body.status) { where.push('status = :status'); params.status = body.status }
     if (body.search) {
       where.push('(company_name LIKE :q OR name LIKE :q OR mobile LIKE :q OR phone LIKE :q OR email LIKE :q)')
@@ -60,111 +77,171 @@ adminRouter.post('/GetVendorList', async (req, res, next) => {
       `SELECT COUNT(*) AS n FROM vendors ${whereSql}`,
       params,
     )
-    ok(res, { vendors, total: Number(totalRow?.n ?? 0), page: body.page, pageSize: body.pageSize })
+    send(res, {
+      data: vendors,
+      vendors,
+      total: Number(totalRow?.n ?? 0),
+      page,
+      pageSize,
+      limit: pageSize,
+    })
   } catch (err) { next(err) }
 })
 
 /* ── Vendor details (vendor row + their services + queue history) ── */
 adminRouter.post('/VendorDetails', async (req, res, next) => {
   try {
-    const { id } = z.object({ id: z.any() }).parse(req.body || {})
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
+    if (!id) throw new ApiError(400, 'id required')
+    const categoryId = pickId(req.body, 'category_id', 'categoryId')
     const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id })
     if (!vendor) throw new ApiError(404, 'Vendor not found')
+    const serviceWhere = categoryId
+      ? `vendor_id = :id AND (category_id = :categoryId OR service_category = :categoryId)`
+      : `vendor_id = :id`
     const services = await query<any>(
-      `SELECT * FROM vendor_services WHERE vendor_id = :id ORDER BY vendor_service_id DESC`,
-      { id },
+      `SELECT * FROM vendor_services WHERE ${serviceWhere} ORDER BY vendor_service_id DESC`,
+      { id, categoryId },
     )
     const queue = await query<any>(
       `SELECT * FROM vendor_review_queue WHERE vendor_id = :id ORDER BY id DESC LIMIT 10`,
       { id },
     )
-    ok(res, { vendor, services, queue })
+    send(res, { data: { vendor, services, queue }, vendor, services, queue })
   } catch (err) { next(err) }
 })
 
 /* ── KYC approve / reject (single source of truth) ─────────── */
 adminRouter.post('/VendorKycUpdate', async (req, res, next) => {
   try {
-    const body = z.object({
-      id:         z.any(),
-      kyc_status: z.enum(['approved', 'rejected', 'pending']),
-      reason:     z.string().optional(),
-    }).parse(req.body)
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
+    if (!id) throw new ApiError(400, 'id required')
+    const requested = String(req.body?.kyc_status ?? req.body?.status ?? 'pending').toLowerCase()
+    const kyc_status = requested === 'approved' || requested === 'verified'
+      ? 'approved'
+      : requested === 'rejected'
+        ? 'rejected'
+        : 'pending'
+    const vendorStatus = requested === 'approved' ? 'verified'
+      : requested === 'verified' ? 'verified'
+        : requested === 'rejected' ? 'rejected'
+          : requested === 'pending_approval' ? 'pending_approval'
+            : 'pending'
+    const reason = req.body?.reason ?? req.body?.rejection_reason ?? null
 
     const reviewerId = Number((req as any).user?.id) || null
     await transaction(async (conn) => {
-      if (body.kyc_status === 'approved') {
-        await conn.query(
-          `UPDATE vendors SET status = 'verified', kyc_approved_at = NOW(), rejection_reason = NULL
-             WHERE vendor_id = ?`,
-          [body.id],
-        )
-      } else if (body.kyc_status === 'rejected') {
-        await conn.query(
-          `UPDATE vendors SET status = 'rejected', kyc_approved_at = NULL, rejection_reason = ?
-             WHERE vendor_id = ?`,
-          [body.reason ?? null, body.id],
-        )
-      }
+      await conn.query(
+        `UPDATE vendors
+            SET status = ?,
+                kyc_approved_at = CASE WHEN ? = 'verified' THEN NOW() ELSE kyc_approved_at END,
+                rejection_reason = CASE WHEN ? = 'rejected' THEN ? ELSE NULL END
+          WHERE vendor_id = ?`,
+        [vendorStatus, vendorStatus, vendorStatus, reason, id],
+      )
       await conn.query(
         `UPDATE vendor_review_queue
             SET status = ?, reviewed_at = NOW(), reviewed_by = ?, reviewer_note = COALESCE(?, reviewer_note)
           WHERE vendor_id = ? AND status = 'PENDING'`,
-        [body.kyc_status === 'approved' ? 'APPROVED' : 'REJECTED', reviewerId, body.reason ?? null, body.id],
+        [kyc_status === 'approved' ? 'APPROVED' : kyc_status === 'rejected' ? 'REJECTED' : 'PENDING', reviewerId, reason, id],
       )
     })
-    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id: body.id })
-    ok(res, { vendor, kyc_status: body.kyc_status })
+    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id })
+    send(res, { message: 'Vendor KYC updated', data: vendor, vendor, kyc_status, status: vendor?.status })
   } catch (err) { next(err) }
 })
 
 /* ── Active / inactive toggle ──────────────────────────────── */
 adminRouter.post('/VendorStatusUpdate', async (req, res, next) => {
   try {
-    const body = z.object({ id: z.any(), status: z.string() }).parse(req.body)
-    await exec(`UPDATE vendors SET status = :status WHERE vendor_id = :id`, { id: body.id, status: body.status })
-    ok(res, { id: body.id, status: body.status })
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
+    const status = req.body?.status
+    if (!id || !status) throw new ApiError(400, 'id and status required')
+    await exec(`UPDATE vendors SET status = :status WHERE vendor_id = :id`, { id, status })
+    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id })
+    send(res, { message: 'Vendor status updated', data: vendor, vendor, id, status })
   } catch (err) { next(err) }
 })
 
 /* ── Soft delete ───────────────────────────────────────────── */
 adminRouter.post('/VendorDelete', async (req, res, next) => {
   try {
-    const { id } = z.object({ id: z.any() }).parse(req.body)
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
+    if (!id) throw new ApiError(400, 'id required')
     await exec(`UPDATE vendors SET status = 'deleted' WHERE vendor_id = :id`, { id })
-    ok(res, { id, status: 'deleted' })
+    send(res, { message: 'Vendor deleted', data: { id, status: 'deleted' }, id, status: 'deleted' })
   } catch (err) { next(err) }
 })
 
 /* ── Save vendor (mutable fields) ──────────────────────────── */
 adminRouter.post('/saveVendor', async (req, res, next) => {
   try {
-    const body = z.object({
-      id:                 z.any(),
-      company_name:       z.string().optional(),
-      name:               z.string().optional(),
-      email:              z.string().email().optional(),
-      city:               z.string().optional(),
-      address:            z.string().optional(),
-      pincode:            z.string().optional(),
-      gst_number:         z.string().optional(),
-      is_gst_registered:  z.boolean().optional(),
-    }).parse(req.body)
-    await exec(
-      `UPDATE vendors
-          SET company_name      = COALESCE(:company_name, company_name),
-              name              = COALESCE(:name, name),
-              email             = COALESCE(:email, email),
-              city              = COALESCE(:city, city),
-              address           = COALESCE(:address, address),
-              pincode           = COALESCE(:pincode, pincode),
-              gst_number        = COALESCE(:gst_number, gst_number),
-              is_gst_registered = COALESCE(:is_gst_registered, is_gst_registered)
-        WHERE vendor_id = :id`,
-      body,
-    )
-    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id: body.id })
-    ok(res, { vendor })
+    const body = req.body || {}
+    const id = pickId(body, 'id', 'vendor_id', 'vendorId')
+    const params = {
+      id,
+      company_name: body.company_name ?? null,
+      name: body.name ?? body.full_name ?? body.owner_name ?? null,
+      owner_name: body.owner_name ?? body.full_name ?? null,
+      mobile: body.mobile ?? body.phone ?? null,
+      phone: body.phone ?? body.mobile ?? null,
+      email: body.email ?? null,
+      city: body.city ?? null,
+      address: body.address ?? null,
+      pincode: body.pincode ?? null,
+      profile_image: body.profile_image ?? body.profile_photo_url ?? null,
+      about: body.about ?? body.short_bio ?? null,
+      experience_years: body.experience_years ?? body.years_of_experience ?? null,
+      gst_number: body.gst_number ?? null,
+      is_gst_registered: boolish(body.is_gst_registered),
+      proof_type: body.proof_type ?? body.kyc_id_type ?? null,
+      proof_number: body.proof_number ?? body.kyc_id_number ?? null,
+      kyc_document_url: body.kyc_document_url ?? body.kyc_id_image ?? null,
+      status: body.status ?? body.kyc_status ?? null,
+    }
+    let vendorId = id
+    if (vendorId) {
+      await exec(
+        `UPDATE vendors
+            SET company_name      = COALESCE(:company_name, company_name),
+                name              = COALESCE(:name, name),
+                owner_name        = COALESCE(:owner_name, owner_name),
+                mobile            = COALESCE(:mobile, mobile),
+                phone             = COALESCE(:phone, phone),
+                email             = COALESCE(:email, email),
+                city              = COALESCE(:city, city),
+                address           = COALESCE(:address, address),
+                pincode           = COALESCE(:pincode, pincode),
+                profile_image     = COALESCE(:profile_image, profile_image),
+                about             = COALESCE(:about, about),
+                experience_years  = COALESCE(:experience_years, experience_years),
+                gst_number        = COALESCE(:gst_number, gst_number),
+                is_gst_registered = COALESCE(:is_gst_registered, is_gst_registered),
+                proof_type        = COALESCE(:proof_type, proof_type),
+                proof_number      = COALESCE(:proof_number, proof_number),
+                kyc_document_url  = COALESCE(:kyc_document_url, kyc_document_url),
+                status            = COALESCE(:status, status)
+          WHERE vendor_id = :id`,
+        params,
+      )
+    } else {
+      const result: any = await exec(
+        `INSERT INTO vendors
+          (company_name, name, owner_name, mobile, phone, email, city, address,
+           pincode, profile_image, about, experience_years, gst_number,
+           is_gst_registered, proof_type, proof_number, kyc_document_url, status, created_at)
+         VALUES
+          (:company_name, :name, :owner_name, :mobile, :phone, :email, :city, :address,
+           :pincode, :profile_image, :about, :experience_years, :gst_number,
+           COALESCE(:is_gst_registered, 0), :proof_type, :proof_number, :kyc_document_url,
+           COALESCE(:status, 'pending'), NOW())`,
+        params,
+      )
+      vendorId = String(result.insertId)
+      await exec(`UPDATE vendors SET id = vendor_id WHERE vendor_id = :id AND (id IS NULL OR id = 0)`, { id: vendorId }).catch(() => undefined)
+    }
+    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id: vendorId })
+    send(res, { message: 'Vendor saved', data: vendor, vendor })
   } catch (err) { next(err) }
 })
 

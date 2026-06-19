@@ -16,6 +16,7 @@ import { softAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { one, query } from '../db';
 import { publicSettingsSafe } from './common';
+import { legacyVendorRouter } from './legacyVendor';
 
 export const bareMobileRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -29,7 +30,7 @@ bareMobileRouter.get('/getLanguages', async (_req, res, next) => {
     const rows = await query<any>(
       `SELECT id, language_name FROM languages WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY language_name`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, languages: rows });
   } catch (err) { next(err); }
 });
 
@@ -62,7 +63,7 @@ bareMobileRouter.get('/get_states_by_country_id', async (req, res, next) => {
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, states_list: rows });
   } catch (err) { next(err); }
 });
 
@@ -79,7 +80,7 @@ bareMobileRouter.post('/get_city', async (req, res, next) => {
           `SELECT city_id, city_name, city_state, city_state_id FROM city
             WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
         );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, city: rows });
   } catch (err) { next(err); }
 });
 
@@ -127,3 +128,59 @@ bareMobileRouter.post('/upload_files',
     } catch (err) { next(err); }
   },
 );
+
+function forwardToVendor(req: any, res: any, next: any) {
+  return (legacyVendorRouter as any).handle(req, res, next);
+}
+
+[
+  '/vendorNotificationList',
+  '/register',
+  '/resendVendorOTP',
+  '/verifyVendorOTP',
+  '/vendor-login-otp',
+  '/vendor-login-verify-otp',
+  '/step1',
+  '/serviceTagStep',
+  '/step2',
+  '/step3',
+  '/step4',
+  '/AcceptEnquiredStatusUpdate',
+  '/VendorAddServiceTag',
+  '/saveServiceListing',
+  '/updateServiceListing',
+  '/ServiceStatusUpdate',
+  '/ServiceReviewStatusUpdate',
+  '/ServiceDetails',
+  '/vendorEnuqiryList',
+  '/sendQuotationToCustomer',
+  '/vendorRejectEnquiry',
+  '/createPlan',
+  '/updatePlan',
+  '/updatePlanStatus',
+  '/vendorgetPlan',
+  '/vendorPlanDetails',
+  '/addPlanMaterial',
+  '/vendorgetMaterial',
+  '/vendorMaterialDetails',
+  '/editPlanMaterial',
+  '/createAcceptPlan',
+  '/vendorOrderDetails',
+  '/vendorPaymentSummary',
+  '/AskPyament',
+  '/AddBankDetails',
+  '/EditBankDetails',
+  '/EditBankDetailsReq',
+  '/GetBankDetails',
+  '/vendorTransactionHistory',
+  '/vendorTransHistoryCurMon',
+  '/vendorPayout',
+  '/vendorBalance',
+].forEach((path) => bareMobileRouter.post(path, forwardToVendor));
+
+[
+  '/vendorGetSettings',
+  '/vendorInfo',
+  '/getVendorRevenueChart',
+  '/getVendorServiceList',
+].forEach((path) => bareMobileRouter.get(path, forwardToVendor));

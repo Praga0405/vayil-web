@@ -27,6 +27,65 @@ function send(res: any, payload: any = {}, status = 200) {
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
 }
 
+function pickId(b: any, ...keys: string[]): string {
+  for (const k of keys) if (b && b[k] !== undefined && b[k] !== null && b[k] !== '') return String(b[k]);
+  return '';
+}
+
+function emptyToNull(v: any) {
+  return v === undefined || v === null || v === '' ? null : v;
+}
+
+function numericId(v: any): number | null {
+  const value = emptyToNull(v);
+  if (value === null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function activeValue(v: any): number | null {
+  if (v === undefined || v === null || v === '') return null;
+  if (v === true || v === 'true') return 1;
+  if (v === false || v === 'false') return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function servicePayload(body: any) {
+  const isActive = activeValue(body?.is_active ?? body?.status);
+  const serviceCategory = emptyToNull(body?.service_category ?? body?.category_id);
+  const serviceSubcategory = emptyToNull(body?.service_subcategory ?? body?.subcategory_id);
+  return {
+    vendorId: emptyToNull(body?.vendorId ?? body?.vendor_id),
+    serviceId: emptyToNull(body?.service_id ?? body?.vendor_service_id ?? body?.id),
+    serviceTitle: emptyToNull(body?.service_title ?? body?.title),
+    serviceCategory,
+    serviceCategoryId: numericId(serviceCategory),
+    serviceSubcategory,
+    serviceSubcategoryId: numericId(serviceSubcategory),
+    description: emptyToNull(body?.description),
+    pricingType: emptyToNull(body?.pricing_type),
+    unitName: emptyToNull(body?.unit_name ?? body?.unit),
+    price: emptyToNull(body?.price),
+    serviceImage: emptyToNull(body?.service_image_url ?? body?.service_image ?? body?.thumbnail),
+    certificateUrl: emptyToNull(body?.certificate_url ?? body?.certificate),
+    minimumFee: emptyToNull(body?.minimum_fee),
+    isActive,
+    canonicalStatus: isActive === null ? null : (isActive === 1 ? 1 : 0),
+    showReview: activeValue(body?.show_review),
+  };
+}
+
+async function selectAdminService(serviceId: any) {
+  return one<any>(
+    `SELECT vs.*, v.name AS vendor_name, v.company_name
+       FROM vendor_services vs
+       LEFT JOIN vendors v ON v.vendor_id = vs.vendor_id
+      WHERE vs.vendor_service_id = :id OR vs.id = :id`,
+    { id: serviceId },
+  );
+}
+
 /* ─── admin auth middleware (separate from our staff JWT, simpler) ─── */
 function requireAdmin(req: AuthRequest, _res: any, next: any) {
   const auth = (req.headers.authorization || '').toString();
@@ -34,7 +93,8 @@ function requireAdmin(req: AuthRequest, _res: any, next: any) {
   if (!token) return next(new ApiError(401, 'Admin token required'));
   try {
     const decoded: any = jwt.verify(token, config.staffJwtSecret);
-    if (!decoded?.admin_id && decoded?.userType !== 'admin' && decoded?.userType !== 'staff') {
+    if (!decoded?.admin_id && decoded?.userType !== 'admin' && decoded?.userType !== 'staff' &&
+        decoded?.role !== 'admin' && decoded?.role !== 'staff') {
       return next(new ApiError(403, 'Not an admin token'));
     }
     (req as any).admin = decoded;
@@ -553,6 +613,100 @@ adminMobileRouter.post('/ServiceDetails', async (req, res, next) => {
                              LEFT JOIN vendors v ON v.vendor_id = vs.vendor_id
                             WHERE vs.vendor_service_id = :id OR vs.id = :id`, { id: sid });
     send(res, { data: svc });
+  } catch (err) { next(err); }
+});
+
+adminMobileRouter.post('/SaveServiceListing', async (req, res, next) => {
+  try {
+    const p = servicePayload(req.body || {});
+    if (!p.vendorId) throw new ApiError(400, 'vendorId required');
+    if (!p.serviceTitle) throw new ApiError(400, 'service_title required');
+    const r: any = await exec(
+      `INSERT INTO vendor_services
+        (vendor_id, title, service_title, category_id, service_category,
+         subcategory_id, service_subcategory, description, pricing_type,
+         unit, unit_name, price, thumbnail, service_image, certificate_url,
+         minimum_fee, status, is_active, show_review, is_deleted, created_at, updated_at)
+       VALUES
+        (:vendorId, :serviceTitle, :serviceTitle, :serviceCategoryId, :serviceCategory,
+         :serviceSubcategoryId, :serviceSubcategory, :description, :pricingType,
+         :unitName, :unitName, :price, :serviceImage, :serviceImage, :certificateUrl,
+         :minimumFee, COALESCE(:canonicalStatus, 1), COALESCE(:isActive, 1),
+         COALESCE(:showReview, 1), 0, NOW(), NOW())`,
+      p,
+    );
+    await exec(
+      `UPDATE vendor_services SET id = vendor_service_id WHERE vendor_service_id = :id AND (id IS NULL OR id = 0)`,
+      { id: r.insertId },
+    ).catch(() => undefined);
+    send(res, { message: 'Service saved', data: await selectAdminService(r.insertId), service_id: r.insertId }, 201);
+  } catch (err) { next(err); }
+});
+
+adminMobileRouter.post('/UpdateServiceListing', async (req, res, next) => {
+  try {
+    const p = servicePayload(req.body || {});
+    if (!p.serviceId) throw new ApiError(400, 'service_id required');
+    const vendorClause = p.vendorId ? 'AND vendor_id = :vendorId' : '';
+    await exec(
+      `UPDATE vendor_services SET
+          title = COALESCE(:serviceTitle, title),
+          service_title = COALESCE(:serviceTitle, service_title),
+          category_id = COALESCE(:serviceCategoryId, category_id),
+          service_category = COALESCE(:serviceCategory, service_category),
+          subcategory_id = COALESCE(:serviceSubcategoryId, subcategory_id),
+          service_subcategory = COALESCE(:serviceSubcategory, service_subcategory),
+          description = COALESCE(:description, description),
+          pricing_type = COALESCE(:pricingType, pricing_type),
+          unit = COALESCE(:unitName, unit),
+          unit_name = COALESCE(:unitName, unit_name),
+          price = COALESCE(:price, price),
+          thumbnail = COALESCE(:serviceImage, thumbnail),
+          service_image = COALESCE(:serviceImage, service_image),
+          certificate_url = COALESCE(:certificateUrl, certificate_url),
+          minimum_fee = COALESCE(:minimumFee, minimum_fee),
+          status = COALESCE(:canonicalStatus, status),
+          is_active = COALESCE(:isActive, is_active),
+          show_review = COALESCE(:showReview, show_review),
+          updated_at = NOW()
+        WHERE (vendor_service_id = :serviceId OR id = :serviceId) ${vendorClause}`,
+      p,
+    );
+    send(res, { message: 'Service updated', data: await selectAdminService(p.serviceId), service_id: p.serviceId });
+  } catch (err) { next(err); }
+});
+
+adminMobileRouter.post('/ServiceStatusUpdate', async (req, res, next) => {
+  try {
+    const serviceId = pickId(req.body, 'service_id', 'vendor_service_id', 'id');
+    if (!serviceId) throw new ApiError(400, 'service_id required');
+    const isActive = activeValue(req.body?.is_active ?? req.body?.status);
+    const showReview = activeValue(req.body?.show_review);
+    if (isActive === null && showReview === null) throw new ApiError(400, 'is_active or show_review required');
+    await exec(
+      `UPDATE vendor_services
+          SET status = COALESCE(:canonicalStatus, status),
+              is_active = COALESCE(:isActive, is_active),
+              show_review = COALESCE(:showReview, show_review),
+              updated_at = NOW()
+        WHERE vendor_service_id = :id OR id = :id`,
+      { id: serviceId, isActive, canonicalStatus: isActive === null ? null : (isActive === 1 ? 1 : 0), showReview },
+    );
+    send(res, { message: 'Service status updated', data: await selectAdminService(serviceId), service_id: serviceId });
+  } catch (err) { next(err); }
+});
+
+adminMobileRouter.post('/ServiceDelete', async (req, res, next) => {
+  try {
+    const id = pickId(req.body, 'service_id', 'vendor_service_id', 'id');
+    if (!id) throw new ApiError(400, 'service_id required');
+    await exec(
+      `UPDATE vendor_services
+          SET is_deleted = 1, status = 0, is_active = 0, updated_at = NOW()
+        WHERE vendor_service_id = :id OR id = :id`,
+      { id },
+    );
+    send(res, { message: 'Service deleted', data: { id, service_id: id, is_deleted: 1 }, service_id: id });
   } catch (err) { next(err); }
 });
 

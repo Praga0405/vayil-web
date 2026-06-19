@@ -83,6 +83,30 @@ async function fetchLegacyCustomerServiceList(body: any): Promise<any[] | null> 
   }
 }
 
+async function fetchLegacyCustomerJson(path: string, body: any, authorization?: string): Promise<any | null> {
+  const endpoint = `${process.env.LEGACY_CUSTOMER_API_BASE || 'https://app.vayil.in/customer'}${path}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4500);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(authorization ? { Authorization: authorization } : {}),
+      },
+      body: JSON.stringify(body ?? {}),
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────
  *  AUTH — register / OTP / login (mounted before requireAuth).
  * ───────────────────────────────────────────────────────────── */
@@ -289,6 +313,9 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
 
 legacyCustomerRouter.post('/ServiceInfo', async (req, res, next) => {
   try {
+    const legacy = await fetchLegacyCustomerJson('/ServiceInfo', req.body, req.headers.authorization);
+    if (legacy?.success && legacy?.data) return res.status(200).json(legacy);
+
     const categoryId = pickId(req.body, 'category_id', 'categoryId', 'id');
     if (!categoryId) throw new ApiError(400, 'category_id required');
     const vendors = await customerSvc.listVendors({ category: categoryId });
@@ -302,6 +329,11 @@ legacyCustomerRouter.post('/ServiceInfo', async (req, res, next) => {
 
 legacyCustomerRouter.post('/vendorInfo', async (req, res, next) => {
   try {
+    const legacy = await fetchLegacyCustomerJson('/vendorInfo', req.body, req.headers.authorization);
+    if (legacy?.success && (legacy?.data || legacy?.category || legacy?.service || legacy?.review)) {
+      return res.status(200).json(legacy);
+    }
+
     const vendorId = pickId(req.body, 'vendor_id', 'vendorId', 'id');
     if (!vendorId) throw new ApiError(400, 'vendor_id required');
     const out: any = await customerSvc.getVendorWithListings(vendorId);
@@ -325,7 +357,7 @@ const publicServiceCategoriesHandler = async (_req: any, res: any, next: any) =>
         WHERE COALESCE(is_deleted, 0) = 0
         ORDER BY name ASC`,
     );
-    send(res, { data: cats });
+    res.status(200).json({ success: true, categories: cats });
   } catch (err) { next(err); }
 };
 legacyCustomerRouter.get('/ServiceCategories',  publicServiceCategoriesHandler);
@@ -333,7 +365,7 @@ legacyCustomerRouter.post('/ServiceCategories', publicServiceCategoriesHandler);
 
 legacyCustomerRouter.post('/ServiceSubcategories', async (req, res, next) => {
   try {
-    const cid = pickId(req.body, 'category_id', 'categoryId') || null;
+    const cid = pickId(req.body, 'category_id', 'categoryId', 'id') || null;
     const rows = cid
       ? await query<any>(
           `SELECT id, subcategory_id, category_id, name, slug
@@ -346,7 +378,7 @@ legacyCustomerRouter.post('/ServiceSubcategories', async (req, res, next) => {
              FROM service_subcategories
             WHERE COALESCE(is_deleted, 0) = 0`,
         );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, subcategories: rows });
   } catch (err) { next(err); }
 });
 
@@ -661,8 +693,23 @@ legacyCustomerRouter.post('/NeedPaymentSummary', async (req: AuthRequest, res, n
   try {
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
-    const out = await paymentSvc.getOrderPaymentSummary(req.user!.id, orderId);
-    send(res, { data: { ...out, needed: out.remaining } });
+    await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
+    const [plan, materials] = await Promise.all([
+      query<any>(`SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC`, { id: orderId }).catch(() => []),
+      query<any>(`SELECT * FROM order_plan_materials WHERE order_id = :id ORDER BY id ASC`, { id: orderId })
+        .catch(() => query<any>(`SELECT * FROM materials WHERE order_id = :id ORDER BY material_id ASC`, { id: orderId }).catch(() => [])),
+    ]);
+    const planTotal = plan.reduce((sum: number, row: any) => sum + Number(row.amount ?? 0), 0);
+    const planBalance = plan.reduce((sum: number, row: any) => sum + Number(row.balance_cost ?? row.balance ?? 0), 0);
+    const materialsTotal = materials.reduce((sum: number, row: any) => sum + Number(row.total_cost ?? row.total ?? 0), 0);
+    const materialsBalance = materials.reduce((sum: number, row: any) => sum + Number(row.balance_cost ?? row.balance ?? 0), 0);
+    res.status(200).json({
+      success: true,
+      plan,
+      planoverall: [{ total_amount: planTotal.toFixed(2), total_balance_cost: planBalance.toFixed(2) }],
+      materials,
+      materialsoverall: [{ total_cost_amount: materialsTotal.toFixed(2), total_balance_cost: materialsBalance.toFixed(2) }],
+    });
   } catch (err) { next(err); }
 });
 
@@ -814,7 +861,14 @@ legacyCustomerRouter.post('/getPlan', async (req: AuthRequest, res, next) => {
  *  approves the submitted plan. action='approve'|'revision'. */
 legacyCustomerRouter.post('/CustomerupdatePlan', async (req: AuthRequest, res, next) => {
   try {
-    const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
+    let orderId = pickId(req.body, 'order_id', 'orderId', 'id');
+    if (!orderId && (req.body?.plan_id || Array.isArray(req.body?.plans))) {
+      const planId = pickId(req.body, 'plan_id') || (Array.isArray(req.body?.plans) ? pickId(req.body.plans[0], 'plan_id', 'id') : '');
+      if (planId) {
+        const row = await one<any>(`SELECT order_id FROM order_plan WHERE plan_id = :id OR id = :id LIMIT 1`, { id: planId }).catch(() => null);
+        if (row?.order_id) orderId = String(row.order_id);
+      }
+    }
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
     const action = String(req.body?.action || 'approve').toLowerCase();

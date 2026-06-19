@@ -40,6 +40,10 @@ function num(v: any, fb = 0): number {
   if (v === undefined || v === null || v === '') return fb;
   const n = Number(v); return Number.isFinite(n) ? n : fb;
 }
+function activeFlag(v: any): boolean | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  return v === '1' || v === 1 || v === true || v === 'true';
+}
 function send(res: any, payload: any = {}, status = 200) {
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
 }
@@ -109,7 +113,7 @@ legacyVendorRouter.get('/getLanguages', async (_req, res, next) => {
     const rows = await commonQuery<any>(
       `SELECT id, language_name FROM languages WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY language_name`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, languages: rows });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.get('/getTools', async (_req, res, next) => {
@@ -137,7 +141,7 @@ legacyVendorRouter.get('/get_states_by_country_id', async (req, res, next) => {
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, states_list: rows });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.post('/get_city', async (req, res, next) => {
@@ -153,7 +157,7 @@ legacyVendorRouter.post('/get_city', async (req, res, next) => {
           `SELECT city_id, city_name, city_state, city_state_id FROM city
             WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
         );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, city: rows });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.post('/listProofTypes', async (_req, res, next) => {
@@ -268,7 +272,7 @@ legacyVendorRouter.post('/get_states_by_country_id', async (req, res, next) => {
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, states_list: rows });
   } catch (err) { next(err); }
 });
 
@@ -317,15 +321,20 @@ legacyVendorRouter.post('/VendorAddServiceTag', async (req: AuthRequest, res, ne
 /* ───── Service listings ───── */
 legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, next) => {
   try {
+    const active = activeFlag(req.body?.is_active ?? req.body?.status);
     const out = await vendorSvc.createListing(req.user!.id, {
-      title: req.body?.title,
+      title: req.body?.title || req.body?.service_title,
       description: req.body?.description,
       price: req.body?.price ? num(req.body.price) : undefined,
-      unit: req.body?.unit,
-      category_id: pickId(req.body, 'category_id', 'categoryId') || undefined,
-      subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId') || undefined,
-      thumbnail: req.body?.thumbnail,
+      unit: req.body?.unit || req.body?.unit_name,
+      category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
+      subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
+      thumbnail: req.body?.thumbnail || req.body?.service_image || req.body?.service_image_url,
+      pricing_type: req.body?.pricing_type,
+      certificate_url: req.body?.certificate_url || req.body?.certificate,
+      minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
       tag_ids: Array.isArray(req.body?.tag_ids) ? req.body.tag_ids.map(Number) : undefined,
+      status: active,
     });
     send(res, { message: 'Listing saved', data: out, vendor_service_id: out?.vendor_service_id }, 201);
   } catch (err) { next(err); }
@@ -335,14 +344,19 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
   try {
     const serviceId = pickId(req.body, 'vendor_service_id', 'service_id', 'serviceId', 'id');
     if (!serviceId) throw new ApiError(400, 'vendor_service_id required');
+    const active = activeFlag(req.body?.is_active ?? req.body?.status);
     const out = await vendorSvc.updateListing(req.user!.id, serviceId, {
-      title: req.body?.title, description: req.body?.description,
+      title: req.body?.title || req.body?.service_title, description: req.body?.description,
       price: req.body?.price ? num(req.body.price) : undefined,
-      unit: req.body?.unit,
-      category_id: pickId(req.body, 'category_id', 'categoryId') || undefined,
-      subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId') || undefined,
-      thumbnail: req.body?.thumbnail,
+      unit: req.body?.unit || req.body?.unit_name,
+      category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
+      subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
+      thumbnail: req.body?.thumbnail || req.body?.service_image || req.body?.service_image_url,
+      pricing_type: req.body?.pricing_type,
+      certificate_url: req.body?.certificate_url || req.body?.certificate,
+      minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
       tag_ids: Array.isArray(req.body?.tag_ids) ? req.body.tag_ids.map(Number) : undefined,
+      status: active,
     });
     send(res, { message: 'Listing updated', data: out });
   } catch (err) { next(err); }
@@ -357,15 +371,28 @@ const handleListings = async (req: AuthRequest, res: any, next: any) => {
 legacyVendorRouter.get('/getVendorServiceList', handleListings);
 legacyVendorRouter.post('/getVendorServiceList', handleListings);
 
-legacyVendorRouter.post('/ServiceStatusUpdate', async (req: AuthRequest, res, next) => {
+async function handleServiceStatusUpdate(req: AuthRequest, res: any, next: any) {
   try {
     const serviceId = pickId(req.body, 'vendor_service_id', 'service_id', 'id');
     if (!serviceId) throw new ApiError(400, 'service_id required');
-    const active = req.body?.status === '1' || req.body?.status === 1 || req.body?.status === true || req.body?.status === 'true';
+    if (req.body?.show_review !== undefined) {
+      const showReview = req.body.show_review === '1' || req.body.show_review === 1 ||
+        req.body.show_review === true || req.body.show_review === 'true';
+      await exec(
+        `UPDATE vendor_services SET show_review = :showReview
+          WHERE (vendor_service_id = :id OR id = :id) AND vendor_id = :vid`,
+        { showReview: showReview ? 1 : 0, id: serviceId, vid: req.user!.id },
+      );
+      const out = await vendorSvc.getListing(req.user!.id, serviceId);
+      return send(res, { message: 'Review status updated', data: out });
+    }
+    const active = activeFlag(req.body?.is_active ?? req.body?.status) ?? false;
     const out = await vendorSvc.setListingStatus(req.user!.id, serviceId, active);
     send(res, { message: 'Status updated', data: out });
   } catch (err) { next(err); }
-});
+}
+legacyVendorRouter.post('/ServiceStatusUpdate', handleServiceStatusUpdate);
+legacyVendorRouter.post('/ServiceReviewStatusUpdate', handleServiceStatusUpdate);
 
 legacyVendorRouter.post('/ServiceDetails', async (req: AuthRequest, res, next) => {
   try {
