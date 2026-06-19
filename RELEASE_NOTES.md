@@ -40,6 +40,118 @@ admin vendor/service CRUD routes, and old JWT claim names.
   `ServiceStatusUpdate`, dual-writing canonical and legacy
   `vendor_services` columns.
 
+### Audit Scope And Counts
+
+The compatibility pass was based on the Postman/collection export
+`Vayil (1).json`, compared against the current `vayil-web` backend and
+safe live probes against `app.vayil.in` / `vayil-web.vercel.app`.
+
+Collection coverage:
+
+| Surface | Count |
+|---|---:|
+| Total collection entries | 146 |
+| Admin entries | 63 |
+| Customer mobile entries | 28 |
+| Vendor mobile entries | 55 |
+
+Audit buckets before this bridge:
+
+| Bucket | Count | Release handling |
+|---|---:|---|
+| No known response-field issue from current code/docs | 77 | No code change needed |
+| High-risk admin response/request mismatch | 6 | Bridged with legacy `data` envelopes and request aliases |
+| Missing/wrong collection route | 6 | Implemented missing admin service routes; documented remaining collection issue |
+| Response-field mismatch | 7 | Bridged customer/vendor public lookup roots |
+| Request + response-field mismatch | 1 | Bridged `ServiceSubcategories` request aliases and response root |
+| Response-field mismatch + fixture/data parity risk | 1 | Added `vendorInfo` legacy fallback |
+| Request-contract mismatch | 1 | Bridged `CustomerupdatePlan` `plan_id` flow |
+| Collection URL gap | 47 | Added bare-path Vercel rewrites and backend vendor forwarding |
+
+### Audit Findings Implemented
+
+Customer APIs bridged:
+
+| API | Compatibility issue fixed |
+|---|---|
+| `POST /customer/ServiceList` | Old vendor-service listing `data[]` shape preserved from v4.5.39 |
+| `GET|POST /customer/ServiceCategories` | Returns root `categories`, not nested `data` |
+| `POST /customer/ServiceSubcategories` | Accepts `id` alias and returns root `subcategories` |
+| `POST /customer/ServiceInfo` | Returns legacy shape from `app.vayil.in` when available |
+| `POST /customer/vendorInfo` | Returns legacy vendor detail/review/category/service shape when available |
+| `POST /customer/NeedPaymentSummary` | Returns root `plan`, `planoverall`, `materials`, `materialsoverall` |
+| `POST /CustomerupdatePlan` | Accepts `plan_id` / `plans[]` and resolves `order_id` |
+
+Vendor/public APIs bridged:
+
+| API group | Compatibility issue fixed |
+|---|---|
+| `GET /getLanguages` | Returns root `languages` |
+| `GET|POST /get_states_by_country_id` | Returns root `states_list` |
+| `POST /get_city` | Returns root `city` |
+| `/service-categories`, `/service-subcategories`, `/service-tags` | Bare taxonomy URLs now route to API JSON |
+| Bare vendor endpoints such as `/step1`, `/vendorBalance`, `/vendorEnuqiryList` | Vercel now forwards collection paths to the backend |
+| `saveServiceListing` / `updateServiceListing` | Old request fields accepted and dual-written |
+| `ServiceStatusUpdate` / `ServiceReviewStatusUpdate` | `is_active`, `status`, and `show_review` handled in old format |
+
+Admin APIs bridged:
+
+| API | Compatibility issue fixed |
+|---|---|
+| `POST /Admin/GetVendorList` | Accepts `limit`; returns legacy `data[]` plus existing `vendors[]` |
+| `POST /Admin/VendorDetails` | Returns `data: { vendor, services, queue }` plus root aliases |
+| `POST /Admin/VendorStatusUpdate` | Returns success message, `data`, and status aliases |
+| `POST /Admin/VendorKycUpdate` | Accepts `status` alias for `kyc_status` and returns `data` |
+| `POST /Admin/VendorDelete` | Returns legacy `data` envelope |
+| `POST /Admin/saveVendor` | Accepts `vendorId`, `full_name`, `profile_photo_url`, KYC aliases, and other old fields |
+| `POST /Admin/SaveServiceListing` | Added missing route; dual-writes canonical and legacy service columns |
+| `POST /Admin/UpdateServiceListing` | Added missing route; accepts collection request body |
+| `POST /Admin/ServiceStatusUpdate` | Added missing route; supports `is_active` and `show_review` |
+| `POST /Admin/ServiceDelete` | Added missing route; soft-deletes via old-compatible fields |
+
+### Functionality Breakage Impact
+
+This is the mobile/Claude handoff. The API contract should now remain
+unchanged; any app-side work should be limited to parsing verification,
+null-safety, and UI smoke tests.
+
+| Area | Breakage if the old contract is not respected | Mobile/Claude guidance |
+|---|---|---|
+| Auth token parsing | Valid old customer/vendor/admin tokens can return `401` or `403` because old claims use `userId`, `user_id`, `admin_id`, or `role` | Keep sending `Authorization: Bearer <token>`; do not rename token claims client-side |
+| Customer service list | Home/service listing can show categories instead of vendor services, or crash on missing service fields | Continue reading `id`, `vendor_id`, `service_title`, `service_image`, `company_name`, `rating`, `review_count`, `booking_text`, `category_name` |
+| Customer categories/subcategories | Filter chips and dropdowns can be empty if app reads `data` instead of old roots | Read `categories` and `subcategories`; tolerate null `icon` |
+| Customer service/vendor detail | Detail pages can lose reviews, portfolio, similar vendors, cart state, category/service roots | Keep old nested model mapping; do not flatten the API response |
+| Customer payment summary | Payment cards can show blank totals if the model only reads nested `data` | Read root `plan`, `planoverall`, `materials`, `materialsoverall` |
+| Customer plan approval | Approval/revision can fail if app changes `plan_id` to a new field | Keep the existing request body; verify approve/revision flow |
+| Vendor lookups | Signup/onboarding dropdowns can be empty | Read root `languages`, `states_list`, and `city` |
+| Vendor bare URLs | Existing app can get Vercel HTML/404/JSON parse errors if paths are changed | Keep bare paths such as `/step1`, `/vendorBalance`, `/vendorEnuqiryList`; do not prepend `/vendor` as a workaround |
+| Vendor service create/update | Services can save with blank title/category/image/certificate fields | Keep sending `service_title`, `service_category`, `service_subcategory`, `unit_name`, `service_image`, `service_image_url`, `certificate`, `minimum_fee` |
+| Vendor service status/review toggle | `"0"` can be treated as active or review toggle can be ignored | Verify `is_active` and `show_review` request/response handling |
+| Vendor enquiry dashboard | Items can appear in wrong tabs | Verify root arrays `new_enquiry`, `ongoing`, and `request_quotation` |
+| Vendor plan/material screens | Timeline/progress/material totals can be blank if only `data` is parsed | Verify old top-level progress fields and nested arrays |
+| Vendor payment/wallet screens | Earnings and payment cards can show zero values | Verify `balance`, `total_earning`, `total_payout`, `TotalAmount`, `TotalPaidAmount`, `invoice_url` |
+| Vendor bank screens | Bank details can fail if bare paths are changed or web shape is assumed | Keep current bare bank paths and add null handling only |
+| Admin vendor list/detail | Admin screens can break if they expect `data` but only consume new web-only fields | Prefer `data`; tolerate extra `vendors`, `vendor`, `services`, `queue` aliases |
+| Admin vendor status/KYC/delete | Actions can fail if request fields are renamed or response lacks old success/data assumptions | Keep request bodies as in the collection; refresh UI from `success` + `data` |
+| Admin save vendor | Form submission can reject old fields or silently drop profile/KYC data | Keep old fields such as `vendorId`, `full_name`, `profile_photo_url`, `years_of_experience`, `kyc_id_type`, `kyc_id_image` |
+| Admin service CRUD | Service management can 404 or create services invisible to customer mobile | Keep `/Admin/SaveServiceListing`, `/Admin/UpdateServiceListing`, `/Admin/ServiceStatusUpdate`, `/Admin/ServiceDelete`; verify created services appear in customer `ServiceList` |
+
+### Remaining Verification Risks
+
+- Authenticated vendor/admin mutation endpoints were not executed
+  against production during the audit because they require safe test
+  accounts and can change live data.
+- `ServiceInfo` and `vendorInfo` preserve exact old detail shape through
+  a legacy-host fallback. If `app.vayil.in` is unavailable or times out,
+  the local fallback shape is less rich.
+- The collection contains at least one path-level issue:
+  admin "Update Bank Status" points at `/customer/payment_update`. This
+  remains a collection/data issue unless the mobile app truly calls that
+  path.
+- Exact old `message` strings for admin mutations still need live
+  confirmation if the UI depends on literal text. Structural fields are
+  bridged.
+
 ### Verification
 
 ```bash
