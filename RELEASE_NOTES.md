@@ -1,5 +1,80 @@
 # Release Notes
 
+## v4.5.41 — Homepage PRD-led design refresh and brand alignment (2026-06-20)
+
+### Why
+
+The public homepage needed to better communicate Vayil's PRD positioning:
+verified professionals, transparent quote comparison, milestone-based
+project control, and trust infrastructure for home renovation and repair
+work. The design pass also needed to keep the current sign-in behavior,
+logo placement, and hero/banner structure stable while improving the
+content below the banner.
+
+### What Changed
+
+- Reworked the homepage content below the banner around real Vayil project
+  journeys instead of generic marketplace copy.
+- Added PRD-aligned service categories:
+  Home Renovation, Kitchen Remodel, Bathroom Remodel, Electrical,
+  Plumbing, Painting & Waterproofing, AC & Appliance Services, and
+  Interior Design Support.
+- Added a trust-pillar strip under the banner for verified professionals,
+  transparent pricing, milestone protection, and execution records.
+- Updated the popular-services strip to use the brand orange palette:
+  `orange-100/80` as the base with a subtle `orange/15` overlay and
+  `orange-200/60` borders.
+- Replaced generic provider cards with verified-professional examples for
+  civil contracting, plumbing, electrical work, and interior execution.
+- Expanded the "How Vayil Works" section into a six-step project flow:
+  requirement sharing, verified quotes, scope/pricing comparison,
+  milestone locking, progress-based payment, and project closure.
+- Added homeowner benefits focused on vendor verification, quote
+  transparency, milestone control, change tracking, dispute support, and
+  project visibility.
+- Added vendor benefits focused on high-intent leads, profile credibility,
+  safer payments, project documentation, reputation building, and structured
+  growth.
+- Added a trust-infrastructure section explaining verified onboarding,
+  standardized quotes, milestone payments, change-order governance, and
+  dispute-resolution support.
+- Added mobile workflow and final conversion CTAs using the existing app
+  badge component styles.
+- Updated the resources section with planning content tied to renovation
+  quote comparison, kitchen remodel decisions, seepage checks, milestone
+  payments, and vendor trust building.
+- Swapped the homepage logo glyph rendering to the supplied orange logo PNG
+  so it displays without cropping and remains aligned with the brand asset.
+- Added the light homepage renovation hero image asset currently used by
+  the banner.
+
+### Design Notes
+
+- The sign-in button behavior and placement were not changed.
+- The homepage logo section keeps the existing layout while using the
+  supplied orange logo asset.
+- The homepage banner structure was preserved after the final requested
+  content pass.
+- Responsive fixes were added for below-banner section headings so the new
+  homepage content stacks cleanly on narrow screens.
+- The remaining small-screen overflow belongs to the pre-existing header
+  and popular-services navigation behavior, which was intentionally left
+  unchanged outside the requested color treatment.
+
+### Verification
+
+```bash
+npx next lint --file src/app/page.tsx
+git diff --check
+```
+
+Focused lint passed with existing `@next/next/no-img-element` warnings
+only. The homepage was previewed locally at `http://localhost:3002/`;
+the updated sections rendered, the popular-services strip showed the
+brand-orange overlay, and the browser console had no errors.
+
+---
+
 ## v4.5.40 — Full mobile collection response-compatibility bridge pass (2026-06-19)
 
 ### Why
