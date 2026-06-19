@@ -12,6 +12,11 @@ import toast from 'react-hot-toast'
 
 type Tab = 'profile' | 'services' | 'reviews'
 
+const serviceIsActive = (service: any) => {
+  const value = service?.is_active ?? service?.status
+  return value === 'active' || value === 1 || value === true || value === '1'
+}
+
 export default function VendorListingPage() {
   const { user, setAuth, token } = useUserAuth()
   const [tab, setTab] = useState<Tab>('profile')
@@ -105,8 +110,8 @@ export default function VendorListingPage() {
     finally { setSaving(false) }
   }
 
-  const toggleStatus = async (serviceId: number, current: string) => {
-    const next = current === 'active' ? 'inactive' : 'active'
+  const toggleStatus = async (serviceId: number, currentActive: boolean) => {
+    const next = currentActive ? 'inactive' : 'active'
     try {
       await vendorApi.updateServiceStatus({ service_id: serviceId, status: next })
       setServices(prev => prev.map(s => (s.id || s.service_id || s.vendor_service_id) === serviceId ? { ...s, status: next } : s))
@@ -114,7 +119,7 @@ export default function VendorListingPage() {
     } catch { toast.error('Failed to update status') }
   }
 
-  const activeCount   = services.filter((s: any) => s.status === 'active').length
+  const activeCount   = services.filter(serviceIsActive).length
   const inactiveCount = services.length - activeCount
 
   return (
@@ -234,7 +239,7 @@ export default function VendorListingPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {services.map((s: any) => {
                   const sid = s.id || s.service_id || s.vendor_service_id
-                  const active = s.status === 'active'
+                  const active = serviceIsActive(s)
                   return (
                     <div key={sid} className="border border-gray-100 rounded-2xl p-4 hover:border-orange/30 hover:shadow-sm transition flex flex-col">
                       <div className="flex items-start gap-3">
@@ -249,9 +254,9 @@ export default function VendorListingPage() {
                         </div>
                       </div>
                       <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
-                        <StatusBadge status={s.status} />
+                        <StatusBadge status={active ? 'active' : 'inactive'} />
                         <div className="flex items-center gap-2">
-                          <button onClick={() => toggleStatus(sid, s.status)}
+                          <button onClick={() => toggleStatus(sid, active)}
                             className="text-gray-400 hover:text-navy transition p-1" aria-label="Toggle status">
                             {active ? <ToggleRight className="w-6 h-6 text-orange" /> : <ToggleLeft className="w-6 h-6" />}
                           </button>

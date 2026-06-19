@@ -23,9 +23,32 @@ function searchInList(list: DummyVendor[], query: string): DummyVendor[] {
     v.service_label.toLowerCase().includes(q) ||
     v.service_slug.toLowerCase().includes(q) ||
     v.specialties.some(s => s.toLowerCase().includes(q)) ||
-    v.services.some(s => s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)) ||
+    v.services.some(s =>
+      s.title.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q) ||
+      String((s as any).category_name ?? '').toLowerCase().includes(q) ||
+      String((s as any).category_slug ?? '').toLowerCase().includes(q)
+    ) ||
     v.tagline.toLowerCase().includes(q)
   )
+}
+
+function vendorCategorySlugs(vendor: DummyVendor): string[] {
+  const slugs = new Set<string>()
+  if (SERVICE_CATEGORIES.some(c => c.slug === vendor.service_slug)) {
+    slugs.add(vendor.service_slug)
+  }
+  vendor.services.forEach(service => {
+    const slug = String((service as any).category_slug ?? '').trim()
+    if (slug && SERVICE_CATEGORIES.some(c => c.slug === slug)) slugs.add(slug)
+  })
+  return Array.from(slugs)
+}
+
+function vendorMatchesCategories(vendor: DummyVendor, selectedCategories: string[]): boolean {
+  if (selectedCategories.length === 0) return true
+  const categorySlugs = vendorCategorySlugs(vendor)
+  return selectedCategories.some(slug => categorySlugs.includes(slug))
 }
 
 /* ─── Wrapper for Suspense (required for useSearchParams in Next 14) ─── */
@@ -74,7 +97,7 @@ function SearchInner() {
     let v: DummyVendor[] = queryParam ? searchInList(allVendors, queryParam) : [...allVendors]
 
     if (selectedCategories.length > 0) {
-      v = v.filter(x => selectedCategories.includes(x.service_slug))
+      v = v.filter(x => vendorMatchesCategories(x, selectedCategories))
     }
     if (minRating > 0)        v = v.filter(x => x.rating >= minRating)
     if (verifiedOnly)         v = v.filter(x => x.kyc_verified)
@@ -97,7 +120,11 @@ function SearchInner() {
   const counts = useMemo(() => {
     const base = queryParam ? searchInList(allVendors, queryParam) : allVendors
     const map: Record<string, number> = {}
-    base.forEach(v => { map[v.service_slug] = (map[v.service_slug] || 0) + 1 })
+    base.forEach(v => {
+      vendorCategorySlugs(v).forEach(slug => {
+        map[slug] = (map[slug] || 0) + 1
+      })
+    })
     return map
   }, [allVendors, queryParam])
 

@@ -10,14 +10,62 @@ commonRouter.get('/health', (_req, res) => ok(res, { status: 'ok', service: 'vay
 // Same paths the frontend already calls (/customer/vendors,
 // /customer/vendors/:id); also exposed at /vendors so signed-in users
 // hit them via the customerClient without an extra round-trip.
+const activeListingWhere = (alias: string) =>
+  `LOWER(CAST(COALESCE(${alias}.is_active, ${alias}.status, 0) AS CHAR)) IN ('1', 'active', 'true')
+        AND COALESCE(${alias}.is_deleted, 0) = 0`;
+
+async function activeListingsForVendors(vendorIds: Array<number | string>) {
+  if (!vendorIds.length) return [];
+  return query<any>(
+    `SELECT
+        vs.*,
+        COALESCE(vs.service_title, vs.title) AS title,
+        COALESCE(vs.unit_name, vs.unit) AS unit,
+        COALESCE(sc.slug, LOWER(REPLACE(sc.name, ' ', '-'))) AS category_slug,
+        sc.name AS category_name
+       FROM vendor_services vs
+       LEFT JOIN service_categories sc
+              ON sc.category_id = vs.category_id
+              OR sc.id = vs.category_id
+              OR sc.category_id = CAST(vs.service_category AS UNSIGNED)
+              OR sc.id = CAST(vs.service_category AS UNSIGNED)
+              OR sc.slug = vs.service_category
+              OR sc.name = vs.service_category
+      WHERE vs.vendor_id IN (:vendorIds)
+        AND ${activeListingWhere('vs')}
+      ORDER BY vs.vendor_service_id DESC`,
+    { vendorIds },
+  );
+}
+
 async function publicVendorList(_req: any, res: any, next: any) {
   try {
-    const vendors = await query<any>(
-      `SELECT vendor_id AS id, name, company_name, city, rating, status
+    const rows = await query<any>(
+      `SELECT vendor_id AS id, vendor_id, name, company_name, city, rating, status,
+              profile_image, profile_photo, onboarded_date, years_of_experience,
+              mobile, phone, email
          FROM vendors
-        WHERE status = 'verified'
+        WHERE COALESCE(is_deleted, 0) = 0
+          AND COALESCE(accept_enquires, 1) = 1
+          AND EXISTS (
+            SELECT 1
+              FROM vendor_services vs_check
+             WHERE vs_check.vendor_id = vendors.vendor_id
+               AND ${activeListingWhere('vs_check')}
+          )
         ORDER BY vendor_id DESC LIMIT 100`,
     );
+    const listings = await activeListingsForVendors(rows.map((v: any) => v.vendor_id || v.id));
+    const byVendor = new Map<number, any[]>();
+    for (const listing of listings) {
+      const vendorId = Number(listing.vendor_id);
+      const bucket = byVendor.get(vendorId) ?? [];
+      bucket.push(listing);
+      byVendor.set(vendorId, bucket);
+    }
+    const vendors = rows
+      .map((vendor: any) => ({ ...vendor, listings: byVendor.get(Number(vendor.vendor_id || vendor.id)) ?? [] }))
+      .filter((vendor: any) => vendor.listings.length > 0);
     ok(res, { vendors });
   } catch (err) { next(err); }
 }
@@ -29,10 +77,7 @@ async function publicVendorDetail(req: any, res: any, next: any) {
       { id: req.params.id },
     );
     if (!vendor) throw new ApiError(404, 'Vendor not found');
-    const listings = await query<any>(
-      `SELECT * FROM vendor_services WHERE vendor_id = :id AND status = 1`,
-      { id: req.params.id },
-    );
+    const listings = await activeListingsForVendors([req.params.id]);
     ok(res, { vendor, listings });
   } catch (err) { next(err); }
 }

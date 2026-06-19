@@ -1,5 +1,53 @@
 # Release Notes
 
+## v4.5.43 — Active vendor services appear in public search (2026-06-20)
+
+### Why
+
+Vendor Studio service toggles were updating service status, but newly
+activated services were not appearing in the customer search experience.
+The public `/search` page reads from the `/vendors` marketplace feed, while
+active service rows were only visible through the legacy customer service
+list endpoint. As a result, search cards could load as vendor shells with
+no active service listings, and the category filter counts could miss
+services that were active for that vendor.
+
+### What Changed
+
+- Updated the public `/vendors` and `/customer/vendors` feed to attach
+  active, non-deleted vendor service listings to each vendor row.
+- Added service category metadata to public vendor listings so customer
+  search can match and filter by active service categories such as
+  Painting, Electrical, Plumbing, and AC Repair.
+- Changed the public vendor detail route to use the same active-service
+  lookup as the list route, keeping search cards and vendor profile data
+  consistent.
+- Updated the live vendor adapter to preserve active service listings,
+  resolve category labels/slugs, and use category imagery when mapping
+  backend rows into the search UI model.
+- Updated `/search` filtering and category counts to consider all active
+  service categories on a vendor, not only the vendor-level primary
+  `service_slug`.
+- Normalized vendor service status handling in Vendor Studio list/detail
+  screens and the legacy vendor service list so backend values like `1`,
+  `0`, `active`, and `inactive` render as proper active/inactive badges
+  and toggles.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+npx next lint --file src/app/search/page.tsx --file src/lib/adapters/vendor.ts --file src/app/vendor-studio/listing/page.tsx --file 'src/app/vendor-studio/services/[id]/page.tsx' --file src/app/vendor/services/page.tsx
+git diff --check
+npm run build
+```
+
+Focused lint passed with existing image/useEffect warnings only. The full
+Next.js production build and backend TypeScript build completed
+successfully.
+
+---
+
 ## v4.5.42 — Homepage Indian-context section image refresh (2026-06-20)
 
 ### Why

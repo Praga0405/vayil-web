@@ -11,7 +11,7 @@
  *                     description, price, unit, status
  */
 
-import type { DummyVendor, DummyService, DummyReview } from '@/lib/dummyData'
+import { SERVICE_CATEGORIES, type DummyVendor, type DummyService, type DummyReview } from '@/lib/dummyData'
 
 type BackendVendor = {
   vendor_id: number
@@ -37,10 +37,14 @@ type BackendListing = {
   vendor_service_id: number
   vendor_id: number
   category_id?: number | null
+  category_name?: string | null
+  category_slug?: string | null
   title?: string | null
+  service_title?: string | null
   description?: string | null
   price?: number | string | null
   unit?: string | null
+  unit_name?: string | null
   status?: boolean | number | null
 }
 
@@ -68,15 +72,43 @@ function priceTypeFromUnit(unit?: string | null): DummyService['price_type'] {
   }
 }
 
+const slugify = (value?: string | null) =>
+  (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+function resolveCategory(row?: BackendListing | null) {
+  if (!row) return null
+  const rawSlug = slugify(row.category_slug)
+  const rawName = row.category_name ?? ''
+  const rawCategory = row.category_id ? `category-${row.category_id}` : ''
+  return (
+    SERVICE_CATEGORIES.find(c => c.slug === rawSlug) ||
+    SERVICE_CATEGORIES.find(c => c.label.toLowerCase() === rawName.toLowerCase()) ||
+    SERVICE_CATEGORIES.find(c => c.slug === slugify(rawName)) ||
+    SERVICE_CATEGORIES.find(c => c.slug === rawCategory) ||
+    null
+  )
+}
+
 export function adaptListingToService(row: BackendListing): DummyService {
-  return {
+  const category = resolveCategory(row)
+  const categorySlug = category?.slug ?? slugify(row.category_slug ?? row.category_name)
+  const service: DummyService = {
     id:          String(row.vendor_service_id),
-    title:       row.title ?? 'Untitled service',
+    title:       row.service_title ?? row.title ?? 'Untitled service',
     price:       Number(row.price ?? 0),
-    price_type:  priceTypeFromUnit(row.unit),
+    price_type:  priceTypeFromUnit(row.unit_name ?? row.unit),
     description: row.description ?? '',
-    image:       'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=400&fit=crop',
+    image:       category?.hero_image ?? 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=400&fit=crop',
   }
+  return Object.assign(service, {
+    category_slug: categorySlug || undefined,
+    category_name: category?.label ?? row.category_name ?? undefined,
+  })
 }
 
 /**
@@ -105,17 +137,16 @@ export function adaptVendorDetail(
     ? Math.min(...services.map(s => s.price).filter(n => n > 0)) || 0
     : 0
 
-  // Service slug: fall back to lowercased category from first listing, or a generic.
-  const firstCategory = listings[0]?.category_id ? `category-${listings[0].category_id}` : 'home-services'
+  const firstCategory = resolveCategory(listings[0])
 
   return {
     id:              String(vId),
-    service_slug:    firstCategory,
-    service_label:   'Home Services',
+    service_slug:    firstCategory?.slug ?? 'home-services',
+    service_label:   firstCategory?.label ?? 'Home Services',
     company_name:    company,
     owner_name:      owner,
     avatar:          photo || placeholderAvatar(company),
-    cover_image:     placeholderCover,
+    cover_image:     firstCategory?.hero_image ?? placeholderCover,
     city:            vendor.city ?? 'Coimbatore',
     area:            vendor.city ?? 'Coimbatore',
     pincode:         '641001',
@@ -157,20 +188,22 @@ export function adaptVendorDetail(
  */
 type BackendVendorListRow = {
   id: number
+  vendor_id?: number | null
   name?: string | null
   company_name?: string | null
   city?: string | null
   rating?: number | string | null
   status?: string | null
+  listings?: BackendListing[]
 }
 
 export function adaptVendorListRow(row: BackendVendorListRow): DummyVendor {
   return adaptVendorDetail({
-    vendor_id:    row.id,
+    vendor_id:    row.vendor_id ?? row.id,
     name:         row.name ?? undefined,
     company_name: row.company_name ?? undefined,
     city:         row.city ?? undefined,
     rating:       row.rating ?? undefined,
     status:       row.status ?? undefined,
-  }, [], [])
+  }, row.listings ?? [], [])
 }

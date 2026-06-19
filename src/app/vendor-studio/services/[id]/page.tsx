@@ -32,6 +32,9 @@ const UNIT_OPTIONS = [
   { value: 'day',  label: 'Per day' },
 ]
 
+const serviceIsActive = (status: unknown) =>
+  status === 'active' || status === 1 || status === true || status === '1'
+
 export default function EditServicePage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
@@ -72,7 +75,7 @@ export default function EditServicePage() {
       setCats(Array.isArray(cats) ? cats : [])
       const tagList = tr?.data?.tags || tr?.data?.data || tr?.data?.result || []
       setTags(Array.isArray(tagList) ? tagList : [])
-      setStatus(s.status || 'active')
+      setStatus(serviceIsActive(s.is_active ?? s.status) ? 'active' : 'inactive')
       setExistingImages(Array.isArray(s.images) ? s.images : [])
       setForm({
         title:          s.title || s.service_title || '',
@@ -143,7 +146,8 @@ export default function EditServicePage() {
   }
 
   const toggleStatus = async () => {
-    const next = status === 'active' ? 'inactive' : 'active'
+    const active = serviceIsActive(status)
+    const next = active ? 'inactive' : 'active'
     setToggling(true)
     try {
       await vendorApi.updateServiceStatus({ service_id: sid, status: next })
@@ -154,6 +158,8 @@ export default function EditServicePage() {
   }
 
   if (!loaded) return <PageLoader />
+
+  const active = serviceIsActive(status)
 
   return (
     <div className="space-y-6 pb-10">
@@ -172,12 +178,12 @@ export default function EditServicePage() {
                 type="button"
                 onClick={toggleStatus}
                 disabled={toggling}
-                aria-label={status === 'active' ? 'Deactivate this service' : 'Activate this service'}
-                aria-pressed={status === 'active'}
+                aria-label={active ? 'Deactivate this service' : 'Activate this service'}
+                aria-pressed={active}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-navy hover:text-orange transition disabled:opacity-50 px-2 py-2 rounded-lg hover:bg-gray-50"
               >
-                {status === 'active' ? <ToggleRight className="w-5 h-5 text-orange" /> : <ToggleLeft className="w-5 h-5" />}
-                {status === 'active' ? 'Deactivate' : 'Activate'}
+                {active ? <ToggleRight className="w-5 h-5 text-orange" /> : <ToggleLeft className="w-5 h-5" />}
+                {active ? 'Deactivate' : 'Activate'}
               </button>
             </div>
           </div>

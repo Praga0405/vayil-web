@@ -6,6 +6,11 @@ import { PageLoader, EmptyState, StatusBadge, Button } from '@/components/ui'
 import { Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+const serviceIsActive = (service: any) => {
+  const value = service?.is_active ?? service?.status
+  return value === 'active' || value === 1 || value === true || value === '1'
+}
+
 export default function VendorServicesPage() {
   const [services, setServices] = useState<any[]>([])
   const [loading,  setLoading]  = useState(true)
@@ -22,8 +27,8 @@ export default function VendorServicesPage() {
 
   useEffect(() => { load() }, [])
 
-  const toggleStatus = async (serviceId: number, current: string) => {
-    const next = current === 'active' ? 'inactive' : 'active'
+  const toggleStatus = async (serviceId: number, currentActive: boolean) => {
+    const next = currentActive ? 'inactive' : 'active'
     try {
       await vendorApi.updateServiceStatus({ service_id: serviceId, status: next })
       setServices(prev => prev.map(s => (s.id || s.service_id) === serviceId ? { ...s, status: next } : s))
@@ -54,6 +59,7 @@ export default function VendorServicesPage() {
         <div className="space-y-3">
           {services.map((s: any) => {
             const sid = s.id || s.service_id
+            const active = serviceIsActive(s)
             return (
               <div key={sid} className="card flex items-center gap-4">
                 <div className="w-14 h-14 rounded-xl bg-navy-50 overflow-hidden shrink-0">
@@ -65,13 +71,10 @@ export default function VendorServicesPage() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-navy text-sm truncate">{s.title || s.service_name}</p>
                   {s.price && <p className="text-xs text-orange font-semibold">₹{Number(s.price).toLocaleString('en-IN')}</p>}
-                  <StatusBadge status={s.status || 'active'} />
+                  <StatusBadge status={active ? 'active' : 'inactive'} />
                 </div>
-                <button onClick={() => toggleStatus(sid, s.status || 'active')} className="text-[var(--text-secondary)] hover:text-navy transition">
-                  {s.status === 'inactive'
-                    ? <ToggleLeft className="w-6 h-6" />
-                    : <ToggleRight className="w-6 h-6 text-green-500" />
-                  }
+                <button onClick={() => toggleStatus(sid, active)} className="text-[var(--text-secondary)] hover:text-navy transition">
+                  {active ? <ToggleRight className="w-6 h-6 text-green-500" /> : <ToggleLeft className="w-6 h-6" />}
                 </button>
               </div>
             )
