@@ -173,8 +173,11 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
       if (cityRow?.city_id) cityId = Number(cityRow.city_id);
     }
 
+    // v4.5.38 — `is_active` may be NULL for listings created via the new
+    // backend's vendorSvc.createListing which writes `status` instead.
+    // Coalesce both so new + legacy listings both surface.
     const where: string[] = [
-      `COALESCE(vs.is_active, 0) = 1`,
+      `COALESCE(vs.is_active, vs.status, 0) = 1`,
       `COALESCE(vs.is_deleted, 0) = 0`,
       `COALESCE(v.is_deleted, 0) = 0`,
       `COALESCE(v.accept_enquires, 1) = 1`,
@@ -208,7 +211,7 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
         vs.pricing_type                                    AS pricing_type,
         vs.unit_name                                       AS unit_name,
         vs.price                                           AS price,
-        vs.service_image                                   AS service_image,
+        COALESCE(vs.service_image, vs.thumbnail)           AS service_image,
         vs.certificate_url                                 AS certificate_url,
         COALESCE(vs.is_active, vs.status, 1)               AS is_active,
         COALESCE(vs.show_review, 1)                        AS show_review,
