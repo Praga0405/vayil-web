@@ -772,8 +772,8 @@ export default function HomePage() {
           {/* Right — real image */}
           <div className="hidden lg:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
             <img
-              src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=626&h=504&fit=crop"
-              alt="Happy homeowner"
+              src="/vayil-homeowners-milestone.jpg"
+              alt="Indian homeowner documenting renovation milestone progress"
               className="w-full h-full object-cover"
             />
           </div>
@@ -786,8 +786,8 @@ export default function HomePage() {
           {/* Left — real image */}
           <div className="hidden lg:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
             <img
-              src="https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=626&h=504&fit=crop"
-              alt="Professional vendor at work"
+              src="/vayil-professionals-growth.jpg"
+              alt="Indian service professional preparing project documentation"
               className="w-full h-full object-cover"
             />
           </div>

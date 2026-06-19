@@ -1,5 +1,57 @@
 # Release Notes
 
+## v4.5.42 — Homepage Indian-context section image refresh (2026-06-20)
+
+### Why
+
+The homeowner and professional value sections needed imagery that felt
+closer to the Vayil product story and Indian home-services market. The
+previous section photos were generic stock-style visuals and did not
+clearly support the PRD themes of milestone visibility, verified work,
+professional documentation, and structured vendor growth.
+
+### What Changed
+
+- Added a new homeowner section image showing an Indian homeowner
+  documenting renovation milestone progress in a kitchen/home-improvement
+  setting.
+- Added a new professional/vendor section image showing an Indian service
+  professional preparing project documentation with tools, material samples,
+  and project paperwork.
+- Replaced the external stock image URLs in the homeowner and vendor value
+  sections with local project assets:
+  `public/vayil-homeowners-milestone.jpg` and
+  `public/vayil-professionals-growth.jpg`.
+- Converted the generated images to compressed JPEG assets for the website,
+  reducing each image from roughly 2 MB PNGs to roughly 335-371 KB JPEGs.
+- Updated alt text to describe the new Indian-context scenarios:
+  milestone progress documentation for homeowners and project
+  documentation preparation for professionals.
+
+### Design Notes
+
+- The new homeowner image is intentionally distinct from the homepage hero:
+  it focuses on a homeowner capturing progress and approvals rather than a
+  seated quote-review consultation.
+- The new professional image supports the vendor growth content by showing
+  organized tools, project documentation, and a credible professional
+  workflow rather than an abstract tool close-up.
+- No layout, sign-in, logo, banner, or CTA behavior changed in this pass.
+
+### Verification
+
+```bash
+npx next lint --file src/app/page.tsx
+git diff --check
+```
+
+Focused lint passed with existing `@next/next/no-img-element` warnings
+only. The homepage preview at `http://localhost:3002/` was refreshed and
+both local section images loaded successfully with no browser console
+errors.
+
+---
+
 ## v4.5.41 — Homepage PRD-led design refresh and brand alignment (2026-06-20)
 
 ### Why
