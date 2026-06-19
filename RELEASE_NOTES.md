@@ -1,5 +1,85 @@
 # Release Notes
 
+## v4.5.36 — Close remaining audit gaps: real enquiry categorisation + literal invoice URL + admin endpoint gap report (2026-06-19)
+
+### Why
+
+The v4.5.35 audit document flagged three remaining "best-guess" items:
+1. `vendorEnuqiryList` categorised by a heuristic on `enquiry.status` strings
+2. `invoice_url` was a placeholder pointing at our new domain
+3. `/Admin/*` endpoints had not been audited the same way mobile endpoints were
+
+This release closes all three.
+
+### 1. `vendorEnuqiryList` — real categorisation logic
+
+Replaced the heuristic with the exact logic from the old
+`app.vayil.in vendorEnuqiryList` handler (extracted from the April 12
+source archive):
+
+```
+request_quotation = enquiry has NO matching order
+new_enquiry       = enquiry has order with order_step_logs.step === 1
+ongoing           = enquiry has order with order_step_logs.step === 2
+```
+
+Handler now JOINs `enquiries`, `orders`, `enquiry_quotations`,
+`order_step_logs`, and `order_plan`, then categorises per-enquiry the
+same way the old API did. Each bucket item carries the nested
+`quotations[]` + `orders[{plans, order_step_logs}]` structure mobile
+expects.
+
+### 2. `invoice_url` — match old API literally
+
+Old API: `invoice_url: "https://app.vayil.in/admin/invoice/"` (literal string)
+v4.5.35: `invoice_url: "https://vayil-web.vercel.app/invoice/"` (made up)
+v4.5.36: `invoice_url: process.env.INVOICE_URL_BASE || "https://app.vayil.in/admin/invoice/"` (back to literal)
+
+Mobile concatenates `${invoiceUrl}${order_id}/${intent_id}` to open
+the invoice. Preserving the literal old URL means existing builds get
+identical behaviour. Override via `INVOICE_URL_BASE` env if we ever
+host the invoice page on the new stack.
+
+Applied to both `vendorPaymentSummary` and `customer/getPaymentDetails`.
+Also converted amount fields to `.toFixed(2)` strings to match the old
+API's number formatting exactly.
+
+### 3. `/Admin/*` gap report — `docs/ADMIN_ENDPOINTS_GAP_AUDIT.md`
+
+Audited the 74 admin endpoints from the old backend against the new
+`adminMobile.ts`:
+
+| | Count |
+|---|---|
+| Old `/Admin/*` endpoints | 74 |
+| Found in new backend | 51 |
+| **Missing** | **23** |
+
+Coverage is 69% (vs 98% on the mobile side). The 23 missing endpoints
+break down by priority:
+
+- **10 HIGH** (Dashboard, Vendor CRUD, Service Listing CRUD, KYC approval)
+- **9 MEDIUM** (Tool CRUD, master data CRUD, banking)
+- **4 LOW** (workarounds exist)
+
+Implementation deferred — see the gap-audit doc for the decision matrix
+and recommended next steps. Action depends on whether the admin panel
+(`Praga0405/Vayil-Admin-Panel-main`) is already pointing at the new
+backend.
+
+### Verification
+
+`smoke:bridges` rerun against production: still **62/62 pass**. No
+regressions from the categorisation rewrite.
+
+```bash
+$ API_BASE=https://vayil-web.vercel.app npm run smoke:bridges
+… 62 passed, 0 failed
+✅ all bridges + new endpoints verified
+```
+
+---
+
 ## v4.5.35 — Proactive mobile-compat audit: 10 response-shape bridges + 7 missing endpoints (2026-06-18)
 
 ### Why

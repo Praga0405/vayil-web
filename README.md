@@ -147,7 +147,7 @@ The README was last refreshed at v4.5.1. Since then 24 versions shipped, several
 
 Up through v4.5.4 the production setup was "Vercel frontend + Render backend + Render MySQL." From **v4.5.6** onward Vayil ships as a single Vercel deployment with the backend mounted as a serverless function — no separate backend host.
 
-| Layer                | Before (v4.5.1)            | Now (v4.5.35)                                                                                                          |
+| Layer                | Before (v4.5.1)            | Now (v4.5.36)                                                                                                          |
 |----------------------|-----------------------------|------------------------------------------------------------------------------------------------------------------------|
 | Frontend             | Vercel                      | Vercel (unchanged)                                                                                                     |
 | Backend              | Render `vayil-backend` service | Vercel serverless function via `pages/api/[...all].ts` catch-all that imports the Express app                          |
