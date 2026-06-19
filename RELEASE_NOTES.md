@@ -1,5 +1,46 @@
 # Release Notes
 
+## v4.5.39 — Customer `ServiceList` mobile response parity fallback (2026-06-19)
+
+### Why
+
+The mobile team is testing `POST /customer/ServiceList` against the new
+Vercel backend and expects the legacy `app.vayil.in` response shape.
+The old API returns vendor service listings in `data[]`, with fields
+such as `id`, `vendor_id`, `service_title`, `service_image`,
+`company_name`, `rating`, `review_count`, `booking_text`, and
+`category_name`.
+
+Recent fixes in v4.5.37/v4.5.38 changed the new handler away from
+category rows and toward the old vendor-service-listing shape, but the
+Vercel TiDB dataset can still return an empty array for the same
+Coimbatore request that returns rows on `app.vayil.in`.
+
+### What Changed
+
+- `POST /customer/ServiceList` now keeps the legacy mobile response
+  envelope:
+  `{ success: true, message: "Service list fetched successfully", data: [...] }`.
+- Local TiDB rows are normalized to the old `data[]` item shape:
+  `booking_count` is removed, `booking_text` is preserved, and `rating`
+  is formatted as a one-decimal string like `"0.0"`.
+- If the new backend query returns no rows, the route temporarily falls
+  back to `https://app.vayil.in/customer/ServiceList` and returns that
+  legacy `data[]` payload directly. This is a narrow bridge for mobile
+  cutover testing while the remaining endpoint audit continues.
+- The fallback URL can be overridden with
+  `LEGACY_CUSTOMER_SERVICE_LIST_URL`.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+```
+
+Build passed locally before pushing.
+
+---
+
 ## v4.5.36 — Close remaining audit gaps: real enquiry categorisation + literal invoice URL + admin endpoint gap report (2026-06-19)
 
 ### Why
