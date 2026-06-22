@@ -349,10 +349,10 @@ export default function HomePage() {
               <Plus className="w-3 h-3" /> Post a Job
             </a>
             {!user && (
-              <button onClick={() => { setLoginTab('vendor'); setLoginOpen(true) }}
+              <Link href="/become-a-vendor"
                 className="hover:text-white transition flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Become a vendor
-              </button>
+              </Link>
             )}
           </div>
         </div>
@@ -373,7 +373,7 @@ export default function HomePage() {
           <nav className="hidden lg:flex items-center gap-8 text-sm font-medium text-navy ml-8">
             <a href="#" className="hover:text-orange transition">Download App</a>
             <a href="#how-it-works" className="hover:text-orange transition">How it works</a>
-            <Link href="/vendor/login" className="hover:text-orange transition">For Vendors</Link>
+            <Link href="/become-a-vendor" className="hover:text-orange transition">For Vendors</Link>
           </nav>
 
           <div className="flex-1" />

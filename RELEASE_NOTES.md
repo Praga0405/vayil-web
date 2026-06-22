@@ -1,5 +1,126 @@
 # Release Notes
 
+## v4.5.44 — Vendor landing page (`/become-a-vendor`) + shared MarketplaceHeader (2026-06-20)
+
+### Why this release exists
+
+The "+ Become a vendor" button in the announcement bar (top of every public
+page) and the "For Vendors" link in the homepage nav both pointed at
+`/vendor/login` — a bare OTP form. Vendors arriving cold from the homepage
+were shown a login screen with no explanation of why they should sign up,
+no value proposition, and no pricing/process clarity. Per the PRD's
+vendor pitch and the "Vayil Website Content Draft" PDF (sections 11 "For
+Vendors", 12 "Trust Infrastructure", and the vendor-facing brand line),
+the intended flow is **value page → register CTA → OTP**, not
+**announcement bar → OTP**.
+
+This release builds that missing middle step.
+
+### What changed
+
+#### 1. New route — `src/app/become-a-vendor/page.tsx`
+
+A full marketing landing page with six sections drawn directly from the
+website-content PDF:
+
+| Section | PDF source | What's on screen |
+|---|---|---|
+| **Hero** | Brand line + vendor-facing tagline (section 16) | Warm-cream canvas with radial orange glow + soft navy ribbon + dot grid. Headline `"Grow with **better leads**, **better trust**, and **better payouts**."` with three orange-highlighted phrases each underlined by a hand-drawn-feel stripe at a slight angle. Two CTAs: orange "Join as a Vendor" (→ `/vendor/login`) with elevated shadow + hover lift, and white "See how it works" anchor. Trust strip below the CTAs: `Verified profile + KYC · Milestone-based payouts · Dispute resolution support`. |
+| **Hero right panel — process journey** | Section 8 (How it works) compressed | Numbered timeline card showing the 6-step vendor journey (Register → List → Leads → Quote → Execute → Get paid). Each step has its own icon, an outcome metric (e.g. "~10 min onboarding", "First lead in ~48 hrs", "₹18,500 first payout"), and a status colour: orange for onboarding/discovery (steps 1–3), navy for execution (steps 4–5), green for the payout (step 6). Connecting dashed spine between the numbered circles. Bottom outcome strip: `Onboard ~10 min · First lead ~48 hrs · First payout Same day`. Two floating accent badges at angles — "VERIFIED · KYC approved" (top-right, +6°) and "PAYOUT · ₹42,000 released" (bottom-left, −4°). |
+| **Proof ribbon** | New (anchors the value claims) | 4-column proof strip below the hero: `₹12L+ paid this quarter · 240+ vendors · 95% milestones approved on first review · <48 hrs to first enquiry`. |
+| **Why Vendors Grow with Vayil** | Section 11 verbatim | Six benefit cards: High-Intent Leads, Better Credibility, Faster Safer Payments, Professional Project Documentation, Reputation That Compounds, Structured Growth. Each card has an icon that fills with orange on hover, with the card border subtly elevating. |
+| **How it works (vendor side)** | Section 8 adapted for vendors | Six numbered cards in a responsive grid: Register & Get Verified → List Your Services → Receive High-Intent Leads → Send Structured Quotes → Execute on Locked Milestones → Get Paid Faster. Each card has a navy circle with the step number floating at the top-left. |
+| **Trust Infrastructure** | Section 12 verbatim | Two-column layout. Left: bold headline "Built on trust, not just listings." with the editorial copy from the PDF. Right: five trust pillars (Verified Vendor Onboarding · Standardised Quotes · Milestone-Based Payments · Change Order Governance · Dispute Resolution Support) as icon + heading + body rows. |
+| **Vendor testimonial** | Composite (in the spirit of section 4) | Dark navy band with a centred quote, attribution, and metadata (vendor name, role, location, projects completed). |
+| **Final CTA** | Section 15 (vendor secondary CTA) | Orange gradient card: "Start serving real projects today." with two CTAs — primary `Join as a Vendor` → `/vendor/login`, secondary `Browse the marketplace first` → `/search`. |
+
+Page is a server component, uses Next 14 metadata API for title/description,
+renders inside `MarketplaceHeader` + `PublicFooter` chrome.
+
+#### 2. New shared component — `src/components/shared/MarketplaceHeader.tsx`
+
+The inline header that was hard-coded in `src/app/page.tsx` is now
+extracted into a reusable component so other landing pages render
+identical chrome without duplicating markup. Behaviour matches the
+homepage:
+
+- Dark navy announcement bar at the top with: `Weekly Offers · Order Status · + Post a Job · + Become a vendor` (Become a vendor hidden when a user is already signed in).
+- Sticky white main header with: Vayil logo + "Coimbatore ▼" pill + nav (`Download App · How it works · For Vendors`) + 300px search box + auth section (Sign in button or user-dropdown).
+- Built-in `LoginModal` instance so the Sign-in button works without the caller wiring state.
+
+`PublicHeader` is still available for the marketplace/search pages —
+they have a richer nav (`Home · All Services · How it works · Vendor Studio`)
+and a flex-width search bar that fits their wider layout. The two
+components are intentionally separate.
+
+#### 3. Three link fixes — all "Become a vendor" + "For Vendors" entry points now route to the new page
+
+| File | Before | After |
+|---|---|---|
+| `src/app/page.tsx` — homepage announcement bar | `<button onClick={() => setLoginOpen(true)}>` (opened login modal) | `<Link href="/become-a-vendor">` |
+| `src/app/page.tsx` — homepage main nav "For Vendors" | `<Link href="/vendor/login">` | `<Link href="/become-a-vendor">` |
+| `src/components/shared/PublicHeader.tsx` — announcement bar | `<button onClick={…setLoginOpen(true)}>` | `<Link href="/become-a-vendor">` |
+
+Net effect: a cold visitor clicking any of those three entry points now
+sees the value-prop landing page, not a bare OTP form.
+
+#### 4. `MarketplaceHeader` "For Vendors" link
+
+Within the extracted header, the `For Vendors` nav link points at
+`/become-a-vendor` rather than `/vendor/login`.
+
+### Design intent — what "creative process journey" means
+
+The first iteration of the hero right panel was a mocked-up vendor
+dashboard (earnings card + milestone progress + new-enquiry notification +
+ratings panel). That visualised *what the vendor studio looks like* but
+buried the more important question for a cold visitor: *what does the
+process actually look like end-to-end?*
+
+The current panel answers that directly. It shows all six steps in one
+glance, attaches a concrete time/value metric to each (so the reader can
+calibrate "what does the journey from signup to first money in my account
+actually look like"), and uses a colour progression — warm orange at the
+start, neutral navy in the middle, celebratory green at the payout — so
+the eye traces the success path on its own.
+
+The decorative tilt (~1° on the main card with a counter-rotated navy
+backdrop, plus ±4–6° on the floating badges) is deliberate — it breaks
+the rigid grid feel that the homepage already has elsewhere, and signals
+that this is a hand-designed pitch page, not a generic SaaS landing.
+
+### What still uses `/vendor/login` directly
+
+The "Sign in" button in the header (when a vendor needs to log in to an
+existing account) and the final-CTA "Join as a Vendor" button on this
+page both go to `/vendor/login`. That is intentional — once a vendor has
+read the value prop, the OTP register/login flow is the right next step.
+
+### Verification
+
+```
+npx tsc --noEmit                                                # backend
+npx tsc --noEmit --project tsconfig.json                       # frontend
+curl -I http://localhost:3000/become-a-vendor                  # 200
+```
+
+In-preview eval against `http://localhost:3000`:
+
+```
+{ path: "/become-a-vendor",
+  h1: "Grow with better leads better trust and better payouts.",
+  forVendorsHref: "/become-a-vendor",
+  hasJourney: true,
+  hasFirstPayout: true,
+  sectionCount: 6 }
+```
+
+All section content, the journey card, the floating accents, the trust
+pillars, and the final CTA render correctly. Three CTAs on the page link
+to `/vendor/login` (the post-conversion destination).
+
+---
+
 ## v4.5.43 — Active vendor services appear in public search (2026-06-20)
 
 ### Why
