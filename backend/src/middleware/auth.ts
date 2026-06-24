@@ -8,6 +8,23 @@ export function signToken(payload: AuthUser, staff = false) {
   return jwt.sign(payload, staff ? config.staffJwtSecret : config.jwtSecret, { expiresIn: config.jwtExpiresIn as any });
 }
 
+function verifyWithConfiguredSecrets(token: string) {
+  const secrets = [
+    config.jwtSecret,
+    (config as any).legacyJwtSecret,
+    config.staffJwtSecret,
+  ].filter((secret, index, all): secret is string => Boolean(secret) && all.indexOf(secret) === index);
+  let lastError: unknown;
+  for (const secret of secrets) {
+    try {
+      return jwt.verify(token, secret);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Extract a JWT from the request. Mobile apps may send the token in
  * several places — accept all of them so the same middleware works for
@@ -51,12 +68,7 @@ export function requireAuth(allowed?: UserType[]) {
     const token = extractToken(req);
     if (!token) return next(new ApiError(401, 'Missing bearer token'));
     try {
-      let decoded: any;
-      try {
-        decoded = jwt.verify(token, config.jwtSecret);
-      } catch {
-        decoded = jwt.verify(token, config.staffJwtSecret);
-      }
+      const decoded: any = verifyWithConfiguredSecrets(token);
       const legacyRole = decoded?.userType || decoded?.role || decoded?.user_role;
       const legacyId = decoded?.id || decoded?.userId || decoded?.user_id || decoded?.customer_id || decoded?.vendor_id || decoded?.admin_id;
       req.user = {
@@ -91,9 +103,7 @@ export function softAuth() {
     const token = extractToken(req);
     if (!token) return next();
     try {
-      let decoded: any;
-      try { decoded = jwt.verify(token, config.jwtSecret); }
-      catch { decoded = jwt.verify(token, config.staffJwtSecret); }
+      const decoded: any = verifyWithConfiguredSecrets(token);
       const legacyRole = decoded?.userType || decoded?.role || decoded?.user_role;
       const legacyId = decoded?.id || decoded?.userId || decoded?.user_id || decoded?.customer_id || decoded?.vendor_id || decoded?.admin_id;
       req.user = {

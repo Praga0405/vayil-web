@@ -10,6 +10,47 @@ import { ApiError } from '../utils/http';
 
 export type UserKind = 'customer' | 'vendor';
 
+function idColumn(userType: UserKind) {
+  return userType === 'customer' ? 'customer_id' : 'vendor_id';
+}
+
+function tableName(userType: UserKind) {
+  return userType === 'customer' ? 'customers' : 'vendors';
+}
+
+function legacyUserOrder() {
+  return `ORDER BY COALESCE(is_deleted, 0) ASC,
+          CASE
+            WHEN status IN ('verified', 'approved', 'active') THEN 0
+            WHEN status IN ('pending', 'pending_approval') THEN 1
+            ELSE 2
+          END ASC,
+          COALESCE(id, 999999999) ASC`;
+}
+
+async function findUserByPhone(userType: UserKind, phone: string) {
+  const table = tableName(userType);
+  return one<any>(
+    `SELECT * FROM ${table}
+      WHERE phone = :phone OR mobile = :phone
+      ${legacyUserOrder()}
+      LIMIT 1`,
+    { phone },
+  );
+}
+
+export async function findUserByLegacyId(userType: UserKind, userId: number | string) {
+  const table = tableName(userType);
+  const idCol = idColumn(userType);
+  return one<any>(
+    `SELECT * FROM ${table}
+      WHERE ${idCol} = :id OR id = :id
+      ${legacyUserOrder()}
+      LIMIT 1`,
+    { id: userId },
+  );
+}
+
 export async function requestOtp(phone: string, userType: UserKind) {
   if (!phone || phone.length < 8) throw new ApiError(400, 'Phone is required');
   const otp = generateOtp();
@@ -19,19 +60,21 @@ export async function requestOtp(phone: string, userType: UserKind) {
 }
 
 export async function verifyOtpAndIssueToken(opts: {
-  phone: string; otp: string; userType: UserKind; name?: string;
+  phone?: string; userId?: number | string; otp: string; userType: UserKind; name?: string;
 }) {
-  const { phone, otp, userType, name } = opts;
-  if (!phone || !otp) throw new ApiError(400, 'phone and otp are required');
-  await verifyOtp(phone, `${userType}_login`, otp);
-  const table = userType === 'customer' ? 'customers' : 'vendors';
-  const idCol = userType === 'customer' ? 'customer_id' : 'vendor_id';
+  const { otp, userType, name } = opts;
+  if (!otp) throw new ApiError(400, 'otp is required');
+  const table = tableName(userType);
+  const idCol = idColumn(userType);
   const defaultName = userType === 'customer' ? 'Customer' : 'Vendor';
 
-  let user = await one<any>(
-    `SELECT * FROM ${table} WHERE phone = :phone OR mobile = :phone LIMIT 1`,
-    { phone },
-  );
+  let user = opts.userId ? await findUserByLegacyId(userType, opts.userId) : null;
+  const phone = String(opts.phone || user?.phone || user?.mobile || '').trim();
+  if (!phone) throw new ApiError(400, 'phone or user id is required');
+
+  await verifyOtp(phone, `${userType}_login`, otp);
+
+  if (!user) user = await findUserByPhone(userType, phone);
   if (!user) {
     // Phone uniqueness across roles: refuse to create a vendor account
     // for a phone already registered as a customer (and vice versa).

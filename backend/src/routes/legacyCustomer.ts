@@ -124,7 +124,17 @@ async function legacyCustomerRowsById(customerId: number | string) {
 
 async function legacyCustomerIdByPhone(phone: string) {
   const row = await one<any>(
-    `SELECT COALESCE(id, customer_id) AS id FROM customers WHERE phone = :phone OR mobile = :phone LIMIT 1`,
+    `SELECT COALESCE(id, customer_id) AS id
+       FROM customers
+      WHERE phone = :phone OR mobile = :phone
+      ORDER BY COALESCE(is_deleted, 0) ASC,
+        CASE
+          WHEN status IN ('verified', 'approved', 'active') THEN 0
+          WHEN status IN ('pending', 'pending_approval') THEN 1
+          ELSE 2
+        END ASC,
+        COALESCE(id, customer_id) ASC
+      LIMIT 1`,
     { phone },
   ).catch(() => null);
   return row?.id ?? null;
@@ -330,9 +340,14 @@ legacyCustomerRouter.post('/register', async (req, res, next) => {
 legacyCustomerRouter.post('/verifyCustomerOTP', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
+    const customerIdInput = pickId(req.body, 'customerId', 'customer_id', 'id');
     const otp = String(req.body?.otp || req.body?.otpcode || '');
     const out = await authService.verifyOtpAndIssueToken({
-      phone, otp, userType: 'customer', name: req.body?.name,
+      phone: phone || undefined,
+      userId: customerIdInput || undefined,
+      otp,
+      userType: 'customer',
+      name: req.body?.name,
     });
     const customerId = out.user?.customer_id ?? out.user?.id;
     res.status(200).json({
@@ -361,7 +376,13 @@ legacyCustomerRouter.post('/verifyLogincustomerOTP', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
     const otp = String(req.body?.otp || '');
-    const out = await authService.verifyOtpAndIssueToken({ phone, otp, userType: 'customer' });
+    const customerIdInput = pickId(req.body, 'customerId', 'customer_id', 'id');
+    const out = await authService.verifyOtpAndIssueToken({
+      phone: phone || undefined,
+      userId: customerIdInput || undefined,
+      otp,
+      userType: 'customer',
+    });
     const customerId = out.user?.customer_id ?? out.user?.id;
     res.status(200).json({
       success: true,

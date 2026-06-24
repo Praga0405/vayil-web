@@ -1,5 +1,53 @@
 # Release Notes
 
+## v4.5.46 - OTP ID verification and cart auth compatibility hotfix (2026-06-24)
+
+### Why
+
+The mobile apps send OTP verification requests with `customerId` /
+`vendorId`, not phone number. Production also has duplicate rows for some
+test phone numbers, so the OTP-send response could return a later duplicate
+ID such as `60001` instead of the legacy mobile ID such as `29`. That broke
+the login flow and downstream authenticated calls like `customer/getCart`.
+
+### What Changed
+
+- `verifyCustomerOTP` and `verifyLogincustomerOTP` now accept
+  `customerId`, `customer_id`, or `id` and resolve the phone before OTP
+  verification.
+- `verifyVendorOTP` and `vendor-login-verify-otp` now accept `vendorId`,
+  `vendor_id`, or `id` and resolve the phone before OTP verification.
+- Customer/vendor OTP-send responses now choose deterministic legacy rows:
+  non-deleted first, verified/approved/active first, then the lowest legacy
+  `id`.
+- Auth middleware can verify bearer tokens signed with `LEGACY_JWT_SECRET`
+  or the old backend env name `JWT_SECRET_KEY` when that env var is set,
+  while still rejecting unsigned or tampered JWTs.
+
+### Impact
+
+- `POST /customer/logincustomerWithOTP` should return `customerId: 29`
+  for `9345704991` instead of a duplicate production row.
+- `POST /customer/verifyCustomerOTP` should return the legacy
+  `OTP verified successfully.` response with `customerId`, `token`, and
+  `data[]`.
+- `POST /verifyVendorOTP` should work with the mobile request body
+  `{ vendorId, otp }`.
+- `POST /customer/getCart` remains a bearer-token API as configured in
+  the Postman collection. Old `app.vayil.in` tokens are accepted only if
+  the matching legacy JWT secret is configured in Vercel.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+Backend TypeScript build and whitespace checks passed locally.
+
+---
+
 ## v4.5.45 - OpenAPI mobile response 1:1 parity patch (2026-06-24)
 
 ### Why

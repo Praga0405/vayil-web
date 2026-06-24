@@ -103,6 +103,10 @@ export const config = {
   jwtSecret: requireInProd('JWT_SECRET', 'dev-secret-change-me',
     'Production must set JWT_SECRET to a strong random value (>= 32 bytes). ' +
     'Run: openssl rand -base64 32'),
+  legacyJwtSecret:
+    process.env.LEGACY_JWT_SECRET ||
+    process.env.JWT_SECRET_KEY ||
+    '',
   staffJwtSecret: requireInProd('STAFF_JWT_SECRET', 'dev-staff-secret-change-me',
     'Production must set STAFF_JWT_SECRET separately from JWT_SECRET. ' +
     'Run: openssl rand -base64 32'),

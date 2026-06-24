@@ -74,7 +74,17 @@ async function legacyVendorRowsById(vendorId: number | string) {
 
 async function legacyVendorIdByPhone(phone: string) {
   const row = await one<any>(
-    `SELECT COALESCE(id, vendor_id) AS id FROM vendors WHERE phone = :phone OR mobile = :phone LIMIT 1`,
+    `SELECT COALESCE(id, vendor_id) AS id
+       FROM vendors
+      WHERE phone = :phone OR mobile = :phone
+      ORDER BY COALESCE(is_deleted, 0) ASC,
+        CASE
+          WHEN status IN ('verified', 'approved', 'active') THEN 0
+          WHEN status IN ('pending', 'pending_approval') THEN 1
+          ELSE 2
+        END ASC,
+        COALESCE(id, vendor_id) ASC
+      LIMIT 1`,
     { phone },
   ).catch(() => null);
   return row?.id ?? null;
@@ -222,9 +232,14 @@ legacyVendorRouter.post('/register', async (req, res, next) => {
 legacyVendorRouter.post('/verifyVendorOTP', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
+    const vendorIdInput = pickId(req.body, 'vendorId', 'vendor_id', 'id');
     const otp = String(req.body?.otp || req.body?.otpcode || '');
     const out = await authService.verifyOtpAndIssueToken({
-      phone, otp, userType: 'vendor', name: req.body?.name || req.body?.company_name,
+      phone: phone || undefined,
+      userId: vendorIdInput || undefined,
+      otp,
+      userType: 'vendor',
+      name: req.body?.name || req.body?.company_name,
     });
     const vendorId = out.user?.vendor_id ?? out.user?.id;
     res.status(200).json({
@@ -252,8 +267,14 @@ legacyVendorRouter.post('/vendor-login-otp', async (req, res, next) => {
 legacyVendorRouter.post('/vendor-login-verify-otp', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
+    const vendorIdInput = pickId(req.body, 'vendorId', 'vendor_id', 'id');
     const otp = String(req.body?.otp || '');
-    const out = await authService.verifyOtpAndIssueToken({ phone, otp, userType: 'vendor' });
+    const out = await authService.verifyOtpAndIssueToken({
+      phone: phone || undefined,
+      userId: vendorIdInput || undefined,
+      otp,
+      userType: 'vendor',
+    });
     const vendorId = out.user?.vendor_id ?? out.user?.id;
     res.status(200).json({
       success: true,
