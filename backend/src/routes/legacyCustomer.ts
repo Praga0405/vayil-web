@@ -107,6 +107,215 @@ async function fetchLegacyCustomerJson(path: string, body: any, authorization?: 
   }
 }
 
+async function legacyCustomerRowsById(customerId: number | string) {
+  return query<any>(
+    `SELECT COALESCE(id, customer_id) AS id, name, email, COALESCE(ph_code, '+91') AS ph_code,
+            COALESCE(phone, mobile) AS phone, status, created_at, updated_at, state, city,
+            pincode, address, COALESCE(profile_photo, profile_image) AS profile_photo,
+            COALESCE(device_id, '') AS device_id, otp, otp_expires_at, otp_attempts,
+            last_otp_sent_at, COALESCE(terms_accept, 1) AS terms_accept,
+            COALESCE(is_deleted, 0) AS is_deleted
+       FROM customers
+      WHERE customer_id = :id OR id = :id
+      LIMIT 1`,
+    { id: customerId },
+  );
+}
+
+async function legacyCustomerIdByPhone(phone: string) {
+  const row = await one<any>(
+    `SELECT COALESCE(id, customer_id) AS id FROM customers WHERE phone = :phone OR mobile = :phone LIMIT 1`,
+    { phone },
+  ).catch(() => null);
+  return row?.id ?? null;
+}
+
+const legacyServiceSelect = `
+  SELECT
+    COALESCE(vs.id, vs.vendor_service_id)              AS id,
+    vs.vendor_id                                       AS vendor_id,
+    COALESCE(vs.service_title, vs.title)               AS service_title,
+    COALESCE(vs.service_category, vs.category_id)      AS service_category,
+    COALESCE(vs.service_subcategory, vs.subcategory_id) AS service_subcategory,
+    vs.description                                     AS description,
+    vs.pricing_type                                    AS pricing_type,
+    COALESCE(vs.unit_name, vs.unit)                    AS unit_name,
+    vs.price                                           AS price,
+    COALESCE(vs.service_image, vs.thumbnail)           AS service_image,
+    vs.certificate_url                                 AS certificate_url,
+    COALESCE(vs.is_active, vs.status, 1)               AS is_active,
+    COALESCE(vs.show_review, 1)                        AS show_review,
+    vs.created_at                                      AS created_at,
+    vs.updated_at                                      AS updated_at,
+    vs.minimum_fee                                     AS minimum_fee,
+    COALESCE(vs.is_deleted, 0)                         AS is_deleted,
+    v.company_name                                     AS company_name,
+    v.name                                             AS vendor_name,
+    sc.name                                            AS category_name,
+    IFNULL((SELECT ROUND(AVG(cr.rating), 1)
+              FROM customer_reviews cr
+             WHERE cr.vendor_id = v.vendor_id AND COALESCE(cr.status, 1) = 1), 0) AS rating,
+    (SELECT COUNT(*)
+       FROM customer_reviews cr
+      WHERE cr.vendor_id = v.vendor_id AND COALESCE(cr.status, 1) = 1)            AS review_count,
+    (SELECT COUNT(*) FROM orders o WHERE o.vendor_id = v.vendor_id)                AS booking_count
+  FROM vendor_services AS vs
+  JOIN vendors AS v ON v.vendor_id = vs.vendor_id
+  LEFT JOIN service_categories AS sc
+         ON sc.category_id = CAST(COALESCE(vs.service_category, vs.category_id) AS UNSIGNED)
+`;
+
+function normalizeLegacyService(row: any, includeBookingText = false) {
+  const n = Number(row?.booking_count ?? 0);
+  const { booking_count, ...item } = row;
+  const out: any = {
+    ...item,
+    rating: Number(row?.rating ?? 0).toFixed(1),
+  };
+  if (includeBookingText) out.booking_text = `${n} ${n === 1 ? 'booking' : 'bookings'}`;
+  return out;
+}
+
+async function buildLocalServiceInfo(serviceId: string, customerId?: string) {
+  const row = await one<any>(
+    `${legacyServiceSelect}
+      WHERE (vs.vendor_service_id = :id OR vs.id = :id)
+        AND COALESCE(vs.is_deleted, 0) = 0
+      LIMIT 1`,
+    { id: serviceId },
+  );
+  if (!row) return null;
+  const service = normalizeLegacyService(row);
+  const [customer_reviews, cart_data, portfolioRows, similarRows] = await Promise.all([
+    query<any>(
+      `SELECT cr.*, c.name AS customer_name, c.profile_image AS customer_image
+         FROM customer_reviews cr
+         LEFT JOIN customers c ON c.customer_id = cr.customer_id
+        WHERE cr.vendor_id = :vendorId AND COALESCE(cr.status, 1) = 1
+        ORDER BY cr.created_at DESC`,
+      { vendorId: row.vendor_id },
+    ).catch(() => []),
+    customerId && customerId !== '0'
+      ? query<any>(
+          `SELECT * FROM cart
+            WHERE customer_id = :customerId AND vendor_id = :vendorId
+              AND service_id = :serviceId AND COALESCE(status, 1) = 1`,
+          { customerId, vendorId: row.vendor_id, serviceId },
+        ).catch(() => [])
+      : Promise.resolve([]),
+    query<any>(
+      `${legacyServiceSelect}
+        WHERE vs.vendor_id = :vendorId AND COALESCE(vs.is_deleted, 0) = 0
+        ORDER BY COALESCE(vs.id, vs.vendor_service_id) DESC`,
+      { vendorId: row.vendor_id },
+    ).catch(() => []),
+    query<any>(
+      `${legacyServiceSelect}
+        WHERE COALESCE(vs.service_category, vs.category_id) = :category
+          AND (vs.vendor_service_id <> :id AND COALESCE(vs.id, vs.vendor_service_id) <> :id)
+          AND COALESCE(vs.is_deleted, 0) = 0
+        ORDER BY COALESCE(vs.id, vs.vendor_service_id) DESC
+        LIMIT 10`,
+      { category: row.service_category, id: serviceId },
+    ).catch(() => []),
+  ]);
+  const stripVendorName = (r: any) => {
+    const item = normalizeLegacyService(r, true);
+    delete item.vendor_name;
+    return item;
+  };
+  return {
+    service,
+    customer_reviews,
+    similar_vendors: similarRows.map(stripVendorName),
+    cart_data,
+    Portfolioservices: portfolioRows.map(stripVendorName),
+  };
+}
+
+function enquiryStatusExpr(alias: string) {
+  return `COALESCE(${alias}.status_int,
+    CASE
+      WHEN ${alias}.status IN ('new', 'pending') THEN 1
+      WHEN ${alias}.status IN ('accepted', 'active') THEN 2
+      WHEN ${alias}.status IN ('quoted', 'quote_received') THEN 11
+      WHEN ${alias}.status = 'rejected' THEN 4
+      WHEN ${alias}.status = 'completed' THEN 8
+      ELSE CAST(${alias}.status AS UNSIGNED)
+    END)`;
+}
+
+async function legacyQuotationRows(enquiryId: number | string) {
+  return query<any>(
+    `SELECT COALESCE(q.id, q.quotation_id) AS id, q.enquiry_id, q.customer_id,
+            q.message, q.files, COALESCE(q.amount, q.final_amount, q.total) AS amount,
+            q.service_time, ${enquiryStatusExpr('q')} AS status, q.created_at,
+            COALESCE(sm.status_name,
+              CASE
+                WHEN q.status IN ('quoted', 'quote_received') THEN 'Quote Received'
+                WHEN q.status = 'accepted' THEN 'Accepted'
+                WHEN q.status = 'rejected' THEN 'Rejected'
+                ELSE q.status
+              END) AS status_name,
+            v.company_name
+       FROM quotation q
+       LEFT JOIN vendors v ON v.vendor_id = q.vendor_id
+       LEFT JOIN status_master sm ON sm.id = ${enquiryStatusExpr('q')}
+      WHERE q.enquiry_id = :id
+      ORDER BY COALESCE(q.id, q.quotation_id) DESC`,
+    { id: enquiryId },
+  ).catch(() => []);
+}
+
+async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?: string) {
+  const where = enquiryId
+    ? `e.customer_id = :customerId AND e.enquiry_id = :enquiryId`
+    : `e.customer_id = :customerId`;
+  const rows = await query<any>(
+    `SELECT COALESCE(e.id, e.enquiry_id) AS enquiry_id, e.customer_id,
+            COALESCE(e.first_name, c.name) AS first_name,
+            COALESCE(e.last_name, '') AS last_name,
+            COALESCE(e.email, c.email) AS email,
+            COALESCE(e.phone, c.phone, c.mobile) AS phone,
+            COALESCE(e.message, e.description) AS message,
+            e.files,
+            ${enquiryStatusExpr('e')} AS status,
+            e.created_at, e.service_id, e.vendor_id,
+            COALESCE(sm.status_name,
+              CASE
+                WHEN e.status IN ('new', 'pending') THEN 'Pending'
+                WHEN e.status IN ('quoted', 'quote_received') THEN 'Quote Received'
+                WHEN e.status = 'accepted' THEN 'Accepted'
+                WHEN e.status = 'rejected' THEN 'Rejected'
+                ELSE e.status
+              END) AS status_name,
+            v.company_name,
+            COALESCE(vs.service_title, vs.title) AS service_title,
+            vs.price,
+            COALESCE(vs.unit_name, vs.unit) AS unit_name,
+            vs.pricing_type,
+            vs.description AS description,
+            COALESCE(vs.service_image, vs.thumbnail) AS service_image,
+            vs.minimum_fee
+       FROM enquiries e
+       LEFT JOIN customers c ON c.customer_id = e.customer_id
+       LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
+       LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id OR vs.id = e.service_id
+       LEFT JOIN status_master sm ON sm.id = ${enquiryStatusExpr('e')}
+      WHERE ${where}
+      ORDER BY COALESCE(e.id, e.enquiry_id) DESC`,
+    { customerId, enquiryId },
+  );
+  return Promise.all(rows.map(async (row: any) => ({
+    ...row,
+    quotations: await legacyQuotationRows(row.enquiry_id),
+    orders: await query<any>(
+      `SELECT * FROM orders WHERE enquiry_id = :id ORDER BY order_id DESC`,
+      { id: row.enquiry_id },
+    ).catch(() => []),
+  })));
+}
+
 /* ─────────────────────────────────────────────────────────────
  *  AUTH — register / OTP / login (mounted before requireAuth).
  * ───────────────────────────────────────────────────────────── */
@@ -125,11 +334,13 @@ legacyCustomerRouter.post('/verifyCustomerOTP', async (req, res, next) => {
     const out = await authService.verifyOtpAndIssueToken({
       phone, otp, userType: 'customer', name: req.body?.name,
     });
-    send(res, {
-      message: 'OTP verified',
-      data: out.user,
+    const customerId = out.user?.customer_id ?? out.user?.id;
+    res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully.',
+      customerId: String(customerId),
       token: out.token,
-      customer_id: out.user?.customer_id,
+      data: await legacyCustomerRowsById(customerId),
     });
   } catch (err) { next(err); }
 });
@@ -137,8 +348,12 @@ legacyCustomerRouter.post('/verifyCustomerOTP', async (req, res, next) => {
 legacyCustomerRouter.post('/logincustomerWithOTP', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
-    const out = await authService.requestOtp(phone, 'customer');
-    send(res, { message: 'Login OTP sent', data: out });
+    await authService.requestOtp(phone, 'customer');
+    res.status(200).json({
+      success: true,
+      message: 'OTP sent for login',
+      customerId: await legacyCustomerIdByPhone(phone),
+    });
   } catch (err) { next(err); }
 });
 
@@ -147,9 +362,13 @@ legacyCustomerRouter.post('/verifyLogincustomerOTP', async (req, res, next) => {
     const phone = pickPhone(req.body);
     const otp = String(req.body?.otp || '');
     const out = await authService.verifyOtpAndIssueToken({ phone, otp, userType: 'customer' });
-    send(res, {
-      message: 'Login successful', data: out.user, token: out.token,
-      customer_id: out.user?.customer_id,
+    const customerId = out.user?.customer_id ?? out.user?.id;
+    res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully.',
+      customerId: String(customerId),
+      token: out.token,
+      data: await legacyCustomerRowsById(customerId),
     });
   } catch (err) { next(err); }
 });
@@ -316,7 +535,18 @@ legacyCustomerRouter.post('/ServiceInfo', async (req, res, next) => {
     const legacy = await fetchLegacyCustomerJson('/ServiceInfo', req.body, req.headers.authorization);
     if (legacy?.success && legacy?.data) return res.status(200).json(legacy);
 
-    const categoryId = pickId(req.body, 'category_id', 'categoryId', 'id');
+    const serviceId = pickId(req.body, 'service_id', 'serviceId', 'id');
+    if (serviceId) {
+      const data = await buildLocalServiceInfo(serviceId, pickId(req.body, 'customer_id', 'customerId'));
+      if (!data) return res.status(200).json({ success: false, message: 'Service not found' });
+      return res.status(200).json({
+        success: true,
+        message: 'Service details fetched successfully',
+        data,
+      });
+    }
+
+    const categoryId = pickId(req.body, 'category_id', 'categoryId');
     if (!categoryId) throw new ApiError(400, 'category_id required');
     const vendors = await customerSvc.listVendors({ category: categoryId });
     const subs = await query<any>(
@@ -507,19 +737,28 @@ legacyCustomerRouter.use(requireAuth(['customer']));
 
 legacyCustomerRouter.post('/saveCustomerInfo', async (req: AuthRequest, res, next) => {
   try {
-    const customer = await customerSvc.updateCustomer(req.user!.id, {
+    await customerSvc.updateCustomer(req.user!.id, {
       name: req.body?.name, email: req.body?.email, city: req.body?.city,
       address: req.body?.address, pincode: req.body?.pincode,
-      profile_image: req.body?.profile_image, fcm_token: req.body?.fcm_token,
+      profile_image: req.body?.profile_image || req.body?.profile_photo,
+      profile_photo: req.body?.profile_photo,
+      fcm_token: req.body?.fcm_token,
     });
-    send(res, { message: 'Profile updated', data: customer });
+    res.status(200).json({
+      success: true,
+      message: 'Customer details saved',
+      data: await legacyCustomerRowsById(req.user!.id),
+    });
   } catch (err) { next(err); }
 });
 
 const handleGetCustomerInfo = async (req: AuthRequest, res: any, next: any) => {
   try {
-    const customer = await customerSvc.getCustomer(req.user!.id);
-    send(res, { data: customer, customer_id: customer.customer_id });
+    res.status(200).json({
+      success: true,
+      message: 'Customer details',
+      data: await legacyCustomerRowsById(req.user!.id),
+    });
   } catch (err) { next(err); }
 };
 legacyCustomerRouter.get('/getCustomerInfo', handleGetCustomerInfo);
@@ -543,18 +782,31 @@ legacyCustomerRouter.post('/sendEnquiry', async (req: AuthRequest, res, next) =>
       location_lng: req.body?.location_lng ? toNumberSafe(req.body.location_lng) : null,
       preferred_date: req.body?.preferred_date || null,
     });
-    send(res, { message: 'Enquiry sent', data: enquiry, enquiry_id: enquiry?.enquiry_id }, 201);
+    await exec(
+      `UPDATE enquiries
+          SET first_name = COALESCE(:firstName, first_name),
+              last_name = COALESCE(:lastName, last_name),
+              phone = COALESCE(:phone, phone),
+              files = COALESCE(:files, files),
+              message = COALESCE(:message, message),
+              status_int = COALESCE(status_int, 1)
+        WHERE enquiry_id = :id`,
+      {
+        id: enquiry?.enquiry_id,
+        firstName: req.body?.first_name ?? null,
+        lastName: req.body?.last_name ?? null,
+        phone: req.body?.phone ?? null,
+        files: req.body?.files ?? req.body?.file ?? null,
+        message: req.body?.message ?? req.body?.description ?? null,
+      },
+    ).catch(() => undefined);
+    res.status(200).json({ success: true, message: 'Enquiry sent to vendor' });
   } catch (err) { next(err); }
 });
 
 legacyCustomerRouter.post('/enquiryList', async (req: AuthRequest, res, next) => {
   try {
-    const enquiries: any[] = await enquirySvc.listCustomerEnquiries(req.user!.id);
-    // v4.5.35 — mobile bridge: Quotelist_Ongoinglist_Model reads `ordersteps`
-    // nested inside each order. For the top-level `ordersteps` field that
-    // some screens reference, expose a flat aggregate.
-    const ordersteps = enquiries.flatMap((e: any) => Array.isArray(e?.ordersteps) ? e.ordersteps : []);
-    send(res, { data: enquiries, ordersteps });
+    res.status(200).json({ success: true, data: await legacyCustomerEnquiryRows(req.user!.id) });
   } catch (err) { next(err); }
 });
 
@@ -562,8 +814,7 @@ legacyCustomerRouter.post('/enquiryDetails', async (req: AuthRequest, res, next)
   try {
     const enquiryId = pickId(req.body, 'enquiry_id', 'enquiryId', 'id');
     if (!enquiryId) throw new ApiError(400, 'enquiry_id required');
-    const out = await enquirySvc.getEnquiryForCustomer(req.user!.id, enquiryId);
-    send(res, { data: out });
+    res.status(200).json({ success: true, data: await legacyCustomerEnquiryRows(req.user!.id, enquiryId) });
   } catch (err) { next(err); }
 });
 

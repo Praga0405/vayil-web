@@ -1,5 +1,99 @@
 # Release Notes
 
+## v4.5.45 - OpenAPI mobile response 1:1 parity patch (2026-06-24)
+
+### Why
+
+The mobile team reported that some `vayil-web.vercel.app` API responses
+still did not match the newer mobile OpenAPI reference
+`Vayil-openapi (2).json`. This patch applies the concrete response-field
+gaps found in that audit so the backend returns the same root keys,
+request aliases, item fields, and old mobile envelopes for the APIs that
+have response examples in the attachment.
+
+### What Changed
+
+- Tightened public/master-data responses to the OpenAPI field set:
+  `getLanguages`, `getTools`, `getToolList`, `listStatus`,
+  `listProofTypes`, `get_states_by_country_id`, `get_city`,
+  `service-categories`, `service-subcategories`, and `service-tags`.
+- Added the missing legacy item fields for languages, tools, statuses,
+  proof types, states, and cities, including `status`, `is_deleted`,
+  timestamp fields, and legacy root keys such as `languages`,
+  `states_list`, `city`, `categories`, `subcategories`, and `tags`.
+- Restored customer auth/profile response shapes for
+  `logincustomerWithOTP`, `verifyCustomerOTP`,
+  `verifyLogincustomerOTP`, `saveCustomerInfo`, and `getCustomerInfo`
+  using root `customerId`, `token`, and legacy `data[]` rows where the
+  mobile contract expects them.
+- Restored customer service/enquiry shapes for `ServiceInfo`,
+  `sendEnquiry`, `enquiryList`, and `enquiryDetails`, including the old
+  `data.service`, `customer_reviews`, `similar_vendors`, `cart_data`,
+  `Portfolioservices`, enquiry rows, quotations, and orders layout.
+- Restored vendor auth/profile/service shapes for `verifyVendorOTP`,
+  `vendor-login-otp`, `vendor-login-verify-otp`, `vendorInfo`,
+  `saveServiceListing`, `updateServiceListing`,
+  `getVendorServiceList`, `ServiceStatusUpdate`,
+  `ServiceReviewStatusUpdate`, and `ServiceDetails`.
+- Restored vendor enquiry/quote/revenue shapes for
+  `vendorEnuqiryList`, `sendQuotationToCustomer`, and
+  `getVendorRevenueChart`, including root `new_enquiry`, `ongoing`,
+  `request_quotation`, exact quote-send response, and 12 month
+  `{ month, amount }` chart rows.
+- Updated customer profile writes to keep `profile_image` and
+  `profile_photo` in sync so old mobile profile screens receive the
+  legacy profile field after save.
+
+### Audit Findings Implemented
+
+| Area | APIs corrected | Contract risk fixed |
+|---|---|---|
+| Public lookup data | `getLanguages`, `getTools`, `getToolList`, `listStatus`, `listProofTypes` | Missing item fields and extra `message` envelopes could break dropdown parsing |
+| State/city lookup | `get_states_by_country_id`, `get_city` | Missing legacy state/city fields and ignored `state_name` filters could leave onboarding location pickers empty |
+| Taxonomy | `service-categories`, `service-subcategories`, `service-tags` | Extra/new fields and missing `category_name` could break category/subcategory models |
+| Customer OTP/login | `logincustomerWithOTP`, `verifyCustomerOTP`, `verifyLogincustomerOTP` | Missing root `customerId`, old `data[]`, and exact token envelope could break login/session setup |
+| Customer profile | `saveCustomerInfo`, `getCustomerInfo` | New object shape could break profile read/write models expecting `data[]` |
+| Customer service detail | `ServiceInfo` | Detail page could receive category/vendor helper data instead of legacy `data.service` detail structure |
+| Customer enquiries | `sendEnquiry`, `enquiryList`, `enquiryDetails` | Enquiry submission and enquiry detail screens could break on new envelopes or missing `quotations`/`orders` |
+| Vendor OTP/login | `verifyVendorOTP`, `vendor-login-otp`, `vendor-login-verify-otp` | Missing root `vendorId` and legacy `data[]` could break vendor login/session setup |
+| Vendor profile | `vendorInfo` | Profile screen could break on a single object instead of old `data[]` |
+| Vendor service CRUD | `saveServiceListing`, `updateServiceListing`, `getVendorServiceList`, `ServiceDetails` | Service screens could miss legacy service fields such as `service_title`, `service_category`, `service_image`, `minimum_fee`, `rating`, and `review_count` |
+| Vendor toggles | `ServiceStatusUpdate`, `ServiceReviewStatusUpdate` | Toggle screens could fail if response contains a new data object instead of the old success/message-only shape |
+| Vendor enquiries | `vendorEnuqiryList`, `sendQuotationToCustomer` | Dashboard buckets and quote submission could break if root arrays or exact quote message are changed |
+| Vendor revenue | `getVendorRevenueChart` | Chart could render blank if API returns `revenue`/`YYYY-MM` rows instead of old `amount`/`JAN..DEC` rows |
+
+### Functionality Breakage Impact
+
+The mobile API contract should remain fixed at the legacy shape. App-side
+work should be limited to verification and null-safety, not changing API
+models to the web shape.
+
+| Mobile area | Breakage prevented by this release |
+|---|---|
+| Customer login | OTP verify now returns `customerId`, `token`, and `data[]`; otherwise session creation can fail |
+| Customer profile | Profile save/get now returns old customer rows; otherwise profile forms can show blank saved values |
+| Customer service detail | `ServiceInfo` now returns old nested detail keys; otherwise service detail, reviews, portfolio, cart state, and similar vendors can disappear |
+| Customer enquiry flow | `sendEnquiry` now returns the old message-only response and list/detail endpoints return enriched rows; otherwise submit success handling and detail rendering can fail |
+| Vendor login | Vendor OTP verify now returns `vendorId`, `token`, and `data[]`; otherwise vendor session creation can fail |
+| Vendor profile | `vendorInfo` now returns old row arrays; otherwise profile/onboarding review screens can fail parsing |
+| Vendor service management | Create/update/list/detail now expose old service fields; otherwise titles, categories, images, certificates, minimum fees, ratings, and review counts can be missing |
+| Vendor status toggles | Service active/review toggles now return old success/message strings; otherwise toggle UI can treat a successful update as failed |
+| Vendor enquiry dashboard | `vendorEnuqiryList` now uses root bucket arrays; otherwise new, ongoing, and quotation-request tabs can be empty |
+| Vendor quotation | Quote send now returns the old message-only success shape; otherwise post-submit navigation/toasts can fail |
+| Vendor revenue chart | Revenue chart now returns 12 fixed months with `amount`; otherwise chart labels/values can render blank |
+| Lookup dropdowns | Master data endpoints now expose exact old field names; otherwise language, proof, status, state, city, category, subcategory, and tag pickers can be empty |
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+Backend TypeScript build and whitespace checks passed locally.
+
+---
+
 ## v4.5.44 — Vendor landing page (`/become-a-vendor`) + shared MarketplaceHeader (2026-06-20)
 
 ### Why this release exists

@@ -14,6 +14,7 @@ export interface CustomerProfileUpdate {
   address?: string | null;
   pincode?: string | null;
   profile_image?: string | null;
+  profile_photo?: string | null;
   fcm_token?: string | null;
 }
 
@@ -34,7 +35,7 @@ export async function updateCustomer(customerId: number | string, body: Customer
     city: body.city ?? null,
     address: body.address ?? null,
     pincode: body.pincode ?? null,
-    profile_image: body.profile_image ?? null,
+    profile_image: body.profile_image ?? body.profile_photo ?? null,
     fcm_token: body.fcm_token ?? null,
   };
   await exec(
@@ -45,6 +46,7 @@ export async function updateCustomer(customerId: number | string, body: Customer
        address       = COALESCE(:address, address),
        pincode       = COALESCE(:pincode, pincode),
        profile_image = COALESCE(:profile_image, profile_image),
+       profile_photo = COALESCE(:profile_image, profile_photo),
        fcm_token     = COALESCE(:fcm_token, fcm_token)
      WHERE customer_id = :id`,
     params,

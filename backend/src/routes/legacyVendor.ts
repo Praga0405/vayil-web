@@ -48,6 +48,166 @@ function send(res: any, payload: any = {}, status = 200) {
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
 }
 
+async function legacyVendorRowsById(vendorId: number | string) {
+  return query<any>(
+    `SELECT COALESCE(id, vendor_id) AS id, name, COALESCE(ph_code, '+91') AS ph_code,
+            COALESCE(phone, mobile) AS phone, email, company_name,
+            COALESCE(full_name, owner_name, name) AS full_name, state, city, pincode, address,
+            COALESCE(profile_photo, profile_image) AS profile_photo,
+            service_tag, service_category, sub_service,
+            COALESCE(years_of_experience, experience_years) AS years_of_experience,
+            COALESCE(short_bio, about) AS short_bio, languages, area_of_service,
+            working_hours_from, working_hours_to, COALESCE(willing_to_travel, 0) AS willing_to_travel,
+            tools_available, certifications, status, kyc_id_type, kyc_id_number,
+            COALESCE(kyc_id_image, kyc_document_url) AS kyc_id_image, kyc_selfie,
+            COALESCE(kyc_status, status) AS kyc_status, kyc_submitted_at, kyc_verified_at,
+            COALESCE(device_id, '') AS device_id, otp, otp_expires_at, otp_attempts,
+            last_otp_sent_at, COALESCE(accept_enquires, 1) AS accept_enquires,
+            created_at, updated_at, COALESCE(terms_accept, 1) AS terms_accept,
+            COALESCE(is_deleted, 0) AS is_deleted
+       FROM vendors
+      WHERE vendor_id = :id OR id = :id
+      LIMIT 1`,
+    { id: vendorId },
+  );
+}
+
+async function legacyVendorIdByPhone(phone: string) {
+  const row = await one<any>(
+    `SELECT COALESCE(id, vendor_id) AS id FROM vendors WHERE phone = :phone OR mobile = :phone LIMIT 1`,
+    { phone },
+  ).catch(() => null);
+  return row?.id ?? null;
+}
+
+function legacyVendorServiceSelect(includeAggregates: boolean) {
+  return `
+    SELECT
+      COALESCE(vs.id, vs.vendor_service_id) AS id,
+      vs.vendor_id,
+      COALESCE(vs.service_title, vs.title) AS service_title,
+      COALESCE(vs.service_category, vs.category_id) AS service_category,
+      COALESCE(vs.service_subcategory, vs.subcategory_id) AS service_subcategory,
+      vs.description,
+      vs.pricing_type,
+      COALESCE(vs.unit_name, vs.unit) AS unit_name,
+      vs.price,
+      COALESCE(vs.service_image, vs.thumbnail) AS service_image,
+      vs.certificate_url,
+      COALESCE(vs.is_active, vs.status, 1) AS is_active,
+      COALESCE(vs.show_review, 1) AS show_review,
+      vs.created_at,
+      vs.updated_at,
+      vs.minimum_fee,
+      COALESCE(vs.is_deleted, 0) AS is_deleted
+      ${includeAggregates ? `,
+      v.company_name,
+      IFNULL((SELECT ROUND(AVG(cr.rating), 1)
+                FROM customer_reviews cr
+               WHERE cr.vendor_id = v.vendor_id AND COALESCE(cr.status, 1) = 1), 0) AS rating,
+      (SELECT COUNT(*)
+         FROM customer_reviews cr
+        WHERE cr.vendor_id = v.vendor_id AND COALESCE(cr.status, 1) = 1) AS review_count` : ''}
+    FROM vendor_services vs
+    ${includeAggregates ? 'LEFT JOIN vendors v ON v.vendor_id = vs.vendor_id' : ''}
+  `;
+}
+
+function normalizeVendorServiceRow(row: any, includeAggregates = false) {
+  const out: any = { ...row };
+  if (includeAggregates) out.rating = Number(row?.rating ?? 0).toFixed(1);
+  return out;
+}
+
+async function legacyVendorServiceRows(vendorId: number | string, serviceId?: string, includeAggregates = false) {
+  const where = serviceId
+    ? `vs.vendor_id = :vendorId AND (vs.vendor_service_id = :serviceId OR vs.id = :serviceId)`
+    : `vs.vendor_id = :vendorId`;
+  const rows = await query<any>(
+    `${legacyVendorServiceSelect(includeAggregates)}
+      WHERE ${where} AND COALESCE(vs.is_deleted, 0) = 0
+      ORDER BY COALESCE(vs.id, vs.vendor_service_id) DESC`,
+    { vendorId, serviceId },
+  );
+  return rows.map((row) => normalizeVendorServiceRow(row, includeAggregates));
+}
+
+function enquiryStatusExpr(alias: string) {
+  return `COALESCE(${alias}.status_int,
+    CASE
+      WHEN ${alias}.status IN ('new', 'pending') THEN 1
+      WHEN ${alias}.status IN ('accepted', 'active') THEN 2
+      WHEN ${alias}.status IN ('quoted', 'quote_received') THEN 11
+      WHEN ${alias}.status = 'rejected' THEN 4
+      WHEN ${alias}.status = 'completed' THEN 8
+      ELSE CAST(${alias}.status AS UNSIGNED)
+    END)`;
+}
+
+async function legacyVendorQuotationRows(enquiryId: number | string) {
+  return query<any>(
+    `SELECT COALESCE(q.id, q.quotation_id) AS id, q.enquiry_id, q.customer_id,
+            q.message, q.files, COALESCE(q.amount, q.final_amount, q.total) AS amount,
+            q.service_time, ${enquiryStatusExpr('q')} AS status, q.created_at,
+            COALESCE(sm.status_name,
+              CASE
+                WHEN q.status IN ('quoted', 'quote_received') THEN 'Quote Received'
+                WHEN q.status = 'accepted' THEN 'Accepted'
+                WHEN q.status = 'rejected' THEN 'Rejected'
+                ELSE q.status
+              END) AS status_name,
+            v.company_name
+       FROM quotation q
+       LEFT JOIN vendors v ON v.vendor_id = q.vendor_id
+       LEFT JOIN status_master sm ON sm.id = ${enquiryStatusExpr('q')}
+      WHERE q.enquiry_id = :id
+      ORDER BY COALESCE(q.id, q.quotation_id) DESC`,
+    { id: enquiryId },
+  ).catch(() => []);
+}
+
+async function legacyVendorEnquiryRows(vendorId: number | string) {
+  const rows = await query<any>(
+    `SELECT COALESCE(e.id, e.enquiry_id) AS enquiry_id, e.customer_id,
+            c.name AS customer_name,
+            COALESCE(e.first_name, c.name) AS first_name,
+            COALESCE(e.last_name, '') AS last_name,
+            COALESCE(e.email, c.email) AS email,
+            COALESCE(e.phone, c.phone, c.mobile) AS phone,
+            COALESCE(e.message, e.description) AS message,
+            e.files,
+            ${enquiryStatusExpr('e')} AS status,
+            e.created_at, e.service_id, e.vendor_id,
+            COALESCE(sm.status_name,
+              CASE
+                WHEN e.status IN ('new', 'pending') THEN 'Pending'
+                WHEN e.status IN ('quoted', 'quote_received') THEN 'Quote Received'
+                WHEN e.status = 'accepted' THEN 'Accepted'
+                WHEN e.status = 'rejected' THEN 'Rejected'
+                ELSE e.status
+              END) AS status_name,
+            v.company_name,
+            COALESCE(vs.service_title, vs.title) AS service_title,
+            vs.price,
+            COALESCE(vs.unit_name, vs.unit) AS unit_name,
+            vs.pricing_type,
+            vs.description,
+            COALESCE(vs.service_image, vs.thumbnail) AS service_image
+       FROM enquiries e
+       LEFT JOIN customers c ON c.customer_id = e.customer_id
+       LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
+       LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id OR vs.id = e.service_id
+       LEFT JOIN status_master sm ON sm.id = ${enquiryStatusExpr('e')}
+      WHERE e.vendor_id = :vendorId
+      ORDER BY COALESCE(e.id, e.enquiry_id) DESC`,
+    { vendorId },
+  );
+  return Promise.all(rows.map(async (row: any) => ({
+    ...row,
+    quotations: await legacyVendorQuotationRows(row.enquiry_id),
+  })));
+}
+
 /* ─────────────────────────────────────────────────────────────
  *  AUTH (open)
  * ───────────────────────────────────────────────────────────── */
@@ -66,9 +226,13 @@ legacyVendorRouter.post('/verifyVendorOTP', async (req, res, next) => {
     const out = await authService.verifyOtpAndIssueToken({
       phone, otp, userType: 'vendor', name: req.body?.name || req.body?.company_name,
     });
-    send(res, {
-      message: 'OTP verified', data: out.user, token: out.token,
-      vendor_id: out.user?.vendor_id,
+    const vendorId = out.user?.vendor_id ?? out.user?.id;
+    res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully.',
+      vendorId: String(vendorId),
+      token: out.token,
+      data: await legacyVendorRowsById(vendorId),
     });
   } catch (err) { next(err); }
 });
@@ -76,8 +240,12 @@ legacyVendorRouter.post('/verifyVendorOTP', async (req, res, next) => {
 legacyVendorRouter.post('/vendor-login-otp', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
-    const out = await authService.requestOtp(phone, 'vendor');
-    send(res, { message: 'Login OTP sent', data: out });
+    await authService.requestOtp(phone, 'vendor');
+    res.status(200).json({
+      success: true,
+      message: 'OTP sent for login',
+      vendorId: await legacyVendorIdByPhone(phone),
+    });
   } catch (err) { next(err); }
 });
 
@@ -86,9 +254,13 @@ legacyVendorRouter.post('/vendor-login-verify-otp', async (req, res, next) => {
     const phone = pickPhone(req.body);
     const otp = String(req.body?.otp || '');
     const out = await authService.verifyOtpAndIssueToken({ phone, otp, userType: 'vendor' });
-    send(res, {
-      message: 'Login successful', data: out.user, token: out.token,
-      vendor_id: out.user?.vendor_id,
+    const vendorId = out.user?.vendor_id ?? out.user?.id;
+    res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully.',
+      vendorId: String(vendorId),
+      token: out.token,
+      data: await legacyVendorRowsById(vendorId),
     });
   } catch (err) { next(err); }
 });
@@ -111,7 +283,10 @@ import { query as commonQuery } from '../db';
 legacyVendorRouter.get('/getLanguages', async (_req, res, next) => {
   try {
     const rows = await commonQuery<any>(
-      `SELECT id, language_name FROM languages WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY language_name`,
+      `SELECT id, language_name, COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+         FROM languages
+        WHERE COALESCE(is_deleted,0)=0 AND status=1
+        ORDER BY language_name`,
     );
     res.status(200).json({ success: true, languages: rows });
   } catch (err) { next(err); }
@@ -119,25 +294,36 @@ legacyVendorRouter.get('/getLanguages', async (_req, res, next) => {
 legacyVendorRouter.get('/getTools', async (_req, res, next) => {
   try {
     const rows = await commonQuery<any>(
-      `SELECT id, tool_name, tool_slug, description FROM tools_master
+      `SELECT id, tool_name, tool_slug, description, created_at, updated_at,
+              COALESCE(is_deleted, 0) AS is_deleted, COALESCE(status, 1) AS status
+         FROM tools_master
         WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY tool_name`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.get('/listStatus', async (_req, res, next) => {
   try {
     const rows = await commonQuery<any>(
-      `SELECT id, status_name FROM status_master WHERE COALESCE(is_deleted,0)=0 AND is_active=1 ORDER BY id`,
+      `SELECT id, status_name, COALESCE(is_active, 1) AS is_active, created_at
+         FROM status_master
+        WHERE COALESCE(is_deleted,0)=0 AND is_active=1
+        ORDER BY id`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.get('/get_states_by_country_id', async (req, res, next) => {
   try {
     const cid = Number((req.query as any)?.country_id ?? 101);
     const rows = await commonQuery<any>(
-      `SELECT id, name, country_id, country_code, state_code FROM states
+      `SELECT id, name, country_id, country_code,
+              NULL AS fips_code, NULL AS iso2, state_code, NULL AS type,
+              NULL AS latitude, NULL AS longitude,
+              created_at, updated_at, NULL AS flag, NULL AS wikiDataId,
+              COALESCE(status, 1) AS status, created_at AS created_on,
+              updated_at AS updated_on, COALESCE(is_deleted, 0) AS is_deleted
+         FROM states
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
@@ -147,14 +333,29 @@ legacyVendorRouter.get('/get_states_by_country_id', async (req, res, next) => {
 legacyVendorRouter.post('/get_city', async (req, res, next) => {
   try {
     const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
+    const stateName = String((req.body as any)?.state_name || (req.body as any)?.city_state || '').trim();
     const rows = sid
       ? await commonQuery<any>(
-          `SELECT city_id, city_name, city_state, city_state_id FROM city
+          `SELECT city_id, city_name, city_state, city_state_id,
+                  COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+             FROM city
             WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
           { sid },
         )
+      : stateName
+        ? await commonQuery<any>(
+            `SELECT city_id, city_name, city_state, city_state_id,
+                    COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+               FROM city
+              WHERE LOWER(city_state) = LOWER(:stateName)
+                AND COALESCE(is_deleted,0)=0 AND status=1
+              ORDER BY city_name`,
+            { stateName },
+          )
       : await commonQuery<any>(
-          `SELECT city_id, city_name, city_state, city_state_id FROM city
+          `SELECT city_id, city_name, city_state, city_state_id,
+                  COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+             FROM city
             WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
         );
     res.status(200).json({ success: true, city: rows });
@@ -163,10 +364,12 @@ legacyVendorRouter.post('/get_city', async (req, res, next) => {
 legacyVendorRouter.post('/listProofTypes', async (_req, res, next) => {
   try {
     const rows = await commonQuery<any>(
-      `SELECT id, proof_name FROM master_proof_types
+      `SELECT id, proof_name, COALESCE(status, 1) AS status, created_at, updated_at,
+              COALESCE(is_deleted, 0) AS is_deleted
+         FROM master_proof_types
         WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY proof_name`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 
@@ -255,7 +458,13 @@ legacyVendorRouter.get('/get_currency', async (_req, res, next) => {
 legacyVendorRouter.get('/get_states', async (_req, res, next) => {
   try {
     const rows = await commonQuery<any>(
-      `SELECT id, name, country_id, country_code, state_code FROM states
+      `SELECT id, name, country_id, country_code,
+              NULL AS fips_code, NULL AS iso2, state_code, NULL AS type,
+              NULL AS latitude, NULL AS longitude,
+              created_at, updated_at, NULL AS flag, NULL AS wikiDataId,
+              COALESCE(status, 1) AS status, created_at AS created_on,
+              updated_at AS updated_on, COALESCE(is_deleted, 0) AS is_deleted
+         FROM states
         WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
     );
     send(res, { data: rows });
@@ -268,7 +477,13 @@ legacyVendorRouter.post('/get_states_by_country_id', async (req, res, next) => {
   try {
     const cid = Number((req.body as any)?.country_id ?? (req.query as any)?.country_id ?? 101);
     const rows = await commonQuery<any>(
-      `SELECT id, name, country_id, country_code, state_code FROM states
+      `SELECT id, name, country_id, country_code,
+              NULL AS fips_code, NULL AS iso2, state_code, NULL AS type,
+              NULL AS latitude, NULL AS longitude,
+              created_at, updated_at, NULL AS flag, NULL AS wikiDataId,
+              COALESCE(status, 1) AS status, created_at AS created_on,
+              updated_at AS updated_on, COALESCE(is_deleted, 0) AS is_deleted
+         FROM states
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
@@ -336,7 +551,12 @@ legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, nex
       tag_ids: Array.isArray(req.body?.tag_ids) ? req.body.tag_ids.map(Number) : undefined,
       status: active,
     });
-    send(res, { message: 'Listing saved', data: out, vendor_service_id: out?.vendor_service_id }, 201);
+    const rows = await legacyVendorServiceRows(req.user!.id, String(out?.vendor_service_id ?? out?.id));
+    res.status(200).json({
+      success: true,
+      message: 'Service listing created successfully',
+      data: rows[0] ?? out,
+    });
   } catch (err) { next(err); }
 });
 
@@ -358,14 +578,22 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
       tag_ids: Array.isArray(req.body?.tag_ids) ? req.body.tag_ids.map(Number) : undefined,
       status: active,
     });
-    send(res, { message: 'Listing updated', data: out });
+    const rows = await legacyVendorServiceRows(req.user!.id, serviceId);
+    res.status(200).json({
+      success: true,
+      message: 'Service listing updated successfully',
+      data: rows[0] ?? out,
+    });
   } catch (err) { next(err); }
 });
 
 const handleListings = async (req: AuthRequest, res: any, next: any) => {
   try {
-    const data = await vendorSvc.listListings(req.user!.id);
-    send(res, { data });
+    res.status(200).json({
+      success: true,
+      message: 'Service list fetched successfully',
+      data: await legacyVendorServiceRows(req.user!.id, undefined, true),
+    });
   } catch (err) { next(err); }
 };
 legacyVendorRouter.get('/getVendorServiceList', handleListings);
@@ -383,12 +611,17 @@ async function handleServiceStatusUpdate(req: AuthRequest, res: any, next: any) 
           WHERE (vendor_service_id = :id OR id = :id) AND vendor_id = :vid`,
         { showReview: showReview ? 1 : 0, id: serviceId, vid: req.user!.id },
       );
-      const out = await vendorSvc.getListing(req.user!.id, serviceId);
-      return send(res, { message: 'Review status updated', data: out });
+      return res.status(200).json({
+        success: true,
+        message: showReview ? 'Service Review activated' : 'Service Review deactivated',
+      });
     }
     const active = activeFlag(req.body?.is_active ?? req.body?.status) ?? false;
-    const out = await vendorSvc.setListingStatus(req.user!.id, serviceId, active);
-    send(res, { message: 'Status updated', data: out });
+    await vendorSvc.setListingStatus(req.user!.id, serviceId, active);
+    res.status(200).json({
+      success: true,
+      message: active ? 'Service activated' : 'Service deactivated',
+    });
   } catch (err) { next(err); }
 }
 legacyVendorRouter.post('/ServiceStatusUpdate', handleServiceStatusUpdate);
@@ -398,8 +631,11 @@ legacyVendorRouter.post('/ServiceDetails', async (req: AuthRequest, res, next) =
   try {
     const serviceId = pickId(req.body, 'vendor_service_id', 'service_id', 'id');
     if (!serviceId) throw new ApiError(400, 'service_id required');
-    const out = await vendorSvc.getListing(req.user!.id, serviceId);
-    send(res, { data: out });
+    res.status(200).json({
+      success: true,
+      message: 'Service Details',
+      data: await legacyVendorServiceRows(req.user!.id, serviceId),
+    });
   } catch (err) { next(err); }
 });
 
@@ -419,14 +655,13 @@ legacyVendorRouter.post('/ServiceDetails', async (req: AuthRequest, res, next) =
 legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next) => {
   try {
     const vendorId = req.user!.id;
-    const enquiries: any[] = await enquirySvc.listVendorEnquiries(vendorId);
+    const enquiries: any[] = await legacyVendorEnquiryRows(vendorId);
     if (!enquiries.length) {
-      return send(res, { data: enquiries, new_enquiry: [], ongoing: [], request_quotation: [] });
+      return res.status(200).json({ success: true, new_enquiry: [], ongoing: [], request_quotation: [] });
     }
     const enquiryIds = enquiries.map((e) => e.enquiry_id).filter(Boolean);
-    const [orders, quotations, stepLogs, plans] = await Promise.all([
+    const [orders, stepLogs, plans] = await Promise.all([
       query<any>(`SELECT * FROM orders WHERE enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
-      query<any>(`SELECT * FROM enquiry_quotations WHERE enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
       query<any>(`SELECT * FROM order_step_logs WHERE order_id IN (
                     SELECT id FROM orders WHERE enquiry_id IN (:ids)
                   )`, { ids: enquiryIds }).catch(() => []),
@@ -439,16 +674,14 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
     const request_quotation: any[] = [];
     for (const enquiry of enquiries) {
       const enquiryOrders   = orders.filter((o: any)     => o.enquiry_id === enquiry.enquiry_id);
-      const enquiryQuotes   = quotations.filter((q: any) => q.enquiry_id === enquiry.enquiry_id);
       if (enquiryOrders.length === 0) {
-        request_quotation.push({ ...enquiry, quotations: enquiryQuotes, orders: [] });
+        request_quotation.push({ ...enquiry, orders: [] });
         continue;
       }
       for (const order of enquiryOrders) {
         const stepLog = stepLogs.find((s: any) => s.order_id === order.id);
         const item = {
           ...enquiry,
-          quotations: enquiryQuotes,
           orders: [{
             ...order,
             plans:           plans.filter((p: any)    => p.order_id === order.id),
@@ -461,7 +694,7 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
         // visible buckets — matches old behaviour.
       }
     }
-    send(res, { data: enquiries, new_enquiry, ongoing, request_quotation });
+    res.status(200).json({ success: true, new_enquiry, ongoing, request_quotation });
   } catch (err) { next(err); }
 });
 
@@ -488,7 +721,7 @@ legacyVendorRouter.post('/sendQuotationToCustomer', async (req: AuthRequest, res
   try {
     const enquiryId = pickId(req.body, 'enquiry_id', 'enquiryId');
     if (!enquiryId) throw new ApiError(400, 'enquiry_id required');
-    const out = await quoteSvc.sendQuote({
+    await quoteSvc.sendQuote({
       vendor_id: req.user!.id,
       enquiry_id: enquiryId,
       amount: num(req.body?.amount),
@@ -497,7 +730,7 @@ legacyVendorRouter.post('/sendQuotationToCustomer', async (req: AuthRequest, res
       valid_until: req.body?.valid_until,
       advance_amount: req.body?.advance_amount ? num(req.body.advance_amount) : undefined,
     });
-    send(res, { message: 'Quote sent', data: out, quotation_id: out?.quotation_id }, 201);
+    res.status(200).json({ success: true, message: 'Quote sent to customer' });
   } catch (err) { next(err); }
 });
 
@@ -684,8 +917,7 @@ legacyVendorRouter.post('/vendorOrderDetails', async (req: AuthRequest, res, nex
 /** GET /vendor/vendorInfo — vendor self-profile lookup (mobile expects GET). */
 legacyVendorRouter.get('/vendorInfo', async (req: AuthRequest, res, next) => {
   try {
-    const v = await vendorSvc.getVendor(req.user!.id);
-    send(res, { data: v, vendor_id: v?.vendor_id ?? v?.id });
+    res.status(200).json({ success: true, data: await legacyVendorRowsById(req.user!.id) });
   } catch (err) { next(err); }
 });
 
@@ -774,8 +1006,16 @@ legacyVendorRouter.post('/vendorBalance', async (req: AuthRequest, res, next) =>
 
 legacyVendorRouter.get('/getVendorRevenueChart', async (req: AuthRequest, res, next) => {
   try {
-    const data = await payoutSvc.getRevenueChart(req.user!.id, req.query?.months ? num(req.query.months) : 6);
-    send(res, { data });
+    const rows = await payoutSvc.getRevenueChart(req.user!.id, req.query?.months ? num(req.query.months) : 12);
+    const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const byMonth = new Map(rows.map((r: any) => {
+      const monthIndex = String(r.month || '').includes('-')
+        ? Number(String(r.month).split('-')[1]) - 1
+        : monthNames.indexOf(String(r.month || '').toUpperCase());
+      return [monthIndex, Number(r.revenue ?? r.amount ?? 0)];
+    }));
+    const data = monthNames.map((month, idx) => ({ month, amount: byMonth.get(idx) ?? 0 }));
+    res.status(200).json({ success: true, data });
   } catch (err) { next(err); }
 });
 

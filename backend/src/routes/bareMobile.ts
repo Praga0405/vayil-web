@@ -28,7 +28,10 @@ function send(res: any, payload: any = {}, status = 200) {
 bareMobileRouter.get('/getLanguages', async (_req, res, next) => {
   try {
     const rows = await query<any>(
-      `SELECT id, language_name FROM languages WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY language_name`,
+      `SELECT id, language_name, COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+         FROM languages
+        WHERE COALESCE(is_deleted,0)=0 AND status=1
+        ORDER BY language_name`,
     );
     res.status(200).json({ success: true, languages: rows });
   } catch (err) { next(err); }
@@ -37,10 +40,12 @@ bareMobileRouter.get('/getLanguages', async (_req, res, next) => {
 const toolsHandler = async (_req: any, res: any, next: any) => {
   try {
     const rows = await query<any>(
-      `SELECT id, tool_name, tool_slug, description FROM tools_master
+      `SELECT id, tool_name, tool_slug, description, created_at, updated_at,
+              COALESCE(is_deleted, 0) AS is_deleted, COALESCE(status, 1) AS status
+         FROM tools_master
         WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY tool_name`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, data: rows });
   } catch (err) { next(err); }
 };
 bareMobileRouter.get('/getTools',    toolsHandler);
@@ -49,9 +54,12 @@ bareMobileRouter.get('/getToolList', toolsHandler);
 bareMobileRouter.get('/listStatus', async (_req, res, next) => {
   try {
     const rows = await query<any>(
-      `SELECT id, status_name FROM status_master WHERE COALESCE(is_deleted,0)=0 AND is_active=1 ORDER BY id`,
+      `SELECT id, status_name, COALESCE(is_active, 1) AS is_active, created_at
+         FROM status_master
+        WHERE COALESCE(is_deleted,0)=0 AND is_active=1
+        ORDER BY id`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 
@@ -59,7 +67,13 @@ bareMobileRouter.get('/get_states_by_country_id', async (req, res, next) => {
   try {
     const cid = Number((req.query as any)?.country_id ?? 101);
     const rows = await query<any>(
-      `SELECT id, name, country_id, country_code, state_code FROM states
+      `SELECT id, name, country_id, country_code,
+              NULL AS fips_code, NULL AS iso2, state_code, NULL AS type,
+              NULL AS latitude, NULL AS longitude,
+              created_at, updated_at, NULL AS flag, NULL AS wikiDataId,
+              COALESCE(status, 1) AS status, created_at AS created_on,
+              updated_at AS updated_on, COALESCE(is_deleted, 0) AS is_deleted
+         FROM states
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
@@ -70,14 +84,29 @@ bareMobileRouter.get('/get_states_by_country_id', async (req, res, next) => {
 bareMobileRouter.post('/get_city', async (req, res, next) => {
   try {
     const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
+    const stateName = String((req.body as any)?.state_name || (req.body as any)?.city_state || '').trim();
     const rows = sid
       ? await query<any>(
-          `SELECT city_id, city_name, city_state, city_state_id FROM city
+          `SELECT city_id, city_name, city_state, city_state_id,
+                  COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+             FROM city
             WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
           { sid },
         )
+      : stateName
+        ? await query<any>(
+            `SELECT city_id, city_name, city_state, city_state_id,
+                    COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+               FROM city
+              WHERE LOWER(city_state) = LOWER(:stateName)
+                AND COALESCE(is_deleted,0)=0 AND status=1
+              ORDER BY city_name`,
+            { stateName },
+          )
       : await query<any>(
-          `SELECT city_id, city_name, city_state, city_state_id FROM city
+          `SELECT city_id, city_name, city_state, city_state_id,
+                  COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+             FROM city
             WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
         );
     res.status(200).json({ success: true, city: rows });
@@ -87,10 +116,12 @@ bareMobileRouter.post('/get_city', async (req, res, next) => {
 bareMobileRouter.post('/listProofTypes', async (_req, res, next) => {
   try {
     const rows = await query<any>(
-      `SELECT id, proof_name FROM master_proof_types
+      `SELECT id, proof_name, COALESCE(status, 1) AS status, created_at, updated_at,
+              COALESCE(is_deleted, 0) AS is_deleted
+         FROM master_proof_types
         WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY proof_name`,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 

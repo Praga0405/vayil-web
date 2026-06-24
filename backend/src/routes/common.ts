@@ -90,7 +90,15 @@ commonRouter.get('/customer/vendors',  publicVendorList);
 commonRouter.get('/customer/vendors/:id(\\d+)', publicVendorDetail);
 
 commonRouter.get('/service-categories', async (_req, res, next) => {
-  try { ok(res, { categories: await query('SELECT * FROM service_categories WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }
+  try {
+    const categories = await query(
+      `SELECT id, name, slug, icon_url, COALESCE(is_active, status, 1) AS is_active
+         FROM service_categories
+        WHERE COALESCE(is_deleted, 0) = 0 AND COALESCE(is_active, status, 1) = 1
+        ORDER BY name ASC`,
+    );
+    res.status(200).json({ success: true, categories });
+  } catch (err) { next(err); }
 });
 commonRouter.get('/service-subcategories', async (req, res, next) => {
   // Accept both naming conventions — current client uses `category_id`
@@ -101,13 +109,37 @@ commonRouter.get('/service-subcategories', async (req, res, next) => {
   const catId = raw === undefined || raw === '' ? null : Number(raw);
   try {
     const rows = catId == null
-      ? await query('SELECT * FROM service_subcategories WHERE status = 1 ORDER BY name ASC')
-      : await query('SELECT * FROM service_subcategories WHERE category_id = :catId AND status = 1 ORDER BY name ASC', { catId });
-    ok(res, { subcategories: rows });
+      ? await query(
+          `SELECT ss.id, ss.name, ss.slug, ss.category_id, sc.name AS category_name,
+                  COALESCE(ss.is_active, ss.status, 1) AS is_active
+             FROM service_subcategories ss
+             LEFT JOIN service_categories sc ON sc.id = ss.category_id OR sc.category_id = ss.category_id
+            WHERE COALESCE(ss.is_deleted, 0) = 0 AND COALESCE(ss.is_active, ss.status, 1) = 1
+            ORDER BY ss.name ASC`,
+        )
+      : await query(
+          `SELECT ss.id, ss.name, ss.slug, ss.category_id, sc.name AS category_name,
+                  COALESCE(ss.is_active, ss.status, 1) AS is_active
+             FROM service_subcategories ss
+             LEFT JOIN service_categories sc ON sc.id = ss.category_id OR sc.category_id = ss.category_id
+            WHERE ss.category_id = :catId
+              AND COALESCE(ss.is_deleted, 0) = 0 AND COALESCE(ss.is_active, ss.status, 1) = 1
+            ORDER BY ss.name ASC`,
+          { catId },
+        );
+    res.status(200).json({ success: true, subcategories: rows });
   } catch (err) { next(err); }
 });
 commonRouter.get('/service-tags', async (_req, res, next) => {
-  try { ok(res, { tags: await query('SELECT * FROM service_tags WHERE status = 1 ORDER BY name ASC') }); } catch (err) { next(err); }
+  try {
+    const tags = await query(
+      `SELECT id, name, COALESCE(is_active, status, 1) AS is_active
+         FROM service_tags
+        WHERE COALESCE(is_deleted, 0) = 0 AND COALESCE(is_active, status, 1) = 1
+        ORDER BY name ASC`,
+    );
+    res.status(200).json({ success: true, tags });
+  } catch (err) { next(err); }
 });
 /**
  * v4.5.23 — Public settings deny-list.
