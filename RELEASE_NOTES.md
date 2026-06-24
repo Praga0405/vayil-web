@@ -91,6 +91,162 @@ git diff --check
 ```
 
 Backend TypeScript build and whitespace checks passed locally.
+## v4.5.46 — City picker system + homepage process snapshot + footer trim (2026-06-24)
+
+> Note: bumped from v4.5.45 → v4.5.46 because the remote landed a
+> separate OpenAPI parity patch under v4.5.45 between this branch
+> starting and the push. The two releases are independent; both stay
+> in the changelog.
+
+Three independent design/UX deliverables shipped together.
+
+---
+
+### 1. Global city picker — dropdown + "Request your city" capture
+
+#### Why
+
+The "Coimbatore" pill in the header was a hard-coded `<button>` with no
+behaviour. There was no way for a visitor in Bengaluru or Chennai to
+switch context, and no mechanism to capture demand from cities Vayil
+doesn't yet serve. The marketplace also had no city-based filtering, so
+all vendors were shown regardless of the visitor's location.
+
+#### What changed
+
+**Frontend — three new files + four edits.**
+
+| File | Role |
+|---|---|
+| `src/stores/city.ts` (new) | Zustand store with localStorage persistence. Exports `SUPPORTED_CITIES = ['Coimbatore', 'Bengaluru', 'Chennai']` and `useCity()` hook with `{ current, setCity }`. Default = Coimbatore. Choice survives reloads. |
+| `src/components/shared/CityDropdown.tsx` (new) | Reusable click-to-open dropdown. Reads/writes `useCity()`. Lists 3 supported cities with check on current + a footer CTA "Request your city" that opens the modal. Closes on outside-click and Escape. Two props: `showIcon` (orange MapPin) and `responsive` (`hidden md:flex` for the marketplace look). |
+| `src/components/shared/RequestCityModal.tsx` (new) | Modal in the same visual family as LoginModal. Fields: city select (41 Indian metros NOT in `SUPPORTED_CITIES`, sorted by population), reason textarea, 5 pre-filled reason chips that append on tap, optional mobile/email. Posts to `POST /city/request`. Shows a green-check success state, toasts the user, auto-closes after 1.6s. Always renders success even on transient network failure so a flaky DB doesn't block a one-shot capture form. |
+| `src/components/shared/MarketplaceHeader.tsx` | "Coimbatore" hard-coded button replaced with `<CityDropdown />`. |
+| `src/components/shared/PublicHeader.tsx`      | Same — replaced with `<CityDropdown showIcon responsive />` to preserve the existing MapPin + hidden-at-narrow-widths behaviour. |
+| `src/app/page.tsx`                            | Homepage inline header — same swap. All three header surfaces now share the picker. |
+| `src/app/search/page.tsx`                     | Reads `useCity()` and filters the vendor list to vendors whose `city` matches. Vendors with empty/missing city are kept in the list so partial data isn't dropped silently. Pure client-side filter on the existing `vendor.city` field — **no API response shape changed.** |
+
+**Backend — one new endpoint.**
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /city/request` (new, on `bareMobileRouter`) | Body: `{ city, reason, contact?, current_city?, source? }`. Lazy-creates the `city_requests` table if it doesn't exist (so deployment doesn't need a separate migration step). Inserts the payload. Returns 200 with `{ success: true, message: 'City request received' }` even if the DB write fails — the modal completes for the user, and the payload is logged server-side either way for retrieval. |
+
+**Rewrite — one new entry.**
+
+| `next.config.js` | Added `{ source: '/city/request', destination: '/api/city/request' }` so the same-origin POST resolves through the Next.js serverless catch-all. |
+
+#### What did NOT change
+
+- No existing API response shape touched. Adheres to the user's standing rule that mobile contracts stay stable.
+- `payment_secret` / `smtp_password` / `smtp_username` exposure (v4.5.34) unchanged.
+- All other existing routes and their responses are byte-for-byte identical to v4.5.44.
+
+#### Verification — all live in preview at `http://localhost:3000`
+
+```
+dropdown opens → 3 supported cities + "Request your city" footer ✅
+clicking Bengaluru → trigger text updates + localStorage persists ✅
+selection survives page reload and applies to every page ✅
+modal opens → 41 city options + 5 reason chips + reason field + contact field + Send button ✅
+POST /city/request → 200 { success: true, message: 'City request received' } ✅
+search page filters vendor list by selected city (client-side) ✅
+no console errors, no TypeScript errors ✅
+```
+
+---
+
+### 2. "How Vayil Works" — customer-experience snapshot on the left
+
+#### Why
+
+The left side of the homepage's "How Vayil Works" section had a faded
+180px `⌂` glyph at 20% opacity — a decorative placeholder. The right
+side already had 6 process cards describing each step. The left needed
+to complement them, not duplicate them: show the *experience*, while
+the cards show the *process*.
+
+#### What changed
+
+`src/app/page.tsx` — replaced the house-emoji decoration with a tilted
+"Active Project" mockup card showing what a real Vayil customer sees at
+the decisive moment of their renovation:
+
+- **Project header** — "Kitchen Remodel · Sharma residence" + vendor row (D'LIFE Interiors + green Verified badge) + "Week 4 of 6" pill + pulsing orange "ACTIVE PROJECT" tag
+- **Milestone tracker** — 5 milestones with progressive state: 3 done (green check + strikethrough), 1 pending (pulsing orange dot + bold + "AWAITING YOU" label), 1 future (gray ring)
+- **Activity card** — "NEW · Vendor uploaded 4 photos" + 4-photo strip (showing actual Indian-context renovation photos) + big orange "Approve & release ₹42,000 ↗" CTA
+- **Bottom trust strip** — "Escrow protected · ₹1,80,000 remaining"
+- **Floating accents** — "4.8 VENDOR" star badge (+6° tilt, top-right) and "APPROVED · M2 paid · 2 days ago" (-5° tilt, bottom-left)
+
+Visual treatment matches the `/become-a-vendor` hero — tilted card with
+floating badges at angles, so the two pages feel like they came from the
+same designer.
+
+Wrapped in `hidden lg:block` so the responsive behaviour matches the
+previous decoration (mobile/tablet stack the 6 cards full-width; desktop
+≥1024px gets the mockup + cards in a two-column layout).
+
+#### Photo strip — Indian-context renovation imagery
+
+The 4 thumbnails in the activity card use real renovation photos
+instead of gradient placeholders:
+
+| Slot | Source |
+|---|---|
+| 1 | `/vayil-homeowners-milestone.jpg` (team-curated, Indian homeowner approving kitchen milestone) |
+| 2 | `/vayil-hero-renovation-light.jpg` (team-curated, Coimbatore renovation scene) |
+| 3 | `/vayil-professionals-growth.jpg` (team-curated, Indian vendor preparing documentation) |
+| 4 | Unsplash `photo-1556909114-f6e7ad7d3136` (kitchen still) |
+
+Three of four are the existing locally hosted assets already used
+elsewhere on the homepage. Each thumbnail keeps a warm gradient
+fallback class on the wrapper so the strip never renders empty if a URL
+fails.
+
+---
+
+### 3. Footer trim — addresses removed, brand strip kept
+
+#### Why
+
+The address grid in the footer ("Serve. Transparent. Innovate." +
+Canada/United States/India offices) was creating clutter on every
+public page footer. The user asked to remove it while preserving the
+brand-rights row.
+
+#### What changed
+
+`src/components/shared/PublicFooter.tsx`:
+
+- **Removed** — the entire address grid block including the "Serve. Transparent. Innovate." headline and the three `AddressBlock` instances (Canada / United States / India).
+- **Removed** — the now-orphaned `AddressBlock` helper component (dead code).
+- **Kept** — the app-download band ("Are you a professional?" + "Need a service?" with App Store / Google Play badges), the social-media row (YouTube, LinkedIn, Facebook, Instagram), the legal links (Terms · Privacy · Cookies), and the "© 2026 Vayil. All rights reserved." copyright line.
+
+Applied uniformly — every surface using `PublicFooter` (homepage,
+`/become-a-vendor`, `/search`, all `/account/*` pages, vendor studio,
+etc.) loses the addresses in one change.
+
+---
+
+### Net file diff for v4.5.46
+
+```
+M  backend/src/routes/bareMobile.ts        (+POST /city/request)
+M  next.config.js                          (+ /city/request rewrite)
+M  src/app/page.tsx                        (homepage header → CityDropdown,
+                                            "How Vayil Works" left mockup,
+                                            Indian-context photo strip)
+M  src/app/search/page.tsx                 (city-filter on vendor list)
+M  src/components/shared/MarketplaceHeader.tsx  (→ CityDropdown)
+M  src/components/shared/PublicHeader.tsx       (→ CityDropdown)
+M  src/components/shared/PublicFooter.tsx       (address grid removed)
+?? src/components/shared/CityDropdown.tsx       (new)
+?? src/components/shared/RequestCityModal.tsx   (new)
+?? src/stores/city.ts                           (new)
+```
+
+3 new files, 7 modified, ~600 LOC net. No backend response shapes
+modified. No existing routes touched. Mobile API contract stable.
 
 ---
 

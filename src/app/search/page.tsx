@@ -12,6 +12,7 @@ import {
   type DummyVendor, type ServiceCategory,
 } from '@/lib/dummyData'
 import { useLiveVendors } from '@/hooks/useLiveVendor'
+import { useCity } from '@/stores/city'
 
 // Local search — same fields as dummyData.searchVendors but operates on
 // whatever vendor list we have (live or fallback).
@@ -84,6 +85,7 @@ function SearchInner() {
   /* Live data with graceful fallback to dummy vendors (no UI change either way) */
   const live = useLiveVendors()
   const allVendors = live.vendors
+  const selectedCity = useCity((s) => s.current)
 
   useEffect(() => {
     if (categoryParam && !selectedCategories.includes(categoryParam)) {
@@ -95,6 +97,14 @@ function SearchInner() {
   /* Compute results */
   const results = useMemo(() => {
     let v: DummyVendor[] = queryParam ? searchInList(allVendors, queryParam) : [...allVendors]
+
+    // v4.5.45 — city filter (client-side only; vendor shape already
+    // carries `city`, so this needs no API change). If a vendor's city
+    // is missing/empty, keep them in the list so partial data doesn't
+    // disappear silently.
+    if (selectedCity) {
+      v = v.filter(x => !x.city || x.city.toLowerCase() === selectedCity.toLowerCase())
+    }
 
     if (selectedCategories.length > 0) {
       v = v.filter(x => vendorMatchesCategories(x, selectedCategories))
@@ -114,7 +124,7 @@ function SearchInner() {
       default: break
     }
     return v
-  }, [allVendors, queryParam, selectedCategories, minRating, verifiedOnly, topRatedOnly, maxPrice, minExperience, availabilityToday, sort])
+  }, [allVendors, queryParam, selectedCity, selectedCategories, minRating, verifiedOnly, topRatedOnly, maxPrice, minExperience, availabilityToday, sort])
 
   /* Category counts */
   const counts = useMemo(() => {

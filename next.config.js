@@ -268,6 +268,9 @@ const nextConfig = {
         { source: '/get_city',                  destination: '/api/get_city' },
         { source: '/listProofTypes',            destination: '/api/listProofTypes' },
         { source: '/getSettings',               destination: '/api/getSettings' },
+        // v4.5.45 — header city dropdown's "Request your city" modal
+        // posts to this path; mounted on bareMobileRouter on the backend.
+        { source: '/city/request',              destination: '/api/city/request' },
         ...bareMobilePaths.map((path) => ({ source: path, destination: `/api${path}` })),
       ],
     }

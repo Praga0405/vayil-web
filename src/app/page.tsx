@@ -6,6 +6,7 @@ import { useUserAuth } from '@/stores/auth'
 import VayilLogo from '@/components/shared/VayilLogo'
 import LoginModal from '@/components/shared/LoginModal'
 import PublicFooter from '@/components/shared/PublicFooter'
+import CityDropdown from '@/components/shared/CityDropdown'
 import { Avatar, StatusBadge } from '@/components/ui'
 import { customerApi } from '@/lib/api/client'
 import { formatRelative } from '@/lib/utils'
@@ -364,9 +365,7 @@ export default function HomePage() {
           {/* Logo + city */}
           <div className="flex items-center gap-4 shrink-0">
             <Link href="/"><VayilLogo size={36} textSize="text-xl" /></Link>
-            <button className="flex items-center gap-1.5 text-sm font-medium text-navy border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition">
-              Coimbatore <ChevronDown className="w-4 h-4 text-gray-400" />
-            </button>
+            <CityDropdown />
           </div>
 
           {/* Centre nav */}
@@ -718,14 +717,141 @@ export default function HomePage() {
       {/* ── 9. How it works ── */}
       <section id="how-it-works" className="bg-orange py-20 px-[46px] relative overflow-hidden">
         <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-10 lg:gap-16 items-start">
-          {/* Left */}
-          <div className="max-w-[394px] lg:shrink-0">
+          {/* Left ── heading + creative customer-experience snapshot
+             The 6 cards on the right describe the PROCESS; this snapshot
+             shows the EXPERIENCE — what a real project looks like inside
+             the Vayil customer app at the most decisive moment (vendor
+             has uploaded work, customer needs to approve and release
+             escrow). Tilted card with floating accent badges to match
+             the design language of the /become-a-vendor hero. */}
+          <div className="lg:max-w-[420px] lg:shrink-0">
             <h2 className="text-[34px] sm:text-[42px] lg:text-[48px] font-bold text-white mb-6">How Vayil Works</h2>
-            <p className="text-white/70 text-sm leading-relaxed">
+            <p className="text-white/80 text-sm leading-relaxed mb-10">
               Vayil helps homeowners move from scattered conversations and advance-payment risk to a more structured and transparent project journey.
             </p>
-            {/* Decorative house outline */}
-            <div className="hidden lg:block mt-12 opacity-20 text-white text-[180px] leading-none select-none">⌂</div>
+
+            {/* Customer-experience mockup */}
+            <div className="hidden lg:block relative mt-6">
+              {/* Tilted backdrop */}
+              <div className="absolute inset-3 bg-white/10 rounded-[24px] -rotate-[2deg]" />
+
+              {/* Main project card */}
+              <div className="relative bg-white rounded-[24px] shadow-2xl shadow-black/20 p-5 rotate-[1.5deg] origin-bottom-right">
+                {/* Header strip */}
+                <div className="flex items-center justify-between pb-4 border-b border-dashed border-gray-200">
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-orange bg-orange/10 px-2 py-1 rounded-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange animate-pulse" />
+                    Active Project
+                  </span>
+                  <span className="text-[10px] font-semibold text-gray-400">Week 4 of 6</span>
+                </div>
+
+                {/* Project title + vendor */}
+                <div className="pt-4">
+                  <h4 className="text-[15px] font-bold text-navy leading-tight">Kitchen Remodel · Sharma residence</h4>
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-navy to-[#0f2540] text-white font-bold flex items-center justify-center text-[10px]">DL</div>
+                    <span className="text-xs text-gray-600">D&apos;LIFE Interiors</span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase text-green-700 bg-green-50 px-1.5 py-0.5 rounded-md">
+                      <BadgeCheck className="w-3 h-3" /> Verified
+                    </span>
+                  </div>
+                </div>
+
+                {/* Milestone tracker — compact */}
+                <div className="mt-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Milestones</p>
+                    <p className="text-[10px] font-bold text-orange">3 of 5 complete</p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {[
+                      { label: 'Design approved',    state: 'done'    as const },
+                      { label: 'Demo + plumbing',    state: 'done'    as const },
+                      { label: 'Tile work',          state: 'done'    as const },
+                      { label: 'Cabinets',           state: 'pending' as const },
+                      { label: 'Final finish',       state: 'future'  as const },
+                    ].map((m) => (
+                      <li key={m.label} className="flex items-center gap-2.5 text-xs">
+                        {m.state === 'done' && <CheckCircle2 className="w-3.5 h-3.5 text-green-600 fill-green-100 shrink-0" />}
+                        {m.state === 'pending' && (
+                          <span className="relative w-3.5 h-3.5 rounded-full bg-orange shrink-0 flex items-center justify-center">
+                            <span className="absolute inset-0 rounded-full bg-orange animate-ping opacity-50" />
+                            <span className="relative w-1.5 h-1.5 rounded-full bg-white" />
+                          </span>
+                        )}
+                        {m.state === 'future' && <span className="w-3.5 h-3.5 rounded-full border-2 border-gray-200 shrink-0" />}
+                        <span className={
+                          m.state === 'done'    ? 'text-gray-500 line-through' :
+                          m.state === 'pending' ? 'font-bold text-navy'         :
+                                                  'text-gray-400'
+                        }>{m.label}</span>
+                        {m.state === 'pending' && (
+                          <span className="ml-auto text-[10px] font-bold uppercase text-orange">Awaiting you</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Approval action card */}
+                <div className="mt-5 bg-gradient-to-br from-orange/8 to-orange/0 border border-orange/20 rounded-xl p-3.5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-orange text-white px-2 py-0.5 rounded">New</span>
+                    <span className="text-xs text-navy font-semibold">Vendor uploaded 4 photos</span>
+                  </div>
+                  {/* Photo strip — Indian-context kitchen remodel photos.
+                     Three locally hosted, team-curated renovation assets
+                     (already used elsewhere on the homepage and verified
+                     Indian-oriented) plus one carefully chosen Unsplash
+                     kitchen still. Subtle gradient fallback class on the
+                     box so it never renders empty if a URL fails. */}
+                  <div className="flex gap-1.5 mb-3">
+                    {[
+                      { src: '/vayil-homeowners-milestone.jpg',                                              alt: 'Homeowner approving kitchen milestone',         g: 'from-amber-200 to-orange-300' },
+                      { src: '/vayil-hero-renovation-light.jpg',                                             alt: 'Kitchen cabinetry detail',                       g: 'from-stone-200 to-amber-200' },
+                      { src: '/vayil-professionals-growth.jpg',                                              alt: 'Vendor preparing cabinet installation',          g: 'from-orange-100 to-amber-200' },
+                      { src: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=240&h=140&fit=crop', alt: 'Kitchen ready for final finish',                 g: 'from-amber-300 to-orange-300' },
+                    ].map((p, i) => (
+                      <div key={i} className={`flex-1 h-14 rounded-md overflow-hidden bg-gradient-to-br ${p.g}`}>
+                        <img src={p.src} alt={p.alt} loading="lazy"
+                          className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                  <button className="w-full bg-orange hover:bg-orange-600 text-white text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition">
+                    Approve &amp; release ₹42,000
+                    <ArrowUpRight className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {/* Bottom trust strip */}
+                <div className="mt-4 flex items-center gap-2 text-[10px] text-gray-500">
+                  <ShieldCheck className="w-3.5 h-3.5 text-navy" />
+                  <span>Escrow protected · ₹1,80,000 remaining</span>
+                </div>
+              </div>
+
+              {/* Floating accent: rating */}
+              <div className="absolute -top-3 -right-3 bg-white rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 rotate-[6deg]">
+                <Star className="w-4 h-4 fill-orange text-orange" />
+                <div className="leading-tight">
+                  <p className="text-xs font-bold text-navy">4.8</p>
+                  <p className="text-[9px] uppercase tracking-wider text-gray-400 font-bold">vendor</p>
+                </div>
+              </div>
+
+              {/* Floating accent: notification */}
+              <div className="absolute -bottom-3 -left-3 bg-white rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 -rotate-[5deg]">
+                <span className="w-7 h-7 rounded-full bg-green-50 text-green-600 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </span>
+                <div className="leading-tight">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Approved</p>
+                  <p className="text-xs font-bold text-navy">M2 paid · 2 days ago</p>
+                </div>
+              </div>
+            </div>
           </div>
           {/* Right steps */}
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-5">

@@ -39,19 +39,6 @@ export default function PublicFooter({ compact = false }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 py-10 border-b border-white/10">
-              <div>
-                <h4 className="text-xl lg:text-2xl font-bold text-white leading-tight">
-                  Serve.<br />Transparent.<br />Innovate.
-                </h4>
-              </div>
-              <AddressBlock country="Canada"
-                lines={['2433 29St SW Calgary, Alberta T3E2K3, Canada', 'Contact: +1 4034000849']} />
-              <AddressBlock country="United States"
-                lines={['12410 Alameda Trace CIR, Austin, TX 78727-6335 United States', 'Contact: +1 4034000849']} />
-              <AddressBlock country="India"
-                lines={['203, 2nd Floor, "B" Wing, Nyati Tech Park, Wadgaon Sheri, Pune, 411014, India', 'Contact: +91 7767815999']} />
-            </div>
           </>
         )}
 
@@ -79,17 +66,6 @@ export default function PublicFooter({ compact = false }: Props) {
         </div>
       </div>
     </footer>
-  )
-}
-
-function AddressBlock({ country, lines }: { country: string; lines: string[] }) {
-  return (
-    <div>
-      <p className="text-white font-semibold mb-3">{country}</p>
-      {lines.map((l, i) => (
-        <p key={i} className={`text-white/60 text-sm ${i === 0 ? 'leading-relaxed' : 'mt-2'}`}>{l}</p>
-      ))}
-    </div>
   )
 }
 

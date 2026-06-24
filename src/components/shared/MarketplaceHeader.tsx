@@ -21,6 +21,7 @@ import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import VayilLogo from '@/components/shared/VayilLogo'
 import LoginModal from '@/components/shared/LoginModal'
+import CityDropdown from '@/components/shared/CityDropdown'
 import { Avatar } from '@/components/ui'
 import {
   Search, ChevronDown, LogOut, Plus,
@@ -70,9 +71,7 @@ export default function MarketplaceHeader({ defaultQuery = '' }: Props) {
           {/* Logo + city */}
           <div className="flex items-center gap-4 shrink-0">
             <Link href="/"><VayilLogo size={36} textSize="text-xl" /></Link>
-            <button className="flex items-center gap-1.5 text-sm font-medium text-navy border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition">
-              Coimbatore <ChevronDown className="w-4 h-4 text-gray-400" />
-            </button>
+            <CityDropdown />
           </div>
 
           {/* Centre nav */}

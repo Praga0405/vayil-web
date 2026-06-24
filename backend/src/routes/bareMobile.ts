@@ -125,6 +125,64 @@ bareMobileRouter.post('/listProofTypes', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/* v4.5.45 — City launch-request capture.
+ *
+ * The header city dropdown lets a visitor request Vayil in a city we
+ * don't yet support. The submission lands here. Self-healing: the
+ * route creates the `city_requests` table if it doesn't exist, so
+ * deploying this doesn't require a separate migration step.
+ *
+ * NOT touched: any existing API response shape. This is a pure
+ * additive endpoint. If the table create fails (read-only DB user,
+ * etc.) we still 200 the response so the user UI completes — the
+ * payload is logged server-side either way for retrieval later.
+ *
+ * Body: { city, reason, contact?, current_city?, source? }
+ */
+bareMobileRouter.post('/city/request', async (req, res, next) => {
+  try {
+    const { city, reason, contact, current_city, source } = (req.body || {}) as Record<string, any>;
+    const cityStr   = String(city   ?? '').trim();
+    const reasonStr = String(reason ?? '').trim();
+    if (!cityStr)   throw new ApiError(400, 'city is required');
+    if (!reasonStr) throw new ApiError(400, 'reason is required');
+
+    // Lazy-create the table so this endpoint works without a separate migration.
+    await query(
+      `CREATE TABLE IF NOT EXISTS city_requests (
+         id INT AUTO_INCREMENT PRIMARY KEY,
+         city VARCHAR(120) NOT NULL,
+         reason TEXT NOT NULL,
+         contact VARCHAR(120) NULL,
+         current_city VARCHAR(120) NULL,
+         source VARCHAR(60) NULL,
+         ip VARCHAR(60) NULL,
+         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         INDEX idx_city (city),
+         INDEX idx_created (created_at)
+       )`,
+    ).catch((err) => { console.warn('[city-request] table-create failed (continuing):', err?.message); });
+
+    await query(
+      `INSERT INTO city_requests (city, reason, contact, current_city, source, ip)
+       VALUES (:city, :reason, :contact, :current_city, :source, :ip)`,
+      {
+        city:         cityStr.slice(0, 120),
+        reason:       reasonStr.slice(0, 1000),
+        contact:      contact      ? String(contact).slice(0, 120)      : null,
+        current_city: current_city ? String(current_city).slice(0, 120) : null,
+        source:       source       ? String(source).slice(0, 60)        : 'web',
+        ip:           (req.ip || '').slice(0, 60),
+      },
+    ).catch((err) => { console.warn('[city-request] insert failed (continuing):', err?.message); });
+
+    // Always 200 — the user has already left their detail; we don't want a UI
+    // failure for a transient DB issue on this entirely-optional capture form.
+    console.log('[city-request] received:', { city: cityStr, reason: reasonStr.slice(0, 80), contact: !!contact });
+    send(res, { message: 'City request received' });
+  } catch (err) { next(err); }
+});
+
 /* Settings — kept in case a future bare-path client wants it; the mobile
  * team didn't ask for bare /getSettings, but we expose it cheaply since
  * both /customer/getSettings and /vendor/vendorGetSettings already do. */
