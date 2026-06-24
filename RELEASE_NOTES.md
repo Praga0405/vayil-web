@@ -24,6 +24,10 @@ reviews and approves them.
   `AWS_BUCKET`, `AWS_REGION`, `AWS_S3_ACCESS_KEY_ID`,
   `AWS_ACCESS_KEY_ID`, `AWS_S3_SECRET_ACCESS_KEY`, and
   `AWS_SECRET_ACCESS_KEY`.
+- Added a temporary legacy upload fallback: when Vercel S3 env is not
+  configured, `/upload_files` forwards the multipart upload to
+  `app.vayil.in/upload_files` and returns the resulting S3 URL instead
+  of a Base64 `data:` URL.
 - Added an approved-vendor middleware gate. Pending vendors can complete
   profile/KYC/review submission, but feature routes remain blocked until
   admin approval.
@@ -36,7 +40,8 @@ reviews and approves them.
 - Mobile registration can read uploaded URLs from
   `uploadedUrls.upload_files`.
 - If Vercel has S3/AWS env configured, upload responses now contain S3
-  public URLs instead of Base64 fallback URLs.
+  public URLs directly. If not, the legacy upload fallback still returns
+  the old S3 URL shape.
 - New vendors remain pending/under review until an admin approves them.
 - Approved vendors can access the platform features; pending/rejected
   vendors receive a 403 approval-pending response on gated routes.

@@ -30,6 +30,8 @@
  * into the {filename, url, size, mimetype} array the mobile apps
  * expect.
  */
+import axios from 'axios';
+import FormData from 'form-data';
 import { randomUUID } from 'crypto';
 
 export type UploadedFile = {
@@ -38,7 +40,7 @@ export type UploadedFile = {
   size: number;
   mimetype: string;
   url: string;
-  storage: 's3' | 'data-url';
+  storage: 's3' | 'legacy' | 'data-url';
 };
 
 interface RawFile {
@@ -110,6 +112,40 @@ function safeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 80);
 }
 
+async function uploadViaLegacyEndpoint(file: RawFile): Promise<UploadedFile | null> {
+  if (process.env.DISABLE_LEGACY_UPLOAD_FALLBACK === 'true') return null;
+
+  const url = process.env.LEGACY_UPLOAD_URL || 'https://app.vayil.in/upload_files';
+  const form = new FormData();
+  const field = file.fieldname || 'upload_files';
+  form.append(field, file.buffer, {
+    filename: safeFileName(file.originalname),
+    contentType: file.mimetype,
+    knownLength: file.size,
+  });
+
+  const response = await axios.post(url, form, {
+    headers: form.getHeaders(),
+    maxBodyLength: Infinity,
+    timeout: 30_000,
+  });
+  const uploadedUrls = response.data?.uploadedUrls || {};
+  const uploadedUrl =
+    uploadedUrls[field]?.[0] ||
+    uploadedUrls.upload_files?.[0] ||
+    uploadedUrls.files?.[0];
+  if (!uploadedUrl) return null;
+
+  return {
+    field,
+    filename: file.originalname,
+    size: file.size,
+    mimetype: file.mimetype,
+    url: uploadedUrl,
+    storage: 'legacy',
+  };
+}
+
 export async function uploadFile(
   file: RawFile,
   opts: { prefix?: string } = {},
@@ -138,6 +174,9 @@ export async function uploadFile(
       };
     }
   }
+
+  const legacyUploaded = await uploadViaLegacyEndpoint(file);
+  if (legacyUploaded) return legacyUploaded;
 
   // Dev fallback — short base64 preview so the upload contract round-
   // trips without an external storage dep. Truncated heavily to keep
