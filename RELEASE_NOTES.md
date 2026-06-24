@@ -4,47 +4,218 @@
 
 ### Why
 
-Vendor registration uploads were receiving the newer internal upload
-envelope and, when production S3 env aliases were not recognized, a
-Base64 `data:` fallback URL. The mobile registration flow expects the
-legacy `uploadedUrls.upload_files[]` response containing public file
-URLs. The vendor onboarding flow also needed an enforced approval gate
-so newly registered vendors cannot use platform features until an admin
-reviews and approves them.
+The mobile vendor registration flow was blocked at the document/image
+upload step because `vayil-web.vercel.app/upload_files` returned the newer
+internal upload envelope:
+
+```json
+{
+  "success": true,
+  "message": "Uploaded",
+  "data": [
+    {
+      "field": "upload_files",
+      "url": "data:image/png;base64,..."
+    }
+  ]
+}
+```
+
+The legacy mobile contract expects this exact shape instead:
+
+```json
+{
+  "success": true,
+  "message": "Files uploaded successfully",
+  "uploadedUrls": {
+    "upload_files": [
+      "https://vayil-files.s3.ap-south-1.amazonaws.com/datas/<file>"
+    ]
+  }
+}
+```
+
+The Base64 value happened because the new backend fell back to local
+`data:` URLs when production S3 env vars were not visible to the Vercel
+function. That response is usable for local smoke tests but not for mobile
+registration, because the app persists and sends the returned URL into the
+next registration/KYC step.
+
+The same release also implements the requested vendor approval process:
+new vendors must stay pending until reviewed by an admin, and should not
+be able to use platform features or appear in customer-facing service
+lists before approval.
 
 ### What Changed
 
-- Restored legacy upload response shape for bare `/upload_files`,
-  `/customer/upload_files`, and `/vendor/upload_files`:
-  `{ success, message: "Files uploaded successfully", uploadedUrls }`.
-- Added `uploadedUrls.upload_files[]` and `uploadedUrls.files[]` aliases
-  so both mobile and web upload parsers receive the public URL array.
-- Added S3 env alias support for the deployment variable names used in
-  existing docs and common AWS variants, including `AWS_S3_BUCKET`,
-  `AWS_BUCKET`, `AWS_REGION`, `AWS_S3_ACCESS_KEY_ID`,
-  `AWS_ACCESS_KEY_ID`, `AWS_S3_SECRET_ACCESS_KEY`, and
-  `AWS_SECRET_ACCESS_KEY`.
-- Added a temporary legacy upload fallback: when Vercel S3 env is not
-  configured, `/upload_files` forwards the multipart upload to
-  `app.vayil.in/upload_files` and returns the resulting S3 URL instead
-  of a Base64 `data:` URL.
-- Added an approved-vendor middleware gate. Pending vendors can complete
-  profile/KYC/review submission, but feature routes remain blocked until
-  admin approval.
-- Hid pending vendors from customer-facing service search/list results.
-- Added a lightweight `/admin` vendor review screen for staff login,
-  pending queue review, approve, and reject actions.
+#### Upload contract restoration
+
+- Restored the legacy response shape for all upload entry points:
+  - `POST /upload_files`
+  - `POST /customer/upload_files`
+  - `POST /vendor/upload_files`
+- Added a shared `legacyUploadResponse()` formatter so all three handlers
+  now return:
+  - root `success: true`
+  - root `message: "Files uploaded successfully"`
+  - root `uploadedUrls`
+  - `uploadedUrls.upload_files[]`
+  - `uploadedUrls.files[]` as a secondary alias for web/client helpers
+- Updated the web `normalizeUploadedUrls()` helper to understand the
+  restored `uploadedUrls.upload_files[]` contract while still accepting
+  older internal shapes during transition.
+
+#### S3 upload fallback hardening
+
+- Added support for additional S3/AWS environment variable names:
+  - `S3_BUCKET`
+  - `S3_BUCKET_NAME`
+  - `AWS_S3_BUCKET`
+  - `AWS_S3_BUCKET_NAME`
+  - `AWS_BUCKET`
+  - `AWS_BUCKET_NAME`
+  - `S3_REGION`
+  - `AWS_S3_REGION`
+  - `AWS_REGION`
+  - `AWS_DEFAULT_REGION`
+  - `S3_ACCESS_KEY_ID`
+  - `AWS_S3_ACCESS_KEY_ID`
+  - `S3_ACCESS_KEY`
+  - `AWS_ACCESS_KEY`
+  - `AWS_ACCESS_KEY_ID`
+  - `S3_SECRET_ACCESS_KEY`
+  - `AWS_S3_SECRET_ACCESS_KEY`
+  - `S3_SECRET_KEY`
+  - `AWS_SECRET_KEY`
+  - `AWS_SECRET_ACCESS_KEY`
+  - `S3_PUBLIC_BASE_URL`
+  - `AWS_S3_PUBLIC_BASE_URL`
+  - `AWS_CLOUDFRONT_URL`
+- Added a temporary compatibility bridge for production:
+  when direct S3 env is not configured, the new backend forwards the
+  multipart upload to `https://app.vayil.in/upload_files` and returns the
+  S3 URL from that legacy service.
+- Added `LEGACY_UPLOAD_URL` for overriding the legacy bridge target and
+  `DISABLE_LEGACY_UPLOAD_FALLBACK=true` for disabling the bridge once
+  Vercel has direct S3 credentials.
+
+#### Vendor approval workflow
+
+- Added an approved-vendor gate in shared auth middleware.
+- Canonical vendor APIs under `/vendors/*` now require an approved vendor
+  status for feature access.
+- Legacy mobile vendor APIs under `/vendor/*` and bare vendor aliases now
+  use the same gate for feature routes.
+- Pending vendors can still complete onboarding and review submission:
+  - `/vendors/me`
+  - `/vendors/kyc`
+  - `/vendors/submit-for-review`
+  - `/vendor/step1`
+  - `/vendor/step2`
+  - `/vendor/step3`
+  - `/vendor/step4`
+  - `/vendor/serviceTagStep`
+  - `/vendor/VendorAddServiceTag`
+  - `/vendor/vendorInfo`
+  - `/vendor/upload_files`
+- Feature routes such as service listing, enquiries, quotes, projects,
+  payments, payouts, bank details, and notifications are blocked until
+  the vendor is approved.
+- Approval statuses treated as active:
+  - `verified`
+  - `approved`
+  - `active`
+  - `kyc_approved`
+- Pending or rejected vendors receive:
+  `403 Vendor approval pending. Please wait for admin approval to access this feature.`
+
+#### Customer-facing visibility
+
+- `POST /customer/ServiceList` now filters vendors to approved statuses,
+  so pending vendors do not appear in the mobile service marketplace.
+- Canonical customer vendor listing now includes `approved` as an allowed
+  approved status and continues excluding pending/rejected/deleted vendors.
+
+#### Admin review page
+
+- Added a lightweight staff-only admin page:
+  `/admin`
+- The page uses existing backend admin contracts:
+  - `POST /auth/staff/login`
+  - `POST /Admin/GetReviewQueue`
+  - `POST /Admin/VendorKycUpdate`
+- Admin users can:
+  - login using staff credentials
+  - view pending vendors
+  - filter queue by pending/approved/rejected
+  - approve vendors
+  - reject vendors
+  - add an optional review note
+- The admin page stores the staff token in `localStorage.vayil_ops_token`,
+  matching the existing ops/admin API client behavior.
 
 ### Impact
 
-- Mobile registration can read uploaded URLs from
-  `uploadedUrls.upload_files`.
-- If Vercel has S3/AWS env configured, upload responses now contain S3
-  public URLs directly. If not, the legacy upload fallback still returns
-  the old S3 URL shape.
-- New vendors remain pending/under review until an admin approves them.
-- Approved vendors can access the platform features; pending/rejected
-  vendors receive a 403 approval-pending response on gated routes.
+- Mobile registration can resume because the upload API again returns
+  `uploadedUrls.upload_files[]` with an HTTPS S3 URL.
+- Existing mobile code that reads only `uploadedUrls.upload_files` no
+  longer needs to understand the newer internal `data[].url` shape.
+- Web upload callers remain compatible through the updated upload URL
+  normalizer.
+- New vendors are not market-visible and cannot use feature APIs until
+  admin approval.
+- Admin review can be done from `https://vayil-web.vercel.app/admin`.
+- The old `app.vayil.in` upload endpoint is now used only as a fallback
+  bridge when direct S3 env is missing. Long term, Vercel should be given
+  direct S3 credentials and the bridge can be disabled with
+  `DISABLE_LEGACY_UPLOAD_FALLBACK=true`.
+
+### Live Verification
+
+After deployment, `POST https://vayil-web.vercel.app/upload_files` was
+tested with multipart field `upload_files` and returned:
+
+```json
+{
+  "success": true,
+  "message": "Files uploaded successfully",
+  "uploadedUrls": {
+    "upload_files": [
+      "https://vayil-files.s3.ap-south-1.amazonaws.com/datas/1782305480764_codex-upload-test.png"
+    ],
+    "files": [
+      "https://vayil-files.s3.ap-south-1.amazonaws.com/datas/1782305480764_codex-upload-test.png"
+    ]
+  }
+}
+```
+
+The same live test confirmed `isDataUrl: false`, so the response is no
+longer returning a Base64 `data:` URL.
+
+`GET https://vayil-web.vercel.app/admin` was also checked and returned
+HTTP `200`, confirming the deployed admin review page is reachable.
+
+### Commits Included
+
+- `b13efd9` - Fix upload parity and vendor approval gate
+- `12b0554` - Expand upload S3 env aliases
+- `717214f` - Bridge uploads to legacy S3 endpoint
+
+### Operational Notes
+
+- Direct S3 env is still the preferred production setup.
+- Required direct S3 env can use any of the aliases listed above, but the
+  clearest set is:
+  - `S3_BUCKET`
+  - `S3_REGION`
+  - `S3_ACCESS_KEY_ID`
+  - `S3_SECRET_ACCESS_KEY`
+  - optional `S3_PUBLIC_BASE_URL`
+- The legacy upload bridge should be treated as a short-term compatibility
+  bridge, not the final storage architecture.
+- Existing staff/admin credentials are required for `/admin`; this release
+  does not create new staff users.
 
 ### Verification
 
