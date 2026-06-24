@@ -5,7 +5,7 @@
  */
 import { exec, one } from '../db';
 import { signToken } from '../middleware/auth';
-import { generateOtp, sendOtp, storeOtp, verifyOtp } from '../utils/otp';
+import { generateOtp, resolvePhoneForOtp, sendOtp, storeOtp, verifyOtp } from '../utils/otp';
 import { ApiError } from '../utils/http';
 
 export type UserKind = 'customer' | 'vendor';
@@ -68,11 +68,13 @@ export async function verifyOtpAndIssueToken(opts: {
   const idCol = idColumn(userType);
   const defaultName = userType === 'customer' ? 'Customer' : 'Vendor';
 
+  const purpose = `${userType}_login`;
   let user = opts.userId ? await findUserByLegacyId(userType, opts.userId) : null;
-  const phone = String(opts.phone || user?.phone || user?.mobile || '').trim();
+  let phone = String(opts.phone || user?.phone || user?.mobile || '').trim();
+  if (!phone) phone = (await resolvePhoneForOtp(purpose, otp)) || '';
   if (!phone) throw new ApiError(400, 'phone or user id is required');
 
-  await verifyOtp(phone, `${userType}_login`, otp);
+  await verifyOtp(phone, purpose, otp);
 
   if (!user) user = await findUserByPhone(userType, phone);
   if (!user) {

@@ -122,3 +122,14 @@ export async function verifyOtp(phone: string, purpose: string, otp: string) {
   if (recent) return;
   throw new ApiError(400, 'Invalid or expired OTP');
 }
+
+export async function resolvePhoneForOtp(purpose: string, otp: string): Promise<string | null> {
+  const row = await one<{ phone: string }>(
+    `SELECT phone FROM otp_codes
+     WHERE purpose = :purpose AND consumed = false
+       AND expires_at > NOW() AND otp_hash = SHA2(:otp, 256)
+     ORDER BY id DESC LIMIT 1`,
+    { purpose, otp },
+  );
+  return row?.phone ?? null;
+}
