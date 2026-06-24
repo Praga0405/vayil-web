@@ -20,8 +20,10 @@ reviews and approves them.
 - Added `uploadedUrls.upload_files[]` and `uploadedUrls.files[]` aliases
   so both mobile and web upload parsers receive the public URL array.
 - Added S3 env alias support for the deployment variable names used in
-  existing docs: `AWS_S3_BUCKET`, `AWS_REGION`,
-  `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
+  existing docs and common AWS variants, including `AWS_S3_BUCKET`,
+  `AWS_BUCKET`, `AWS_REGION`, `AWS_S3_ACCESS_KEY_ID`,
+  `AWS_ACCESS_KEY_ID`, `AWS_S3_SECRET_ACCESS_KEY`, and
+  `AWS_SECRET_ACCESS_KEY`.
 - Added an approved-vendor middleware gate. Pending vendors can complete
   profile/KYC/review submission, but feature routes remain blocked until
   admin approval.
