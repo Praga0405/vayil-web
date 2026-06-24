@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { exec, one, query, transaction } from '../db';
-import { requireAuth } from '../middleware/auth';
+import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
 
 export const vendorRouter = Router();
 vendorRouter.use(requireAuth(['vendor']));
+vendorRouter.use(requireApprovedVendor({ allowPaths: ['/me', '/kyc', '/submit-for-review'] }));
 
 vendorRouter.get('/me', async (req: AuthRequest, res, next) => {
   try { ok(res, { vendor: await one<any>('SELECT * FROM vendors WHERE vendor_id = :id', { id: req.user!.id }) }); } catch (err) { next(err); }

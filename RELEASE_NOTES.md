@@ -1,5 +1,54 @@
 # Release Notes
 
+## v4.5.48 - Upload response parity and vendor approval gate (2026-06-24)
+
+### Why
+
+Vendor registration uploads were receiving the newer internal upload
+envelope and, when production S3 env aliases were not recognized, a
+Base64 `data:` fallback URL. The mobile registration flow expects the
+legacy `uploadedUrls.upload_files[]` response containing public file
+URLs. The vendor onboarding flow also needed an enforced approval gate
+so newly registered vendors cannot use platform features until an admin
+reviews and approves them.
+
+### What Changed
+
+- Restored legacy upload response shape for bare `/upload_files`,
+  `/customer/upload_files`, and `/vendor/upload_files`:
+  `{ success, message: "Files uploaded successfully", uploadedUrls }`.
+- Added `uploadedUrls.upload_files[]` and `uploadedUrls.files[]` aliases
+  so both mobile and web upload parsers receive the public URL array.
+- Added S3 env alias support for the deployment variable names used in
+  existing docs: `AWS_S3_BUCKET`, `AWS_REGION`,
+  `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
+- Added an approved-vendor middleware gate. Pending vendors can complete
+  profile/KYC/review submission, but feature routes remain blocked until
+  admin approval.
+- Hid pending vendors from customer-facing service search/list results.
+- Added a lightweight `/admin` vendor review screen for staff login,
+  pending queue review, approve, and reject actions.
+
+### Impact
+
+- Mobile registration can read uploaded URLs from
+  `uploadedUrls.upload_files`.
+- If Vercel has S3/AWS env configured, upload responses now contain S3
+  public URLs instead of Base64 fallback URLs.
+- New vendors remain pending/under review until an admin approves them.
+- Approved vendors can access the platform features; pending/rejected
+  vendors receive a 403 approval-pending response on gated routes.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+npm run build
+git diff --check
+```
+
+---
+
 ## v4.5.47 - OTP verification fallback hardening (2026-06-24)
 
 ### Why

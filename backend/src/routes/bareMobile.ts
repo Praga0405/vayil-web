@@ -204,7 +204,7 @@ bareMobileRouter.post('/upload_files',
   upload.any(),
   async (req: AuthRequest, res, next) => {
     try {
-      const { uploadFiles } = await import('../utils/uploads');
+      const { legacyUploadResponse, uploadFiles } = await import('../utils/uploads');
       const { validateProfileImage } = await import('../utils/imageValidation');
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
       if (!files.length) throw new ApiError(400, 'no files in request');
@@ -213,7 +213,7 @@ bareMobileRouter.post('/upload_files',
         ? `${req.user.userType || 'user'}-${req.user.id}`
         : `guest-${(req.ip || 'anon').replace(/[^a-z0-9]/gi, '')}`;
       const urls = await uploadFiles(files as any, { prefix });
-      send(res, { message: 'Uploaded', data: urls, urls });
+      send(res, legacyUploadResponse(urls));
     } catch (err) { next(err); }
   },
 );

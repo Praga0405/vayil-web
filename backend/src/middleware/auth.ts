@@ -1,6 +1,7 @@
 import { NextFunction, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
+import { one } from '../db';
 import { AuthRequest, AuthUser, UserType } from '../types';
 import { ApiError } from '../utils/http';
 
@@ -90,6 +91,29 @@ export function requireRole(role: string) {
   return (req: AuthRequest, _res: Response, next: NextFunction) => {
     if (!req.user?.roles?.includes(role)) return next(new ApiError(403, `Missing role: ${role}`));
     next();
+  };
+}
+
+const approvedVendorStatuses = new Set(['verified', 'approved', 'active', 'kyc_approved']);
+
+export function requireApprovedVendor(opts: { allowPaths?: string[] } = {}) {
+  const allowPaths = opts.allowPaths ?? [];
+  return async (req: AuthRequest, _res: Response, next: NextFunction) => {
+    try {
+      if (req.user?.userType !== 'vendor') return next();
+      if (allowPaths.some((path) => req.path === path || req.path.startsWith(`${path}/`))) {
+        return next();
+      }
+      const vendor = await one<{ status?: string | null }>(
+        `SELECT status FROM vendors WHERE vendor_id = :id OR id = :id LIMIT 1`,
+        { id: req.user.id },
+      );
+      const status = String(vendor?.status || '').toLowerCase();
+      if (approvedVendorStatuses.has(status)) return next();
+      return next(new ApiError(403, 'Vendor approval pending. Please wait for admin approval to access this feature.'));
+    } catch (err) {
+      next(err);
+    }
   };
 }
 

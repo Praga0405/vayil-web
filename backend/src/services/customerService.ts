@@ -55,7 +55,7 @@ export async function updateCustomer(customerId: number | string, body: Customer
 }
 
 export async function listVendors(opts: { category?: string; city?: string; limit?: number } = {}) {
-  const where: string[] = [`v.status IN ('verified','active','kyc_approved')`];
+  const where: string[] = [`v.status IN ('verified','approved','active','kyc_approved')`];
   const params: any = { limit: opts.limit ?? 100 };
   if (opts.city) { where.push('v.city = :city'); params.city = opts.city; }
   // Category filtering via vendor_services.category_id when supplied.

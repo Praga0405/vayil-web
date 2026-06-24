@@ -51,20 +51,28 @@ interface RawFile {
 
 let s3Singleton: any | null = null;
 
+function env(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value) return value;
+  }
+  return undefined;
+}
+
 /** Lazy-load @aws-sdk/client-s3 only when we actually need it. */
 async function getS3() {
   if (s3Singleton) return s3Singleton;
   try {
     const { S3Client } = await import('@aws-sdk/client-s3');
-    const region   = process.env.S3_REGION || 'us-east-1';
-    const endpoint = process.env.S3_ENDPOINT || undefined;
+    const region   = env('S3_REGION', 'AWS_REGION', 'AWS_DEFAULT_REGION') || 'us-east-1';
+    const endpoint = env('S3_ENDPOINT', 'AWS_S3_ENDPOINT') || undefined;
     s3Singleton = new S3Client({
       region,
       endpoint,
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
       credentials: {
-        accessKeyId:     process.env.S3_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+        accessKeyId:     env('S3_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID')!,
+        secretAccessKey: env('S3_SECRET_ACCESS_KEY', 'AWS_SECRET_ACCESS_KEY')!,
       },
     });
     return s3Singleton;
@@ -76,20 +84,21 @@ async function getS3() {
 
 function isS3Configured(): boolean {
   return Boolean(
-    process.env.S3_BUCKET &&
-    process.env.S3_ACCESS_KEY_ID &&
-    process.env.S3_SECRET_ACCESS_KEY,
+    env('S3_BUCKET', 'AWS_S3_BUCKET', 'AWS_BUCKET_NAME') &&
+    env('S3_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID') &&
+    env('S3_SECRET_ACCESS_KEY', 'AWS_SECRET_ACCESS_KEY'),
   );
 }
 
 function publicUrlFor(key: string): string {
-  if (process.env.S3_PUBLIC_BASE_URL) {
-    const base = process.env.S3_PUBLIC_BASE_URL.replace(/\/$/, '');
+  const publicBaseUrl = env('S3_PUBLIC_BASE_URL', 'AWS_S3_PUBLIC_BASE_URL');
+  if (publicBaseUrl) {
+    const base = publicBaseUrl.replace(/\/$/, '');
     return `${base}/${key}`;
   }
-  const bucket = process.env.S3_BUCKET!;
-  const region = process.env.S3_REGION || 'us-east-1';
-  const endpoint = process.env.S3_ENDPOINT;
+  const bucket = env('S3_BUCKET', 'AWS_S3_BUCKET', 'AWS_BUCKET_NAME')!;
+  const region = env('S3_REGION', 'AWS_REGION', 'AWS_DEFAULT_REGION') || 'us-east-1';
+  const endpoint = env('S3_ENDPOINT', 'AWS_S3_ENDPOINT');
   if (endpoint) {
     return `${endpoint.replace(/\/$/, '')}/${bucket}/${key}`;
   }
@@ -113,7 +122,7 @@ export async function uploadFile(
     if (s3) {
       const { PutObjectCommand } = await import('@aws-sdk/client-s3');
       await s3.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET!,
+        Bucket: env('S3_BUCKET', 'AWS_S3_BUCKET', 'AWS_BUCKET_NAME')!,
         Key: key,
         Body: file.buffer,
         ContentType: file.mimetype,
@@ -145,4 +154,22 @@ export async function uploadFile(
 
 export async function uploadFiles(files: RawFile[], opts: { prefix?: string } = {}): Promise<UploadedFile[]> {
   return Promise.all(files.map(f => uploadFile(f, opts)));
+}
+
+export function legacyUploadResponse(files: UploadedFile[]) {
+  const urls = files.map((file) => file.url).filter(Boolean);
+  const uploadedUrls = files.reduce<Record<string, string[]>>((acc, file) => {
+    const key = file.field || 'upload_files';
+    acc[key] = acc[key] || [];
+    acc[key].push(file.url);
+    return acc;
+  }, {});
+
+  if (!uploadedUrls.upload_files) uploadedUrls.upload_files = urls;
+  if (!uploadedUrls.files) uploadedUrls.files = urls;
+
+  return {
+    message: 'Files uploaded successfully',
+    uploadedUrls,
+  };
 }

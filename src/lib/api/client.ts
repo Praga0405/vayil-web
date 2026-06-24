@@ -102,6 +102,7 @@ export const vendorClient   = makeClient(`${BASE}/vendors`,   getToken)
 export const paymentsClient = makeClient(`${BASE}/payments`,  getToken)
 export const commonClient   = makeClient(BASE,                getToken)
 export const opsClient      = makeClient(`${BASE}/ops`,       getOpsToken)
+export const adminClient    = makeClient(`${BASE}/Admin`,     getOpsToken)
 
 // Singular-path clients reserved for the LEGACY MOBILE ALIASES blocks
 // below. They map onto the legacyCustomer.ts / legacyVendor.ts route
@@ -135,6 +136,15 @@ export const authApi = {
   staffLogin: (email: string, password: string) =>
                authClient.post('/staff/login', { email, password }),
   staffMe:    () => authClient.get('/staff/me'),
+}
+
+export const adminApi = {
+  getReviewQueue: (data: { status?: 'PENDING' | 'APPROVED' | 'REJECTED'; page?: number; pageSize?: number } = {}) =>
+    adminClient.post('/GetReviewQueue', { status: 'PENDING', page: 1, pageSize: 50, ...data }),
+  getVendorList: (data: Record<string, unknown> = {}) =>
+    adminClient.post('/GetVendorList', data),
+  updateVendorKyc: (vendorId: string | number, status: 'approved' | 'rejected' | 'pending', reason?: string) =>
+    adminClient.post('/VendorKycUpdate', { vendor_id: vendorId, status, reason }),
 }
 
 /* ═════════════════════════════════════════════════════════════════
@@ -435,7 +445,8 @@ export const legacyMobileApi = {
  * once to get the URL array, then kept looking for `.data` / `.files`
  * ON the array and found nothing, so the caller saw "Server returned
  * no image URL" on a perfectly valid response. The backend's
- * /upload_files returns `{ success, message, data: [{url, ...}], urls: [...] }`.
+ * /upload_files returns the legacy mobile shape
+ * `{ success, message, uploadedUrls: { upload_files: [...] } }`.
  */
 export function normalizeUploadedUrls(res: any): string[] {
   // Accept either the raw response body or an axios response.
@@ -444,8 +455,13 @@ export function normalizeUploadedUrls(res: any): string[] {
     : res ?? {};     // already the body
 
   // Try every known shape, in priority order.
+  const uploadedUrlValues = body.uploadedUrls && typeof body.uploadedUrls === 'object'
+    ? Object.values(body.uploadedUrls).find(Array.isArray)
+    : null;
   const candidates =
+    body.uploadedUrls?.upload_files ??
     body.uploadedUrls?.files ??
+    uploadedUrlValues ??
     body.data?.uploadedUrls?.files ??
     body.files ??
     (Array.isArray(body.data) ? body.data : null) ??

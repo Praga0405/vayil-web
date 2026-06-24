@@ -469,6 +469,7 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
       `COALESCE(vs.is_active, vs.status, 0) = 1`,
       `COALESCE(vs.is_deleted, 0) = 0`,
       `COALESCE(v.is_deleted, 0) = 0`,
+      `v.status IN ('verified', 'approved', 'active', 'kyc_approved')`,
       `COALESCE(v.accept_enquires, 1) = 1`,
     ];
     const params: Record<string, any> = {};
@@ -735,7 +736,7 @@ legacyCustomerRouter.post('/upload_files',
   upload.any(),
   async (req: AuthRequest, res, next) => {
     try {
-      const { uploadFiles } = await import('../utils/uploads');
+      const { legacyUploadResponse, uploadFiles } = await import('../utils/uploads');
       const { validateProfileImage } = await import('../utils/imageValidation');
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
       if (!files.length) throw new ApiError(400, 'no files in request');
@@ -746,7 +747,7 @@ legacyCustomerRouter.post('/upload_files',
       if (req.body?.kind === 'profile') files.forEach(validateProfileImage);
       const prefix = req.user?.id ? `customer-${req.user.id}` : `guest-${(req.ip || 'anon').replace(/[^a-z0-9]/gi, '')}`;
       const urls = await uploadFiles(files as any, { prefix });
-      send(res, { message: 'Uploaded', data: urls, urls });
+      send(res, legacyUploadResponse(urls));
     } catch (err) { next(err); }
   },
 );

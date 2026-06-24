@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { ApiError } from '../utils/http';
-import { requireAuth } from '../middleware/auth';
+import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { exec, one, query } from '../db';
 import { publicSettingsSafe } from './common';
@@ -516,6 +516,18 @@ legacyVendorRouter.post('/get_states_by_country_id', async (req, res, next) => {
  *  Authenticated vendor endpoints
  * ───────────────────────────────────────────────────────────── */
 legacyVendorRouter.use(requireAuth(['vendor']));
+legacyVendorRouter.use(requireApprovedVendor({
+  allowPaths: [
+    '/step1',
+    '/step2',
+    '/step3',
+    '/step4',
+    '/serviceTagStep',
+    '/VendorAddServiceTag',
+    '/vendorInfo',
+    '/upload_files',
+  ],
+}));
 
 /* ───── Onboarding step1..step4 + serviceTagStep ───── */
 async function handleStep(step: number, req: AuthRequest, res: any, next: any) {
@@ -1153,13 +1165,13 @@ legacyVendorRouter.post('/upload_files',
   upload.any(),
   async (req: AuthRequest, res, next) => {
     try {
-      const { uploadFiles } = await import('../utils/uploads');
+      const { legacyUploadResponse, uploadFiles } = await import('../utils/uploads');
       const { validateProfileImage } = await import('../utils/imageValidation');
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
       if (!files.length) throw new ApiError(400, 'no files in request');
       if (req.body?.kind === 'profile') files.forEach(validateProfileImage);
       const urls = await uploadFiles(files as any, { prefix: `vendor-${req.user!.id}` });
-      send(res, { message: 'Uploaded', data: urls, urls });
+      send(res, legacyUploadResponse(urls));
     } catch (err) { next(err); }
   },
 );
