@@ -89,7 +89,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
 
           {/* Auth section */}
           {user ? (
-            <div className="relative group flex items-center gap-2">
+            <div className="relative group ml-auto flex items-center gap-2">
               {/* Vendor badge */}
               {isVendor && (
                 <Link href="/vendor-studio/listing"
@@ -106,7 +106,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
               </button>
 
               {/* Dropdown */}
-              <div className="hidden group-hover:block absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+              <div data-account-menu className="hidden group-hover:block fixed inset-x-3 top-[98px] z-50 w-auto max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-xl sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-56 sm:max-w-none">
                 {/* User info */}
                 <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                   <p className="text-sm font-bold text-navy truncate">{user.name}</p>
@@ -149,7 +149,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
             </div>
           ) : (
             <button onClick={() => { setLoginTab('customer'); setLoginOpen(true) }}
-              className="bg-[#183954] text-white px-3 sm:px-4 lg:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
+              className="ml-auto bg-[#183954] text-white px-3 sm:px-4 lg:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
               Sign in
             </button>
           )}

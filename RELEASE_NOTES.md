@@ -1,5 +1,44 @@
 # Release Notes
 
+## v4.5.52 - Mobile account menu viewport clamp (2026-06-25)
+
+### Why
+
+On narrow mobile viewports, the public header account dropdown could be
+opened from the avatar while positioned relative to the avatar group.
+At iPhone SE width (`375x667`), the menu could clip against the left
+edge and hide part of the vendor identity row.
+
+### What Changed
+
+- Moved the account dropdown to a viewport-clamped mobile layout.
+- The menu now uses mobile `left/right` insets and a `max-width` based on
+  the viewport, while preserving the compact right-aligned desktop/tablet
+  dropdown.
+- Pushed the authenticated header controls to the right with `ml-auto`,
+  so the avatar/menu anchor is stable on small screens.
+- Added a `data-account-menu` marker for focused responsive verification.
+
+### Verification
+
+Focused account-menu audit passed on `/vendor-studio/earnings` across:
+
+```text
+320x667, 360x800, 375x667, 393x873, 430x932, 768x1024
+```
+
+For the reported iPhone SE scenario (`375x667`), the menu now measures:
+
+```text
+left: 12
+right: 363
+width: 351
+clippedLeft: false
+clippedRight: false
+```
+
+---
+
 ## v4.5.51 - Tall tablet footer alignment fix (2026-06-25)
 
 ### Why
