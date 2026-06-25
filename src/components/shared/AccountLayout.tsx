@@ -59,10 +59,10 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
   if (user?.type === 'vendor') return null
 
   return (
-    <div className="min-h-screen bg-[#F4F7FA]">
+    <div className="min-h-screen bg-[#F4F7FA] flex flex-col">
       <PublicHeader />
 
-      <div className="app-container py-4 sm:py-6 flex gap-6">
+      <div className="app-container flex-1 py-4 sm:py-6 flex gap-6">
         {/* Sidebar nav (desktop) */}
         <aside className="hidden lg:block w-[220px] shrink-0">
           <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">

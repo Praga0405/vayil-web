@@ -1,5 +1,43 @@
 # Release Notes
 
+## v4.5.51 - Tall tablet footer alignment fix (2026-06-25)
+
+### Why
+
+The prior responsive audit verified horizontal overflow and offscreen
+elements, but it did not assert footer placement on tall tablet
+viewports. On short account/vendor-studio pages, such as
+`/vendor-studio/enquiries` at 1024x1366, the compact footer rendered
+above the bottom of the viewport and left visible blank space underneath.
+
+### What Changed
+
+- Updated `AccountLayout` and `VendorStudioLayout` to use a vertical
+  flex shell.
+- Made the shared account/vendor-studio content area flex to fill the
+  remaining viewport height before the compact footer renders.
+- This keeps the footer pinned to the bottom on short pages while still
+  allowing normal scrolling on longer pages.
+
+### Verification
+
+Added and ran a targeted tall-viewport audit for account and
+vendor-studio pages:
+
+```text
+36 checks passed across 393x873, 768x1024, 1024x1366, and 1366x768
+```
+
+For the reported scenario, `/vendor-studio/enquiries` at 1024x1366 now
+measures:
+
+```text
+footerBottom: 1366
+footerGap: 0
+```
+
+---
+
 ## v4.5.50 - Responsive coverage across target devices (2026-06-25)
 
 ### Research Baseline
