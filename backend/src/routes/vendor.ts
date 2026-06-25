@@ -4,6 +4,7 @@ import { exec, one, query, transaction } from '../db';
 import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
+import * as vendorSvc from '../services/vendorService';
 
 export const vendorRouter = Router();
 vendorRouter.use(requireAuth(['vendor']));
@@ -502,37 +503,7 @@ vendorRouter.post('/submit-for-review', async (req: AuthRequest, res, next) => {
     const vendorId = Number(req.user!.id);
     const reason = z.object({ note: z.string().optional() }).parse(req.body || {}).note ?? null;
 
-    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id: vendorId });
-    if (!vendor) throw new ApiError(404, 'Vendor not found');
-
-    // Flip the vendor row into kyc_submitted state so /Admin/GetVendorList
-    // (and the existing mobile app) can pick it up via the status filter.
-    await exec(
-      `UPDATE vendors SET status = 'kyc_submitted', rejection_reason = NULL WHERE vendor_id = :id`,
-      { id: vendorId },
-    );
-
-    // Upsert into the review queue. The unique key (vendor_id, status)
-    // means re-submitting an already-pending vendor doesn't duplicate.
-    let queueId: number;
-    const existing = await one<any>(
-      `SELECT id FROM vendor_review_queue WHERE vendor_id = :id AND status = 'PENDING' LIMIT 1`,
-      { id: vendorId },
-    );
-    if (existing) {
-      queueId = existing.id;
-      await exec(
-        `UPDATE vendor_review_queue SET submitted_at = NOW(), reviewer_note = :note WHERE id = :id`,
-        { id: queueId, note: reason },
-      );
-    } else {
-      const result: any = await exec(
-        `INSERT INTO vendor_review_queue (vendor_id, status, source, reviewer_note)
-         VALUES (:vendorId, 'PENDING', 'web_signup', :note)`,
-        { vendorId, note: reason },
-      );
-      queueId = result.insertId;
-    }
+    const { vendor, queueId } = await vendorSvc.submitVendorForReview(vendorId, 'web_signup', reason);
 
     // Fire-and-forget notification to the admin portal (env-configurable).
     // We don't block the response on it — failure is logged + retryable.

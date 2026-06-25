@@ -117,16 +117,18 @@ adminRouter.post('/VendorKycUpdate', async (req, res, next) => {
     const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
     if (!id) throw new ApiError(400, 'id required')
     const requested = String(req.body?.kyc_status ?? req.body?.status ?? 'pending').toLowerCase()
-    const kyc_status = requested === 'approved' || requested === 'verified'
+    const approvedStatuses = new Set(['approved', 'verified', 'active', 'kyc_approved'])
+    const kyc_status = approvedStatuses.has(requested)
       ? 'approved'
       : requested === 'rejected'
         ? 'rejected'
         : 'pending'
-    const vendorStatus = requested === 'approved' ? 'verified'
-      : requested === 'verified' ? 'verified'
+    const vendorStatus = requested === 'approved' ? 'approved'
+      : approvedStatuses.has(requested) ? requested
         : requested === 'rejected' ? 'rejected'
           : requested === 'pending_approval' ? 'pending_approval'
             : 'pending'
+    const reviewStatus = kyc_status === 'approved' ? 'APPROVED' : kyc_status === 'rejected' ? 'REJECTED' : 'PENDING'
     const reason = req.body?.reason ?? req.body?.rejection_reason ?? null
 
     const reviewerId = Number((req as any).user?.id) || null
@@ -134,17 +136,42 @@ adminRouter.post('/VendorKycUpdate', async (req, res, next) => {
       await conn.query(
         `UPDATE vendors
             SET status = ?,
-                kyc_approved_at = CASE WHEN ? = 'verified' THEN NOW() ELSE kyc_approved_at END,
+                kyc_approved_at = CASE WHEN ? IN ('verified', 'approved', 'active', 'kyc_approved') THEN NOW() ELSE kyc_approved_at END,
                 rejection_reason = CASE WHEN ? = 'rejected' THEN ? ELSE NULL END
           WHERE vendor_id = ?`,
         [vendorStatus, vendorStatus, vendorStatus, reason, id],
       )
-      await conn.query(
-        `UPDATE vendor_review_queue
-            SET status = ?, reviewed_at = NOW(), reviewed_by = ?, reviewer_note = COALESCE(?, reviewer_note)
-          WHERE vendor_id = ? AND status = 'PENDING'`,
-        [kyc_status === 'approved' ? 'APPROVED' : kyc_status === 'rejected' ? 'REJECTED' : 'PENDING', reviewerId, reason, id],
+      const [pendingRows]: any = await conn.query(
+        `SELECT id FROM vendor_review_queue WHERE vendor_id = ? AND status = 'PENDING' LIMIT 1`,
+        [id],
       )
+      const pendingId = pendingRows?.[0]?.id
+      if (pendingId) {
+        if (reviewStatus !== 'PENDING') {
+          await conn.query(
+            `DELETE FROM vendor_review_queue WHERE vendor_id = ? AND status = ? AND id <> ?`,
+            [id, reviewStatus, pendingId],
+          )
+        }
+        await conn.query(
+          `UPDATE vendor_review_queue
+              SET status = ?, reviewed_at = CASE WHEN ? <> 'PENDING' THEN NOW() ELSE reviewed_at END,
+                  reviewed_by = ?, reviewer_note = COALESCE(?, reviewer_note)
+            WHERE id = ?`,
+          [reviewStatus, reviewStatus, reviewerId, reason, pendingId],
+        )
+      } else {
+        await conn.query(
+          `INSERT INTO vendor_review_queue
+             (vendor_id, status, source, reviewed_at, reviewed_by, reviewer_note)
+           VALUES (?, ?, 'admin_direct', CASE WHEN ? <> 'PENDING' THEN NOW() ELSE NULL END, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             reviewed_at = VALUES(reviewed_at),
+             reviewed_by = VALUES(reviewed_by),
+             reviewer_note = COALESCE(VALUES(reviewer_note), reviewer_note)`,
+          [id, reviewStatus, reviewStatus, reviewerId, reason],
+        )
+      }
     })
     const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id })
     send(res, { message: 'Vendor KYC updated', data: vendor, vendor, kyc_status, status: vendor?.status })

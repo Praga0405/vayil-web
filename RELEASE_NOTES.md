@@ -1,5 +1,62 @@
 # Release Notes
 
+## v4.5.49 - Align vendor approval with existing admin module (2026-06-25)
+
+### Why
+
+The team already uses the existing Admin module endpoints for vendor
+verification and account status management:
+
+- `POST /Admin/VendorKycUpdate`
+- `POST /Admin/VendorStatusUpdate`
+
+The web and mobile vendor onboarding flows need to feed that same admin
+module instead of relying on a separate approval path. In particular, the
+legacy mobile `POST /vendor/step4` flow stamped the vendor as
+`kyc_submitted`, but did not consistently create the `vendor_review_queue`
+row consumed by the existing admin review flow.
+
+### What Changed
+
+- Added a shared `submitVendorForReview()` service helper that:
+  - sets `vendors.status = 'kyc_submitted'`
+  - clears prior `rejection_reason`
+  - creates or refreshes the `vendor_review_queue` `PENDING` row
+  - records the submission source (`mobile_step4` or `web_signup`)
+- Updated mobile onboarding `POST /vendor/step4` to push the vendor into
+  the same admin review queue automatically.
+- Updated web `POST /vendors/submit-for-review` to use the same shared
+  queue helper instead of duplicating queue logic.
+- Updated `POST /Admin/VendorKycUpdate` so `status=approved` keeps the
+  vendor status as `approved` instead of converting it to `verified`.
+- Hardened `POST /Admin/VendorKycUpdate` to update the `PENDING` review
+  queue row when present, or insert/update an `admin_direct` review row
+  when the admin approves/rejects a vendor that did not have a pending
+  queue row.
+- Updated the remaining canonical customer vendor list filter to include
+  `approved` vendors alongside `verified`, `active`, and `kyc_approved`.
+
+### Impact
+
+- Existing admin-module users can continue approving vendors through
+  `POST /Admin/VendorKycUpdate`.
+- Mobile vendors that finish `step4` will appear in the existing admin
+  review queue without needing a separate web-only submit action.
+- Approved vendors unlock the vendor feature gates and become visible in
+  customer-facing vendor/service lists.
+- No new approval endpoint is required for the active admin workflow.
+  The `/admin` page remains only a lightweight web surface over the same
+  existing Admin APIs.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+---
+
 ## v4.5.48 - Upload response parity and vendor approval gate (2026-06-24)
 
 ### Why

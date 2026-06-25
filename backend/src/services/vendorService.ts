@@ -81,6 +81,48 @@ export async function updateVendor(vendorId: number | string, b: VendorProfileUp
   return getVendor(vendorId);
 }
 
+export async function submitVendorForReview(
+  vendorId: number | string,
+  source = 'vendor_onboarding',
+  note: string | null = null,
+) {
+  const vendor = await getVendor(vendorId);
+
+  await exec(
+    `UPDATE vendors
+        SET status = 'kyc_submitted',
+            rejection_reason = NULL
+      WHERE vendor_id = :id`,
+    { id: vendorId },
+  );
+
+  const existing = await one<any>(
+    `SELECT id FROM vendor_review_queue
+      WHERE vendor_id = :id AND status = 'PENDING'
+      LIMIT 1`,
+    { id: vendorId },
+  );
+  if (existing) {
+    await exec(
+      `UPDATE vendor_review_queue
+          SET submitted_at = NOW(),
+              source = COALESCE(:source, source),
+              reviewer_note = COALESCE(:note, reviewer_note)
+        WHERE id = :id`,
+      { id: existing.id, source, note },
+    );
+    return { vendor: await getVendor(vendorId), queueId: existing.id };
+  }
+
+  const result: any = await exec(
+    `INSERT INTO vendor_review_queue (vendor_id, status, source, reviewer_note)
+     VALUES (:vendorId, 'PENDING', :source, :note)`,
+    { vendorId, source, note },
+  );
+
+  return { vendor: await getVendor(vendorId), queueId: result.insertId };
+}
+
 /* ───── Mobile step1..step4 onboarding ─────
  * Mobile splits onboarding into multiple POSTs. Each step is just a
  * partial update to the vendors row, so we expose one helper that
@@ -90,10 +132,7 @@ export async function onboardingStep(vendorId: number | string, step: number, b:
   // Stamp status only on the final step; mobile expects 'kyc_submitted'
   // so the admin queue picks it up.
   if (step >= 4) {
-    await exec(
-      `UPDATE vendors SET status = 'kyc_submitted' WHERE vendor_id = :id`,
-      { id: vendorId },
-    );
+    await submitVendorForReview(vendorId, 'mobile_step4');
   }
   return getVendor(vendorId);
 }

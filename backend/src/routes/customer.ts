@@ -38,7 +38,12 @@ customerRouter.put('/me', async (req: AuthRequest, res, next) => {
 
 customerRouter.get('/vendors', async (req, res, next) => {
   try {
-    const vendors = await query<any>(`SELECT vendor_id AS id, name, company_name, city, rating, status FROM vendors WHERE status = 'verified' ORDER BY vendor_id DESC LIMIT 100`);
+    const vendors = await query<any>(
+      `SELECT vendor_id AS id, name, company_name, city, rating, status
+         FROM vendors
+        WHERE status IN ('verified', 'approved', 'active', 'kyc_approved')
+        ORDER BY vendor_id DESC LIMIT 100`,
+    );
     ok(res, { vendors });
   } catch (err) { next(err); }
 });
