@@ -2,26 +2,72 @@
 
 ## v4.5.52 - Mobile account menu viewport clamp (2026-06-25)
 
+Commit: `8e3b1a0` - `Fix mobile account menu clipping`
+
 ### Why
 
-On narrow mobile viewports, the public header account dropdown could be
-opened from the avatar while positioned relative to the avatar group.
-At iPhone SE width (`375x667`), the menu could clip against the left
-edge and hide part of the vendor identity row.
+The authenticated account menu in `PublicHeader` was still using the
+desktop positioning model on narrow screens:
+
+- the dropdown was absolutely positioned relative to the avatar group
+- the dropdown had a fixed width
+- the authenticated controls were not forced to the right edge of the
+  mobile header
+
+On an iPhone SE viewport (`375x667`), this could put part of the menu
+outside the visible viewport. In the reported production screenshot from
+`/vendor-studio/earnings`, the left side of the menu clipped and hid
+part of the vendor identity row.
+
+This issue affected the shared public header, so it could appear anywhere
+`PublicHeader` is used with an authenticated user:
+
+- public marketplace pages
+- account pages
+- vendor-studio pages
+- vendor-authenticated marketplace browsing
 
 ### What Changed
 
-- Moved the account dropdown to a viewport-clamped mobile layout.
-- The menu now uses mobile `left/right` insets and a `max-width` based on
-  the viewport, while preserving the compact right-aligned desktop/tablet
-  dropdown.
-- Pushed the authenticated header controls to the right with `ml-auto`,
-  so the avatar/menu anchor is stable on small screens.
-- Added a `data-account-menu` marker for focused responsive verification.
+Updated `src/components/shared/PublicHeader.tsx`:
+
+- Added `ml-auto` to the authenticated header control wrapper so the
+  avatar/menu anchor stays aligned to the right side of the header.
+- Added `ml-auto` to the unauthenticated sign-in button for the same
+  mobile header alignment behavior.
+- Changed the account menu positioning on mobile from avatar-relative to
+  viewport-clamped:
+  - `fixed`
+  - `inset-x-3`
+  - `top-[98px]`
+  - `w-auto`
+  - `max-w-[calc(100vw-1.5rem)]`
+- Preserved the desktop/tablet dropdown behavior from `sm` upward:
+  - `absolute`
+  - `right-0`
+  - `top-full`
+  - `mt-2`
+  - `w-56`
+- Added `data-account-menu` to the dropdown so automated viewport checks
+  can measure the exact menu panel instead of a parent container.
+
+No route logic, auth behavior, menu links, or menu content was changed.
+The update is layout-only.
+
+### User Impact
+
+- Vendor users can open the avatar menu on small phones without losing
+  the vendor name, phone/email, role badge, menu links, or sign-out
+  action off the left side of the viewport.
+- Customer users get the same viewport-safe behavior because the same
+  `PublicHeader` dropdown is used for both customer and vendor accounts.
+- Desktop and tablet users keep the familiar compact menu anchored to
+  the avatar.
 
 ### Verification
 
-Focused account-menu audit passed on `/vendor-studio/earnings` across:
+Focused account-menu audit passed on `/vendor-studio/earnings` across
+the responsive widths most likely to expose this bug:
 
 ```text
 320x667, 360x800, 375x667, 393x873, 430x932, 768x1024
@@ -37,31 +83,108 @@ clippedLeft: false
 clippedRight: false
 ```
 
+Live production verification also passed on the reported URL:
+
+```text
+URL: https://vayil-web.vercel.app/vendor-studio/earnings
+viewport: 375x667
+left: 12
+right: 363
+width: 351
+clippedLeft: false
+clippedRight: false
+```
+
+Standard checks:
+
+```bash
+git diff --check
+npm run lint
+npm run build
+```
+
+Lint completed with the existing project warnings only.
+
 ---
 
 ## v4.5.51 - Tall tablet footer alignment fix (2026-06-25)
 
+Commit: `93d5df3` - `Fix tall tablet footer spacing`
+
 ### Why
 
-The prior responsive audit verified horizontal overflow and offscreen
-elements, but it did not assert footer placement on tall tablet
-viewports. On short account/vendor-studio pages, such as
-`/vendor-studio/enquiries` at 1024x1366, the compact footer rendered
-above the bottom of the viewport and left visible blank space underneath.
+The main responsive release verified horizontal overflow and offscreen
+elements, but it did not include an assertion for vertical footer
+placement on tall viewports.
+
+On short account and vendor-studio pages, the compact footer rendered
+immediately after the page content. If the viewport was taller than the
+content, the footer appeared above the bottom of the viewport and left a
+large blank area underneath. This was visible in the reported tablet
+scenario:
+
+```text
+route: /vendor-studio/enquiries
+viewport: 1024x1366
+device preset: iPad Pro
+```
+
+The root cause was the shared account/vendor-studio shell:
+
+- the outer shell had `min-h-screen`, but it was not a vertical flex
+  container
+- the content wrapper did not expand to consume remaining viewport height
+- the compact footer followed short content instead of being pushed to
+  the bottom
 
 ### What Changed
 
-- Updated `AccountLayout` and `VendorStudioLayout` to use a vertical
-  flex shell.
-- Made the shared account/vendor-studio content area flex to fill the
-  remaining viewport height before the compact footer renders.
-- This keeps the footer pinned to the bottom on short pages while still
-  allowing normal scrolling on longer pages.
+Updated `src/components/shared/AccountLayout.tsx`:
+
+- changed the outer wrapper to `min-h-screen ... flex flex-col`
+- changed the account content wrapper to `app-container flex-1 ...`
+
+Updated `src/components/shared/VendorStudioLayout.tsx`:
+
+- changed the outer wrapper to `min-h-screen ... flex flex-col`
+- changed the vendor-studio content wrapper to `app-container flex-1 ...`
+
+The compact footer component itself was not changed. The fix is in the
+layout shell so all pages using these shared wrappers inherit the correct
+behavior.
+
+### Routes Covered
+
+The fix applies to the account shell:
+
+- `/account/enquiries`
+- `/account/projects`
+- `/account/payments`
+- `/account/profile`
+- related nested account detail/payment/materials/plan pages
+
+The fix applies to the vendor-studio shell:
+
+- `/vendor-studio/dashboard`
+- `/vendor-studio/enquiries`
+- `/vendor-studio/earnings`
+- `/vendor-studio/listing`
+- `/vendor-studio/setup`
+- related vendor-studio enquiry/job/service/materials/plan/payout pages
+
+### User Impact
+
+- Short pages now fill the available viewport height before the footer,
+  so the footer sits at the bottom instead of leaving post-footer white
+  space.
+- Longer pages still scroll normally because `flex-1` only consumes
+  remaining height; it does not force content into a fixed viewport.
+- The change benefits tablet portrait layouts most visibly, especially
+  `768x1024` and `1024x1366`.
 
 ### Verification
 
-Added and ran a targeted tall-viewport audit for account and
-vendor-studio pages:
+Targeted tall-viewport audit passed for account and vendor-studio pages:
 
 ```text
 36 checks passed across 393x873, 768x1024, 1024x1366, and 1366x768
@@ -74,6 +197,26 @@ measures:
 footerBottom: 1366
 footerGap: 0
 ```
+
+Live production verification also passed for the reported class of issue:
+
+```text
+URL: https://vayil-web.vercel.app/vendor-studio/enquiries
+viewport: 1024x1366
+footerTop: 1242
+footerBottom: 1366
+footerGap: 0
+```
+
+Standard checks:
+
+```bash
+git diff --check
+npm run lint
+npm run build
+```
+
+Lint completed with the existing project warnings only.
 
 ---
 
