@@ -43,7 +43,7 @@ export default function VendorProfilePage() {
     return (
       <div className="min-h-screen bg-[#F4F7FA]">
         <PublicHeader />
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-20">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-20">
           <PageLoader />
         </div>
       </div>
@@ -55,7 +55,7 @@ export default function VendorProfilePage() {
     return (
       <div className="min-h-screen bg-[#F4F7FA]">
         <PublicHeader />
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-20 text-center">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-20 text-center">
           <h1 className="text-2xl font-bold text-navy mb-2">
             {hasError ? 'Couldn\'t load this vendor' : 'Vendor not found'}
           </h1>
@@ -96,12 +96,12 @@ export default function VendorProfilePage() {
 
       {/* Breadcrumb */}
       <div className="bg-white border-b border-gray-100">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-3 text-xs text-gray-500 flex items-center gap-1.5">
-          <Link href="/" className="hover:text-orange">Home</Link>
+        <div className="app-container py-3 text-xs text-gray-500 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap">
+          <Link href="/" className="hover:text-orange shrink-0">Home</Link>
           <ChevronRight className="w-3 h-3" />
-          <Link href="/search" className="hover:text-orange">All Services</Link>
+          <Link href="/search" className="hover:text-orange shrink-0">All Services</Link>
           <ChevronRight className="w-3 h-3" />
-          <Link href={`/search?category=${vendor.service_slug}`} className="hover:text-orange">{vendor.service_label}</Link>
+          <Link href={`/search?category=${vendor.service_slug}`} className="hover:text-orange shrink-0">{vendor.service_label}</Link>
           <ChevronRight className="w-3 h-3" />
           <span className="text-navy truncate">{vendor.company_name}</span>
         </div>
@@ -121,7 +121,7 @@ export default function VendorProfilePage() {
         </div>
       </div>
 
-      <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] -mt-20 relative z-10 flex flex-col lg:flex-row gap-6">
+      <div className="app-container -mt-20 relative z-10 flex flex-col lg:flex-row gap-6">
         {/* Main */}
         <div className="flex-1 min-w-0">
 
@@ -163,7 +163,7 @@ export default function VendorProfilePage() {
             </div>
 
             {/* Stats row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-gray-100">
+            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-gray-100">
               <Stat icon={Briefcase} label="Projects" value={`${vendor.completed_jobs}+`} />
               <Stat icon={Calendar} label="Experience" value={`${vendor.years_experience} yrs`} />
               <Stat icon={Award} label="Service" value={vendor.service_label} />
@@ -248,9 +248,9 @@ export default function VendorProfilePage() {
                   <div key={s.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 hover:shadow-sm transition">
                     <img src={s.image} alt={s.title} className="w-full sm:w-32 h-32 sm:h-24 rounded-xl object-cover shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-2">
                         <h3 className="font-bold text-navy">{s.title}</h3>
-                        <div className="text-right shrink-0">
+                        <div className="text-left xs:text-right xs:shrink-0">
                           <p className="text-lg font-bold text-orange leading-none">₹{s.price.toLocaleString('en-IN')}</p>
                           <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-0.5">
                             {s.price_type === 'fixed' ? 'fixed' : s.price_type.replace('per_','per ').replace('_',' ')}
@@ -269,7 +269,7 @@ export default function VendorProfilePage() {
             )}
 
             {tab === 'portfolio' && (
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 gap-3">
                 {vendor.portfolio.map(p => (
                   <div key={p.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden group cursor-pointer hover:shadow-md transition">
                     <div className="aspect-square overflow-hidden">
@@ -287,7 +287,7 @@ export default function VendorProfilePage() {
             {tab === 'reviews' && (
               <div className="space-y-3">
                 {/* Summary */}
-                <div className="bg-white border border-gray-100 rounded-2xl p-5 flex items-center gap-6">
+                <div className="bg-white border border-gray-100 rounded-2xl p-5 flex flex-col xs:flex-row xs:items-center gap-6">
                   <div className="text-center">
                     <p className="text-4xl font-bold text-navy">{vendor.rating}</p>
                     <div className="flex justify-center my-1">
@@ -316,7 +316,7 @@ export default function VendorProfilePage() {
 
                 {vendor.reviews.map(r => (
                   <div key={r.id} className="bg-white border border-gray-100 rounded-2xl p-5">
-                    <div className="flex items-start justify-between mb-2">
+                    <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-3 mb-2">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-orange/10 text-orange font-bold flex items-center justify-center text-sm">
                           {r.customer_name[0]}
@@ -388,8 +388,8 @@ export default function VendorProfilePage() {
 
       {/* Related vendors */}
       {related.length > 0 && (
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-12">
-          <div className="flex items-center justify-between mb-5">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-12">
+          <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 mb-5">
             <h2 className="text-xl lg:text-2xl font-bold text-navy">More {vendor.service_label} vendors</h2>
             <Link href={`/search?category=${vendor.service_slug}`} className="text-sm font-semibold text-orange hover:underline flex items-center gap-1">
               View all <ChevronRight className="w-4 h-4" />
@@ -407,7 +407,7 @@ export default function VendorProfilePage() {
                     <img src={v.avatar} alt={v.owner_name} className="w-7 h-7 rounded-full object-cover" />
                     <h3 className="font-bold text-navy text-sm truncate group-hover:text-orange transition">{v.company_name}</h3>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="flex items-center gap-1">
                       <Star className="w-3 h-3 fill-orange text-orange" />
                       <span className="font-semibold text-navy">{v.rating}</span>
@@ -495,15 +495,15 @@ function EnquiryModal({ open, onClose, vendor, service }: {
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4">
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center px-3 py-4 sm:p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={reset} />
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-lg animate-slide-up overflow-hidden">
+      <div className="relative bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[92dvh] animate-slide-up overflow-y-auto overflow-x-hidden">
         <button onClick={reset} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center z-10">
           <X className="w-4 h-4 text-gray-500" />
         </button>
 
         {done ? (
-          <div className="p-10 text-center">
+          <div className="p-6 sm:p-10 text-center">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-8 h-8 text-green-500" />
             </div>
@@ -512,7 +512,7 @@ function EnquiryModal({ open, onClose, vendor, service }: {
               {vendor?.company_name} will get back to you within {vendor?.response_time}.
               You can track this in <strong>My Enquiries</strong>.
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-col xs:flex-row gap-3">
               <button onClick={reset} className="flex-1 border-2 border-gray-200 text-navy py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-50">
                 Close
               </button>
@@ -528,7 +528,7 @@ function EnquiryModal({ open, onClose, vendor, service }: {
               <h3 className="text-lg font-bold">{vendor?.company_name}</h3>
               {service && <p className="text-xs text-orange mt-0.5">Re: {service.title}</p>}
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-4 sm:p-6 space-y-4">
               {service && (
                 <div className="flex items-center gap-3 bg-orange/5 border border-orange/20 rounded-xl p-3">
                   <img src={service.image} alt={service.title} className="w-12 h-12 rounded-lg object-cover shrink-0" />
@@ -598,15 +598,15 @@ function BookVisitModal({ open, onClose, vendor }: {
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4">
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center px-3 py-4 sm:p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={reset} />
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md animate-slide-up overflow-hidden">
+      <div className="relative bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md max-h-[92dvh] animate-slide-up overflow-y-auto overflow-x-hidden">
         <button onClick={reset} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center z-10">
           <X className="w-4 h-4 text-gray-500" />
         </button>
 
         {done ? (
-          <div className="p-10 text-center">
+          <div className="p-6 sm:p-10 text-center">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-8 h-8 text-green-500" />
             </div>
@@ -625,8 +625,8 @@ function BookVisitModal({ open, onClose, vendor }: {
               <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Book a Site Visit with</p>
               <h3 className="text-lg font-bold">{vendor?.company_name}</h3>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+            <div className="p-4 sm:p-6 space-y-4">
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Date *</label>
                   <input type="date" min={minDate} value={date} onChange={e => setDate(e.target.value)}

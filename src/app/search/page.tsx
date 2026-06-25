@@ -169,7 +169,7 @@ function SearchInner() {
 
       {/* ── Title bar + prominent search ── */}
       <div className="bg-white border-b border-gray-100">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-5">
+        <div className="app-container py-5">
           {/* Breadcrumb */}
           <div className="text-xs text-gray-500 flex items-center gap-1.5 mb-3">
             <Link href="/" className="hover:text-orange">Home</Link>
@@ -200,7 +200,7 @@ function SearchInner() {
       </div>
 
       {/* ── Main body ── */}
-      <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-6 flex gap-6">
+      <div className="app-container py-4 sm:py-6 flex gap-6">
 
         {/* ── Sidebar ── */}
         <aside className="hidden lg:block w-[260px] shrink-0">
@@ -222,7 +222,7 @@ function SearchInner() {
         {/* ── Results ── */}
         <div className="flex-1 min-w-0">
           {/* Toolbar */}
-          <div className="bg-white border border-gray-100 rounded-xl p-3 flex items-center justify-between gap-3 mb-4">
+          <div className="bg-white border border-gray-100 rounded-xl p-3 flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 mb-4">
             <button
               onClick={() => setFiltersOpen(true)}
               className="lg:hidden flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-medium text-navy hover:bg-gray-50">
@@ -236,7 +236,7 @@ function SearchInner() {
             <p className="text-sm text-gray-600 hidden sm:block">
               Showing <span className="font-semibold text-navy">{results.length}</span> results
             </p>
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 xs:ml-auto w-full xs:w-auto">
               <span className="text-xs text-gray-500 hidden sm:inline flex items-center gap-1">
                 <ArrowUpDown className="w-3.5 h-3.5" /> Sort by:
               </span>
@@ -244,7 +244,7 @@ function SearchInner() {
                 <select
                   value={sort}
                   onChange={e => setSort(e.target.value as SortKey)}
-                  className="appearance-none border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium text-navy bg-white focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange"
+                  className="w-full xs:w-auto appearance-none border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium text-navy bg-white focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange"
                 >
                   <option value="relevance">Best Match</option>
                   <option value="rating">Top Rated</option>
@@ -281,7 +281,7 @@ function SearchInner() {
           {/* Browse other services (sits ABOVE the results) */}
           <div className="bg-white border border-gray-100 rounded-2xl p-5 lg:p-6 mb-5">
             <h3 className="text-base lg:text-lg font-bold text-navy mb-4">Browse other services</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-3">
               {SERVICE_CATEGORIES.filter(c => !selectedCategories.includes(c.slug)).slice(0, 8).map(c => (
                 <Link
                   key={c.slug}
@@ -320,7 +320,7 @@ function SearchInner() {
 
           {/* Result grid */}
           {!live.loading && results.length === 0 ? (
-            <div className="bg-white border border-gray-100 rounded-2xl p-12 text-center">
+            <div className="bg-white border border-gray-100 rounded-2xl p-6 sm:p-12 text-center">
               <div className="w-16 h-16 mx-auto rounded-full bg-orange/10 flex items-center justify-center mb-4 text-3xl">🔍</div>
               <h3 className="text-xl font-bold text-navy mb-2">No vendors match these filters</h3>
               <p className="text-sm text-gray-500 mb-6">Try adjusting your filters or clearing them to see more results.</p>
@@ -341,7 +341,7 @@ function SearchInner() {
       {filtersOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-black/50" onClick={() => setFiltersOpen(false)} />
-          <div className="relative bg-white w-[320px] max-w-[85vw] h-full overflow-y-auto p-5 ml-auto">
+          <div className="relative bg-white w-[min(22rem,92vw)] h-full overflow-y-auto p-4 sm:p-5 ml-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-navy">Filters</h3>
               <button onClick={() => setFiltersOpen(false)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center">
@@ -385,7 +385,7 @@ function FilterSidebar(p: {
   return (
     <div className="space-y-5">
       {/* Active count + clear */}
-      <div className="bg-white border border-gray-100 rounded-xl p-4 flex items-center justify-between">
+      <div className="bg-white border border-gray-100 rounded-xl p-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Filters</p>
           <p className="text-sm font-semibold text-navy mt-0.5">{p.totalActiveFilters} active</p>
@@ -402,15 +402,15 @@ function FilterSidebar(p: {
             const count = p.counts[c.slug] || 0
             const checked = p.selectedCategories.includes(c.slug)
             return (
-              <label key={c.slug} className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded-lg px-2 py-1.5 -mx-2">
-                <span className="flex items-center gap-2.5">
+              <label key={c.slug} className="flex items-start justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded-lg px-2 py-1.5 -mx-2">
+                <span className="flex items-start gap-2.5 min-w-0">
                   <input
                     type="checkbox"
                     checked={checked}
                     onChange={() => p.toggleCategory(c.slug)}
                     className="w-4 h-4 rounded border-gray-300 text-orange focus:ring-orange"
                   />
-                  <span className="text-sm text-navy">{c.label}</span>
+                  <span className="text-sm text-navy leading-snug">{c.label}</span>
                 </span>
                 <span className="text-xs text-gray-400">{count}</span>
               </label>
@@ -560,8 +560,8 @@ function VendorCard({ v }: { v: DummyVendor }) {
         </div>
       </div>
 
-      <div className="p-4 flex-1 flex flex-col">
-        <div className="flex items-start justify-between gap-2 mb-1">
+      <div className="p-4 flex-1 flex flex-col min-w-0">
+        <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-1 xs:gap-2 mb-1">
           <h3 className="font-bold text-navy text-base leading-tight group-hover:text-orange transition">{v.company_name}</h3>
           <span className="flex items-center gap-1 shrink-0">
             <Star className="w-3.5 h-3.5 fill-orange text-orange" />
@@ -572,7 +572,7 @@ function VendorCard({ v }: { v: DummyVendor }) {
 
         <p className="text-xs text-gray-500 mb-2 line-clamp-1">{v.tagline}</p>
 
-        <div className="flex items-center gap-3 text-[11px] text-gray-500 mb-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 mb-3">
           <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {v.area}</span>
           <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {v.response_time}</span>
         </div>
@@ -585,7 +585,7 @@ function VendorCard({ v }: { v: DummyVendor }) {
           ))}
         </div>
 
-        <div className="mt-auto flex items-center justify-between pt-3 border-t border-gray-100">
+        <div className="mt-auto flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 pt-3 border-t border-gray-100">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Starting at</p>
             <p className="text-lg font-bold text-navy">₹{v.starting_price.toLocaleString('en-IN')}</p>

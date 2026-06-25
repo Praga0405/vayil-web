@@ -42,7 +42,7 @@ export default function VendorEarningsPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
         <div className="card bg-gradient-to-br from-navy to-navy-700 text-white">
           <div className="flex items-center gap-2 mb-2">
             <Wallet className="w-4 h-4 text-orange-300" />
@@ -64,12 +64,12 @@ export default function VendorEarningsPage() {
       </div>
 
       {/* Total earnings */}
-      <div className="card flex items-center justify-between">
-        <div>
+      <div className="card flex items-center justify-between gap-4">
+        <div className="min-w-0">
           <p className="text-sm text-[var(--text-secondary)]">Total Earnings</p>
           <p className="text-2xl font-bold text-navy">{formatCurrency(balance?.total_earnings || 0)}</p>
         </div>
-        <TrendingUp className="w-10 h-10 text-green-500" />
+        <TrendingUp className="w-10 h-10 text-green-500 shrink-0" />
       </div>
 
       {/* Revenue chart */}
@@ -95,7 +95,7 @@ export default function VendorEarningsPage() {
 
       {/* Recent transactions */}
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-2 mb-3">
           <h2 className="heading-sm">This Month</h2>
           <Link href="/vendor/earnings/history" className="text-xs text-orange font-semibold flex items-center gap-1">
             All history <ChevronRight className="w-3 h-3" />
@@ -111,11 +111,11 @@ export default function VendorEarningsPage() {
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${t.type === 'CREDIT' ? 'bg-green-100' : 'bg-red-100'}`}>
                   <ArrowUpRight className={`w-4 h-4 ${t.type === 'CREDIT' ? 'text-green-600' : 'text-red-600 rotate-180'}`} />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-navy">{t.description || t.type}</p>
                   <p className="text-xs text-[var(--text-muted)]">{formatRelative(t.created_at)}</p>
                 </div>
-                <p className={`font-bold text-sm ${t.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'}`}>
+                <p className={`font-bold text-sm shrink-0 ${t.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'}`}>
                   {t.type === 'CREDIT' ? '+' : '-'}{formatCurrency(t.amount)}
                 </p>
               </div>

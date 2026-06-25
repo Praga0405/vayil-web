@@ -26,12 +26,52 @@
 
 * { box-sizing: border-box; }
 
+html {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
   background-color: var(--bg);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  min-width: 0;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+@media (min-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 14px;
+  }
 }
 
 /* ── Scrollbar ── */
@@ -41,8 +81,8 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: #a0b8cc; }
 
 /* ── Typography ── */
-.heading-xl  { @apply text-3xl font-bold text-navy leading-tight; }
-.heading-lg  { @apply text-2xl font-bold text-navy leading-tight; }
+.heading-xl  { @apply text-2xl sm:text-3xl font-bold text-navy leading-tight; }
+.heading-lg  { @apply text-xl sm:text-2xl font-bold text-navy leading-tight; }
 .heading-md  { @apply text-xl  font-semibold text-navy; }
 .heading-sm  { @apply text-base font-semibold text-navy; }
 .body-lg     { @apply text-base text-navy-500; }
@@ -52,7 +92,7 @@ body {
 
 /* ── Cards ── */
 .card {
-  @apply bg-white rounded-2xl p-5 shadow-card border border-[var(--border)];
+  @apply bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-[var(--border)] min-w-0;
 }
 .card-hover {
   @apply card transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5 cursor-pointer;
@@ -60,22 +100,22 @@ body {
 
 /* ── Buttons ── */
 .btn {
-  @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply inline-flex max-w-full items-center justify-center gap-2 rounded-xl font-semibold text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed;
 }
 .btn-primary {
-  @apply btn bg-orange text-white hover:bg-orange-600 focus:ring-orange shadow-btn px-5 py-2.5 text-sm;
+  @apply btn bg-orange text-white hover:bg-orange-600 focus:ring-orange shadow-btn px-4 sm:px-5 py-2.5 text-sm;
 }
 .btn-secondary {
-  @apply btn bg-navy text-white hover:bg-navy-600 focus:ring-navy px-5 py-2.5 text-sm;
+  @apply btn bg-navy text-white hover:bg-navy-600 focus:ring-navy px-4 sm:px-5 py-2.5 text-sm;
 }
 .btn-outline {
-  @apply btn border-2 border-navy text-navy hover:bg-navy-50 focus:ring-navy px-5 py-2.5 text-sm;
+  @apply btn border-2 border-navy text-navy hover:bg-navy-50 focus:ring-navy px-4 sm:px-5 py-2.5 text-sm;
 }
 .btn-ghost {
   @apply btn text-navy hover:bg-navy-50 focus:ring-navy px-4 py-2 text-sm;
 }
 .btn-danger {
-  @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 px-5 py-2.5 text-sm;
+  @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 px-4 sm:px-5 py-2.5 text-sm;
 }
 .btn-sm  { @apply px-3 py-1.5 text-xs !important; }
 .btn-lg  { @apply px-6 py-2.5 text-sm !important; }
@@ -143,21 +183,30 @@ body {
 .divider { @apply border-t border-[var(--border)] my-4; }
 
 /* ── Page layout ── */
-.page-container { @apply max-w-6xl mx-auto px-4 py-6; }
+.page-container { @apply max-w-6xl mx-auto w-full px-4 py-5 sm:py-6; }
 .page-header    { @apply mb-6; }
+
+.app-container { @apply max-w-[1440px] mx-auto w-full px-4 sm:px-6 lg:px-[46px]; }
+.app-section { @apply px-4 sm:px-6 lg:px-[46px]; }
+.stackable-header { @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between; }
+.responsive-grid-2 { @apply grid grid-cols-1 sm:grid-cols-2 gap-4; }
+.responsive-grid-3 { @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4; }
+.responsive-grid-4 { @apply grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-4; }
+.responsive-scroll { @apply w-full overflow-x-auto overscroll-x-contain; }
+.responsive-scroll > table { @apply min-w-[640px]; }
 
 /* ── Sidebar layout ── */
 .sidebar-layout {
-  @apply flex min-h-screen;
+  @apply flex min-h-screen w-full min-w-0;
 }
 .sidebar {
-  @apply w-64 shrink-0 bg-navy min-h-screen flex flex-col;
+  @apply w-64 shrink-0 bg-navy min-h-screen flex-col;
 }
 .sidebar-collapsed {
   @apply w-16;
 }
 .main-content {
-  @apply flex-1 flex flex-col min-h-screen bg-[var(--bg)];
+  @apply flex-1 flex flex-col min-h-screen min-w-0 bg-[var(--bg)];
 }
 
 /* ── Nav item ── */
@@ -173,7 +222,9 @@ body {
 
 /* ── OTP input ── */
 .otp-input {
-  @apply w-12 h-12 text-center text-xl font-bold rounded-xl border-2 border-[var(--border)] bg-white text-navy
+  width: clamp(2.25rem, 12vw, 3rem);
+  height: clamp(2.75rem, 13vw, 3rem);
+  @apply text-center text-lg sm:text-xl font-bold rounded-xl border-2 border-[var(--border)] bg-white text-navy
   focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition;
 }
 
@@ -205,7 +256,7 @@ body {
 
 /* ── Auth card ── */
 .auth-card {
-  @apply bg-white rounded-3xl shadow-card-hover p-8 w-full max-w-md mx-auto;
+  @apply bg-white rounded-3xl shadow-card-hover p-5 sm:p-8 w-full max-w-md mx-auto;
 }
 
 /* ── Bottom tab bar (mobile-like for smaller viewports) ── */

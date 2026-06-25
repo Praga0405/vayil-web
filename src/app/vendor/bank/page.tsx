@@ -55,7 +55,7 @@ export default function BankPage() {
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-navy">
         <ChevronLeft className="w-4 h-4" /> Back
       </button>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
         <h1 className="heading-lg">Bank Details</h1>
         {bank && !editing && (
           <button onClick={() => setEditing(true)} className="btn btn-ghost btn-sm gap-1">
@@ -84,7 +84,7 @@ export default function BankPage() {
           <Input label="IFSC Code" placeholder="e.g. SBIN0001234" value={form.ifsc_code} onChange={set('ifsc_code')} required />
           <Input label="Bank Name" placeholder="e.g. State Bank of India" value={form.bank_name} onChange={set('bank_name')} required />
           <Input label="Branch (optional)" placeholder="Branch name" value={form.branch} onChange={set('branch')} />
-          <div className="flex gap-3">
+          <div className="flex flex-col xs:flex-row gap-3">
             {bank && <Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button>}
             <Button full loading={saving} onClick={save}>Save Bank Details</Button>
           </div>

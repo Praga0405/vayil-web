@@ -53,7 +53,12 @@ const config: Config = {
         btn: '0 4px 12px 0 rgba(232,148,58,0.30)',
       },
       screens: {
-        xs: '375px',
+        xxs: '320px',
+        xs: '360px',
+        phone: '393px',
+        compact: '480px',
+        tablet: '600px',
+        wide: '840px',
       },
     },
   },

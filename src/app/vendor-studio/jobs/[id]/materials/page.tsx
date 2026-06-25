@@ -81,18 +81,18 @@ export default function MaterialsManagerPage() {
           const lineTotal = m.quantity * m.rate
           return (
             <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start gap-3">
                 <Input label="Item Name" value={m.name} onChange={e => update(i, 'name', e.target.value)} />
-                <button onClick={() => remove(i)} className="ml-3 text-gray-400 hover:text-red-500 mt-6">
+                <button onClick={() => remove(i)} className="text-gray-400 hover:text-red-500 mt-8 shrink-0">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 xs:grid-cols-3 gap-3">
                 <Input label="Qty"  type="number" value={String(m.quantity)} onChange={e => update(i, 'quantity', Number(e.target.value))} />
                 <Input label="Unit" value={m.unit}                          onChange={e => update(i, 'unit', e.target.value)} />
                 <Input label="Rate" type="number" value={String(m.rate)}    onChange={e => update(i, 'rate', Number(e.target.value))} />
               </div>
-              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+              <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-2 pt-2 border-t border-gray-100">
                 <StatusBadge status={m.status} />
                 <span className="text-sm font-bold text-navy">Total: {formatCurrency(lineTotal)}</span>
               </div>
@@ -106,7 +106,7 @@ export default function MaterialsManagerPage() {
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 sticky bottom-4 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1">
           <span className="text-sm text-gray-500">Materials Total</span>
           <span className="text-lg font-bold text-navy">{formatCurrency(total)}</span>
         </div>

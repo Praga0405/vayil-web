@@ -25,11 +25,17 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
   const router   = useRouter()
   const { user, clearAuth } = useUserAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const bypassShell =
+    pathname.startsWith('/vendor/login') ||
+    pathname.startsWith('/vendor/signup') ||
+    pathname.startsWith('/vendor/onboarding')
 
   const logout = () => {
     clearAuth()
     router.push('/vendor/login')
   }
+
+  if (bypassShell) return <>{children}</>
 
   const SidebarContent = ({ onNav }: { onNav?: () => void }) => (
     <>
@@ -89,27 +95,27 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-72 sidebar flex flex-col z-10">
+          <aside className="absolute left-0 top-0 bottom-0 w-[min(18rem,88vw)] sidebar flex flex-col z-10">
             <SidebarContent onNav={() => setSidebarOpen(false)} />
           </aside>
         </div>
       )}
 
       <div className="main-content">
-        <header className="sticky top-0 z-40 bg-white border-b border-[var(--border)] shadow-nav px-4 py-3 flex items-center gap-3">
-          <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-xl hover:bg-gray-100">
+        <header className="sticky top-0 z-40 bg-white border-b border-[var(--border)] shadow-nav px-2 xs:px-3 sm:px-4 py-3 flex items-center gap-2 xs:gap-3 w-full max-w-full overflow-hidden">
+          <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-xl hover:bg-gray-100 shrink-0">
             <Menu className="w-5 h-5 text-navy" />
           </button>
-          <div className="flex-1" />
-          <Link href="/vendor/notifications" className="p-2 rounded-xl hover:bg-gray-100">
+          <div className="flex-1 min-w-0" />
+          <Link href="/vendor/notifications" className="p-2 rounded-xl hover:bg-gray-100 shrink-0">
             <Bell className="w-5 h-5 text-navy" />
           </Link>
-          <Link href="/vendor/profile">
+          <Link href="/vendor/profile" className="shrink-0">
             <Avatar name={user?.name} src={user?.profile_image} size={9} />
           </Link>
         </header>
 
-        <main className="flex-1 p-4 lg:p-6 max-w-6xl mx-auto w-full">
+        <main className="flex-1 p-3 sm:p-4 lg:p-6 max-w-6xl mx-auto w-full min-w-0">
           {children}
         </main>
       </div>

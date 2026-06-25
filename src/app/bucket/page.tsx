@@ -39,8 +39,8 @@ export default function BucketPage() {
     <div className="min-h-screen bg-gray-50">
       <PublicHeader />
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-5">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold text-navy">My Bucket</h1>
             <p className="text-sm text-gray-500">{items.length} service{items.length !== 1 ? 's' : ''} selected</p>
           </div>
@@ -57,7 +57,7 @@ export default function BucketPage() {
           <>
             {Object.entries(grouped).map(([vendorId, vItems]) => (
               <div key={vendorId} className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-2">
                   <p className="font-bold text-navy">{vItems[0].vendor_name}</p>
                   <Link href={`/vendors/${vendorId}`} className="text-xs text-orange font-semibold flex items-center gap-1">
                     View vendor <ChevronRight className="w-3 h-3" />
@@ -72,11 +72,11 @@ export default function BucketPage() {
                       <p className="text-sm font-semibold text-navy truncate">{it.service_title}</p>
                       <p className="text-xs text-gray-500">{it.category}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <p className="text-sm font-bold text-navy">{formatCurrency(it.starting_price)}</p>
                       <p className="text-[10px] text-gray-400">Starting</p>
                     </div>
-                    <button onClick={() => remove(it)} className="text-gray-400 hover:text-red-500 transition">
+                    <button onClick={() => remove(it)} className="text-gray-400 hover:text-red-500 transition shrink-0">
                       <X className="w-4 h-4" />
                     </button>
                   </div>

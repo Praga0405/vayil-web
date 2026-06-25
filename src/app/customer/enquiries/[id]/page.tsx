@@ -131,8 +131,8 @@ export default function EnquiryDetailPage() {
 
       {/* Header */}
       <div className="card">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="heading-md">{enquiry.company_name || enquiry.vendor_name || `Enquiry #${id}`}</h1>
             <p className="text-sm text-[var(--text-secondary)] mt-0.5">{enquiry.service_title || enquiry.category_name || 'Home Service'}</p>
             <p className="text-xs text-[var(--text-muted)] mt-1">{formatDate(enquiry.created_at)}</p>
@@ -158,8 +158,8 @@ export default function EnquiryDetailPage() {
 
           {/* Line items */}
           {quote.items?.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="responsive-scroll">
+              <table className="w-full min-w-[620px] text-sm">
                 <thead>
                   <tr className="border-b border-[var(--border)]">
                     <th className="text-left py-2 text-xs text-[var(--text-secondary)] font-semibold">Description</th>
@@ -189,7 +189,7 @@ export default function EnquiryDetailPage() {
             <InfoRow label="Subtotal"      value={formatCurrency(quote.subtotal || quote.total || 0)} />
             {quote.platform_fee > 0 && <InfoRow label="Platform Fee (5%)" value={formatCurrency(quote.platform_fee)} />}
             {quote.gst > 0          && <InfoRow label="GST"               value={formatCurrency(quote.gst)} />}
-            <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 pt-2 border-t border-[var(--border)]">
               <span className="font-bold text-navy">Total</span>
               <Amount value={quote.total || quote.amount || 0} size="lg" />
             </div>

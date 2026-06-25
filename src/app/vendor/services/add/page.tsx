@@ -80,13 +80,13 @@ export default function AddServicePage() {
       <div className="card space-y-4">
         <Input label="Service Title" placeholder="e.g. Interior Wood Work" value={form.title} onChange={set('title')} required />
         <Textarea label="Description" rows={3} placeholder="Describe your service..." value={form.description} onChange={set('description')} />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
           <Select label="Category" value={form.category_id} onChange={set('category_id')}
             options={cats.map(c => ({ value: c.id, label: c.category_name || c.name }))} />
           <Select label="Sub-category" value={form.subcategory_id} onChange={set('subcategory_id')}
             options={subcats.map(s => ({ value: s.id, label: s.sub_category_name || s.name }))} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
           <Select label="Pricing Type" value={form.price_type} onChange={set('price_type')} options={PRICE_TYPES} />
           {form.price_type !== 'quote_based' && (
             <Input label={`Price (₹${form.price_type !== 'fixed' ? ' / unit' : ''})`}

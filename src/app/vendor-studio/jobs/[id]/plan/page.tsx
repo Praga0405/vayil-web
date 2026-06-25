@@ -80,14 +80,14 @@ export default function PlanBuilderPage() {
       <div className="space-y-3">
         {drafts.map((m, i) => (
           <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-3">
               <span className="text-xs font-bold text-orange uppercase tracking-wider">Milestone {i + 1}</span>
               <button onClick={() => remove(i)} className="text-gray-400 hover:text-red-500 transition">
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
             <Input label="Title" value={m.title} onChange={e => update(i, 'title', e.target.value)} placeholder="e.g. Tiling & flooring" />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
               <Input label="Days" type="number" value={String(m.days)} onChange={e => update(i, 'days', Number(e.target.value))} />
               <Input label="% of Total" type="number" value={String(m.percentage)} onChange={e => update(i, 'percentage', Number(e.target.value))} />
             </div>
@@ -106,7 +106,7 @@ export default function PlanBuilderPage() {
 
       {/* Footer summary */}
       <div className="bg-white border border-gray-100 rounded-2xl p-5 sticky bottom-4 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1">
           <span className="text-sm text-gray-500">Total Percentage</span>
           <span className={`text-lg font-bold ${totalPct === 100 ? 'text-green-600' : 'text-orange'}`}>
             {totalPct}% / 100%

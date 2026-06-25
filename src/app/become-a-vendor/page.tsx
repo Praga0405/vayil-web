@@ -111,35 +111,33 @@ export default function BecomeAVendorPage() {
       <section className="relative overflow-hidden bg-[#FFF8F0]">
         {/* Background washes */}
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute -top-32 -right-32 w-[640px] h-[640px] rounded-full bg-gradient-to-br from-orange/25 to-orange/0 blur-3xl" />
-          <div className="absolute -bottom-40 -left-40 w-[520px] h-[520px] rounded-full bg-gradient-to-tr from-navy/10 to-transparent blur-3xl" />
           <div className="absolute inset-0 opacity-[0.04]" style={{
             backgroundImage: 'radial-gradient(circle at 1px 1px, #183954 1px, transparent 0)',
             backgroundSize: '28px 28px',
           }} />
         </div>
 
-        <div className="relative max-w-[1440px] mx-auto px-6 lg:px-[46px] pt-12 lg:pt-16 pb-20 lg:pb-28">
-          <div className="grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-20 items-center">
+        <div className="relative max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] pt-12 lg:pt-16 pb-20 lg:pb-28">
+          <div className="grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-20 items-center min-w-0">
             {/* ── LEFT — emphasis headline + CTAs ── */}
-            <div className="relative">
+            <div className="relative min-w-0 w-full max-w-[calc(100vw-2rem)] sm:max-w-none">
               <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-orange/20 text-orange text-[11px] font-bold uppercase tracking-[0.15em] mb-7 shadow-sm">
                 <Sparkles className="w-3.5 h-3.5" /> For Vendors · Coimbatore
               </span>
 
-              <h1 className="text-[40px] lg:text-[64px] font-bold leading-[1.05] tracking-tight text-navy">
+              <h1 className="text-[32px] xs:text-[34px] lg:text-[64px] font-bold leading-[1.05] tracking-tight text-navy w-full max-w-full overflow-hidden">
                 Grow with
-                <span className="relative inline-block mx-2">
+                <span className="relative block sm:inline-block mx-0 sm:mx-2 w-full max-w-full sm:w-auto">
                   <span className="relative z-10 text-orange">better leads</span>
                   <span className="absolute -bottom-1 left-0 right-0 h-3 bg-orange/20 -rotate-1" />
                 </span>
                 <br />
-                <span className="relative inline-block mr-2">
+                <span className="relative block sm:inline-block mr-0 sm:mr-2 w-full max-w-full sm:w-auto">
                   <span className="relative z-10 text-orange">better trust</span>
                   <span className="absolute -bottom-1 left-0 right-0 h-3 bg-orange/20 rotate-1" />
                 </span>
                 and
-                <span className="relative inline-block ml-2">
+                <span className="relative block sm:inline-block ml-0 sm:ml-2 w-full max-w-full sm:w-auto">
                   <span className="relative z-10 text-orange">better payouts</span>
                   <span className="absolute -bottom-1 left-0 right-0 h-3 bg-orange/20 -rotate-1" />
                 </span>
@@ -153,12 +151,12 @@ export default function BecomeAVendorPage() {
 
               <div className="flex flex-col sm:flex-row gap-3 mt-9">
                 <Link href="/vendor/login"
-                  className="group inline-flex items-center justify-center gap-2 bg-orange hover:bg-orange-600 text-white font-bold px-7 py-4 rounded-2xl transition shadow-[0_12px_30px_-8px_rgba(232,148,58,0.55)] hover:shadow-[0_18px_40px_-8px_rgba(232,148,58,0.7)] hover:-translate-y-0.5">
+                  className="group inline-flex items-center justify-center gap-2 bg-orange hover:bg-orange-600 text-white font-bold px-5 sm:px-7 py-4 rounded-2xl transition shadow-[0_12px_30px_-8px_rgba(232,148,58,0.55)] hover:shadow-[0_18px_40px_-8px_rgba(232,148,58,0.7)] hover:-translate-y-0.5">
                   Join as a Vendor
                   <ArrowRight className="w-4 h-4 transition group-hover:translate-x-1" />
                 </Link>
                 <Link href="#how-it-works"
-                  className="inline-flex items-center justify-center gap-2 bg-white border-2 border-navy/10 hover:border-navy/30 text-navy font-bold px-7 py-4 rounded-2xl transition">
+                  className="inline-flex items-center justify-center gap-2 bg-white border-2 border-navy/10 hover:border-navy/30 text-navy font-bold px-5 sm:px-7 py-4 rounded-2xl transition">
                   See how it works
                 </Link>
               </div>
@@ -184,19 +182,19 @@ export default function BecomeAVendorPage() {
               accent badges (KYC verified + ₹ released) at the corners
               tie the journey to a concrete first payout.
              ────────────────────────────────────────────────────────── */}
-            <div className="relative">
+            <div className="relative min-w-0 w-full max-w-[calc(100vw-2rem)] sm:max-w-none">
               {/* Decorative tilted backdrop */}
-              <div className="absolute inset-6 bg-gradient-to-br from-navy to-[#0f2540] rounded-[28px] rotate-[1.5deg] opacity-90" />
+              <div className="hidden sm:block absolute inset-6 bg-gradient-to-br from-navy to-[#0f2540] rounded-[28px] rotate-[1.5deg] opacity-90" />
 
               {/* Main journey card */}
-              <div className="relative bg-white rounded-[28px] shadow-2xl shadow-navy/20 border border-white p-7 lg:p-8 -rotate-[1deg] origin-bottom-left">
+              <div className="relative w-full max-w-full bg-white rounded-2xl sm:rounded-[28px] shadow-2xl shadow-navy/20 border border-white p-4 xs:p-5 sm:p-7 lg:p-8 sm:-rotate-[1deg] origin-bottom-left">
                 {/* Header strip */}
-                <div className="flex items-start justify-between pb-6 border-b border-dashed border-gray-200">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 pb-6 border-b border-dashed border-gray-200">
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-orange">Your Journey</p>
                     <h3 className="text-xl font-bold text-navy mt-1">From signup to first paid milestone</h3>
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider bg-green-50 text-green-700 px-2.5 py-1 rounded-md shrink-0">~6 weeks</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-green-50 text-green-700 px-2.5 py-1 rounded-md sm:shrink-0 self-start">~6 weeks</span>
                 </div>
 
                 {/* Steps */}
@@ -220,7 +218,7 @@ export default function BecomeAVendorPage() {
                         <span className={`relative z-10 w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ring-4 ring-white ${toneRing}`}>
                           {n}
                         </span>
-                        <div className={`flex-1 flex items-center gap-3 rounded-xl px-3 py-2.5 ${highlight ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200' : 'bg-gray-50'}`}>
+                        <div className={`flex-1 min-w-0 flex items-center gap-3 rounded-xl px-3 py-2.5 ${highlight ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200' : 'bg-gray-50'}`}>
                           <Icon className={`w-4 h-4 shrink-0 ${highlight ? 'text-green-600' : 'text-navy/60'}`} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold text-navy truncate">{title}</p>
@@ -238,12 +236,12 @@ export default function BecomeAVendorPage() {
                 </ol>
 
                 {/* Bottom outcome strip */}
-                <div className="mt-7 pt-5 border-t border-dashed border-gray-200 grid grid-cols-3 gap-3 text-center">
+                <div className="mt-7 pt-5 border-t border-dashed border-gray-200 grid grid-cols-1 xs:grid-cols-3 gap-3 text-center">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Onboard</p>
                     <p className="text-sm font-bold text-navy mt-1">~10 min</p>
                   </div>
-                  <div className="border-x border-gray-100">
+                  <div className="xs:border-x border-gray-100">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">First lead</p>
                     <p className="text-sm font-bold text-navy mt-1">~48 hrs</p>
                   </div>
@@ -255,7 +253,7 @@ export default function BecomeAVendorPage() {
               </div>
 
               {/* Floating accent: KYC verified */}
-              <div className="absolute -top-3 -right-2 lg:-right-5 bg-white rounded-2xl shadow-xl shadow-navy/20 px-4 py-3 flex items-center gap-2.5 rotate-[6deg] border border-gray-100 z-10">
+              <div className="hidden sm:flex absolute -top-3 -right-2 lg:-right-5 bg-white rounded-2xl shadow-xl shadow-navy/20 px-4 py-3 items-center gap-2.5 rotate-[6deg] border border-gray-100 z-10">
                 <span className="w-9 h-9 rounded-full bg-green-50 text-green-600 flex items-center justify-center">
                   <BadgeCheck className="w-5 h-5" />
                 </span>
@@ -266,7 +264,7 @@ export default function BecomeAVendorPage() {
               </div>
 
               {/* Floating accent: payout released */}
-              <div className="absolute -bottom-3 -left-3 lg:-left-6 bg-white rounded-2xl shadow-xl shadow-navy/20 px-4 py-3 flex items-center gap-2.5 -rotate-[4deg] border border-gray-100 z-10">
+              <div className="hidden sm:flex absolute -bottom-3 -left-3 lg:-left-6 bg-white rounded-2xl shadow-xl shadow-navy/20 px-4 py-3 items-center gap-2.5 -rotate-[4deg] border border-gray-100 z-10">
                 <span className="w-9 h-9 rounded-full bg-orange/15 text-orange flex items-center justify-center">
                   <Wallet className="w-5 h-5" />
                 </span>
@@ -279,7 +277,7 @@ export default function BecomeAVendorPage() {
           </div>
 
           {/* ── Bottom proof ribbon ── */}
-          <div className="mt-16 lg:mt-20 bg-white rounded-2xl border border-gray-100 shadow-sm grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
+          <div className="mt-16 lg:mt-20 bg-white rounded-2xl border border-gray-100 shadow-sm grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
             {[
               { n: '₹12L+',  l: 'Paid to vendors in the last quarter' },
               { n: '240+',    l: 'Verified vendors onboarded' },
@@ -296,7 +294,7 @@ export default function BecomeAVendorPage() {
       </section>
 
       {/* ── Why Vendors Grow with Vayil — 6 benefit cards ─────── */}
-      <section className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-16 lg:py-24">
+      <section className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-16 lg:py-24">
         <div className="text-center max-w-3xl mx-auto mb-12">
           <p className="text-xs font-bold uppercase tracking-widest text-orange mb-3">The vendor case</p>
           <h2 className="text-3xl lg:text-4xl font-bold text-navy">Why Vendors Grow with Vayil</h2>
@@ -321,7 +319,7 @@ export default function BecomeAVendorPage() {
 
       {/* ── How vendor flow works ──────────────────────────────── */}
       <section id="how-it-works" className="bg-[#F4F7FA] py-16 lg:py-24">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px]">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px]">
           <div className="text-center max-w-3xl mx-auto mb-12">
             <p className="text-xs font-bold uppercase tracking-widest text-orange mb-3">How it works</p>
             <h2 className="text-3xl lg:text-4xl font-bold text-navy">From signup to first paid milestone</h2>
@@ -345,7 +343,7 @@ export default function BecomeAVendorPage() {
       </section>
 
       {/* ── Trust infrastructure ───────────────────────────────── */}
-      <section className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-16 lg:py-24">
+      <section className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-16 lg:py-24">
         <div className="grid lg:grid-cols-[1fr_1.4fr] gap-10 lg:gap-16 items-start">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest text-orange mb-3">Trust infrastructure</p>
@@ -363,7 +361,7 @@ export default function BecomeAVendorPage() {
 
           <div className="space-y-4">
             {TRUST_PILLARS.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="flex gap-5 bg-white border border-gray-200 rounded-2xl p-5">
+              <div key={title} className="flex gap-4 sm:gap-5 bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
                 <div className="w-12 h-12 rounded-xl bg-navy/5 text-navy shrink-0 flex items-center justify-center">
                   <Icon className="w-5 h-5" />
                 </div>
@@ -379,7 +377,7 @@ export default function BecomeAVendorPage() {
 
       {/* ── Social proof / what other vendors say ──────────────── */}
       <section className="bg-navy text-white py-16 lg:py-20">
-        <div className="max-w-4xl mx-auto px-6 lg:px-[46px] text-center">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-[46px] text-center">
           <Users className="w-10 h-10 text-orange mx-auto mb-5" />
           <p className="text-2xl lg:text-3xl font-medium leading-relaxed">
             &ldquo;Before Vayil, half my time was chasing payments. Now milestones get approved
@@ -391,9 +389,9 @@ export default function BecomeAVendorPage() {
       </section>
 
       {/* ── Final CTA ──────────────────────────────────────────── */}
-      <section className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-16 lg:py-24">
-        <div className="bg-gradient-to-br from-orange to-orange-600 text-white rounded-3xl p-10 lg:p-16 text-center">
-          <h2 className="text-3xl lg:text-5xl font-bold">Start serving real projects today.</h2>
+      <section className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-16 lg:py-24">
+        <div className="bg-gradient-to-br from-orange to-orange-600 text-white rounded-3xl p-6 sm:p-10 lg:p-16 text-center">
+          <h2 className="text-2xl sm:text-3xl lg:text-5xl font-bold">Start serving real projects today.</h2>
           <p className="text-white/90 text-lg mt-4 max-w-2xl mx-auto">
             Onboarding takes ~10 minutes. Your first listing can be live before lunch.
           </p>

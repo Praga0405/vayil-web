@@ -35,19 +35,19 @@ export function PageHero({
   meta?: React.ReactNode
 }) {
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl px-6 py-5">
+    <div className="bg-white border border-gray-100 rounded-2xl px-4 sm:px-6 py-5 min-w-0">
       {backHref && (
         <Link href={backHref}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-navy transition mb-3">
           <ChevronLeft className="w-3.5 h-3.5" /> {backLabel ?? 'Back'}
         </Link>
       )}
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 min-w-0">
         <div className="min-w-0">
-          <h1 className="text-2xl lg:text-3xl font-bold text-navy">{title}</h1>
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-navy break-words">{title}</h1>
           {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
+        {actions && <div className="flex flex-col xs:flex-row flex-wrap items-stretch xs:items-center gap-2 lg:shrink-0">{actions}</div>}
       </div>
       {meta && <div className="mt-4 pt-4 border-t border-gray-100">{meta}</div>}
     </div>
@@ -70,14 +70,14 @@ export function PageSection({
   className?: string
 }) {
   return (
-    <section className={`bg-white border border-gray-100 rounded-2xl ${dense ? '' : 'p-6'} ${className ?? ''}`}>
+    <section className={`bg-white border border-gray-100 rounded-2xl min-w-0 ${dense ? '' : 'p-4 sm:p-6'} ${className ?? ''}`}>
       {(title || actions) && (
-        <div className={`flex items-start justify-between gap-3 ${dense ? 'px-6 pt-5 pb-4' : 'mb-4'}`}>
-          <div>
+        <div className={`flex flex-col xs:flex-row xs:items-start xs:justify-between gap-3 ${dense ? 'px-4 sm:px-6 pt-5 pb-4' : 'mb-4'}`}>
+          <div className="min-w-0">
             {title && <h2 className="text-base font-bold text-navy">{title}</h2>}
             {description && <p className="text-xs text-gray-500 mt-1">{description}</p>}
           </div>
-          {actions && <div className="shrink-0">{actions}</div>}
+          {actions && <div className="xs:shrink-0">{actions}</div>}
         </div>
       )}
       {children}
@@ -100,7 +100,7 @@ export function TwoColumn({
   className?: string
 }) {
   return (
-    <div className={`flex flex-col ${reverse ? 'lg:flex-row-reverse' : 'lg:flex-row'} gap-5 ${className ?? ''}`}>
+    <div className={`flex flex-col ${reverse ? 'lg:flex-row-reverse' : 'lg:flex-row'} gap-5 min-w-0 ${className ?? ''}`}>
       <aside className={`${leftWidth} shrink-0 space-y-5`}>{left}</aside>
       <div className="flex-1 min-w-0 space-y-5">{right}</div>
     </div>
@@ -122,7 +122,7 @@ export function StatGrid({ items, columns = 4 }: {
 }) {
   const colsClass = columns === 2 ? 'sm:grid-cols-2'
                   : columns === 3 ? 'sm:grid-cols-2 lg:grid-cols-3'
-                  :                 'sm:grid-cols-2 lg:grid-cols-4'
+                  :                 'xs:grid-cols-2 lg:grid-cols-4'
   return (
     <div className={`grid grid-cols-1 ${colsClass} gap-4`}>
       {items.map((it, i) => {
@@ -134,11 +134,11 @@ export function StatGrid({ items, columns = 4 }: {
                     : accent === 'red'    ? 'bg-red-50 text-red-600'
                     :                       'bg-gray-100 text-gray-500'
         return (
-          <div key={i} className="bg-white border border-gray-100 rounded-2xl p-5">
+          <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5 min-w-0">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{it.label}</p>
-                <p className="text-2xl font-bold text-navy mt-2">{it.value}</p>
+                <p className="text-xl sm:text-2xl font-bold text-navy mt-2 break-words">{it.value}</p>
                 {it.sublabel && <p className="text-xs text-gray-500 mt-1">{it.sublabel}</p>}
               </div>
               {Icon && (

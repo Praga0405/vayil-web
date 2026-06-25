@@ -61,9 +61,9 @@ export default function VendorEnquiryDetailPage() {
       </button>
 
       {/* Header */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 sm:p-6">
+        <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold text-navy">{enquiry.customer_name}</h1>
             <p className="text-sm text-gray-500">{enquiry.service_title} · {enquiry.category_name}</p>
             <p className="text-xs text-gray-400 mt-1">{formatRelative(enquiry.created_at)}</p>

@@ -179,8 +179,8 @@ export default function EnquiryDetailPage() {
       </button>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold text-navy">{enquiry.company_name || enquiry.vendor_name || `Enquiry #${id}`}</h1>
             <p className="text-sm text-gray-500 mt-0.5">{enquiry.service_title || enquiry.category_name || enquiry.category || 'Home Service'}</p>
             <p className="text-xs text-gray-400 mt-1">{formatDate(enquiry.created_at)}</p>
@@ -207,14 +207,14 @@ export default function EnquiryDetailPage() {
             <InfoRow label="Subtotal" value={formatCurrency(quote.subtotal || quoteTotal)} />
             {quote.platform_fee > 0 && <InfoRow label="Platform Fee" value={formatCurrency(quote.platform_fee)} />}
             {quote.gst > 0          && <InfoRow label="GST"          value={formatCurrency(quote.gst)} />}
-            <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 pt-2 border-t border-gray-100">
               <span className="font-bold text-navy">Quote Total</span>
               <Amount value={quoteTotal} size="lg" />
             </div>
           </div>
 
           {(!quote.status || quote.status === 'PENDING' || quote.status === 'SENT' || quote.status === 'sent') && (
-            <div className="flex gap-3 pt-2">
+            <div className="flex flex-col xs:flex-row gap-3 pt-2">
               <Button full onClick={acceptQuote} loading={acting === 'accept'}><CheckCircle className="w-4 h-4" /> Accept Quote</Button>
               <Button variant="outline" onClick={rejectQuote} loading={acting === 'reject'}><XCircle className="w-4 h-4" /> Reject</Button>
             </div>
@@ -280,7 +280,7 @@ export default function EnquiryDetailPage() {
       )}
 
       {!quote && enquiry.status === 'PENDING' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center">
+        <div className="bg-white border border-gray-100 rounded-2xl p-6 sm:p-10 text-center">
           <div className="w-14 h-14 rounded-2xl bg-orange/10 flex items-center justify-center mx-auto mb-3">
             <Receipt className="w-7 h-7 text-orange" />
           </div>
@@ -298,12 +298,12 @@ function OptionCard({ active, onClick, title, subtitle, amount, children }: {
   return (
     <button onClick={onClick}
       className={`w-full text-left p-4 rounded-2xl border-2 transition ${active ? 'border-orange bg-orange/5' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
+        <div className="flex items-start xs:items-center gap-3 min-w-0">
           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${active ? 'border-orange' : 'border-gray-300'}`}>
             {active && <div className="w-2 h-2 rounded-full bg-orange" />}
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="font-semibold text-navy text-sm">{title}</p>
             <p className="text-xs text-gray-500">{subtitle}</p>
           </div>
@@ -317,7 +317,7 @@ function OptionCard({ active, onClick, title, subtitle, amount, children }: {
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 text-sm">
       <span className={bold ? 'font-bold text-navy' : 'text-gray-500'}>{label}</span>
       <span className={bold ? 'font-bold text-navy' : 'text-navy'}>{value}</span>
     </div>

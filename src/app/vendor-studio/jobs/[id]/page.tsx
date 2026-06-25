@@ -40,7 +40,7 @@ export default function VendorJobDetailPage() {
         }
         meta={
           <div>
-            <div className="flex items-center justify-between text-sm mb-1.5">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 text-sm mb-1.5">
               <span className="text-gray-500">Payment progress</span>
               <span className="font-bold text-navy">{formatCurrency(job.paid)} / {formatCurrency(job.total)}</span>
             </div>
@@ -91,7 +91,7 @@ export default function VendorJobDetailPage() {
             ) : (
               <ul className="divide-y divide-gray-100">
                 {job.milestones.map(m => (
-                  <li key={m.id} className="flex items-center gap-3 py-3">
+                  <li key={m.id} className="flex flex-col xs:flex-row xs:items-center gap-3 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-navy text-sm truncate">{m.title}</p>
                       <p className="text-xs text-gray-500">
@@ -100,7 +100,7 @@ export default function VendorJobDetailPage() {
                     </div>
                     <StatusBadge status={m.status} />
                     <Link href={`/vendor-studio/milestones/${m.id}/update`}
-                      className="text-xs font-semibold text-navy hover:text-orange transition inline-flex items-center gap-1">
+                      className="text-xs font-semibold text-navy hover:text-orange transition inline-flex items-center gap-1 xs:ml-auto">
                       Update <ChevronRight className="w-3.5 h-3.5" />
                     </Link>
                   </li>

@@ -95,8 +95,8 @@ export default function ProjectDetailPage() {
 
       {/* Header */}
       <div className="card">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="heading-md">{order.company_name || order.vendor_name || `Project #${id}`}</h1>
             <p className="text-sm text-[var(--text-secondary)]">{order.service_title || 'Home Service'}</p>
             <p className="text-xs text-[var(--text-muted)] mt-1">Started {formatDate(order.created_at)}</p>
@@ -140,7 +140,7 @@ export default function ProjectDetailPage() {
                   {m.status === 'COMPLETED' && <span className="text-xs">✓</span>}
                   {m.status === 'IN_PROGRESS' && <span className="text-xs">●</span>}
                 </div>
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-2 xs:gap-4">
                   <div>
                     <p className={cn('text-sm font-semibold', m.status === 'COMPLETED' && 'line-through opacity-60')}>
                       {m.title}
@@ -163,8 +163,8 @@ export default function ProjectDetailPage() {
       {materials.length > 0 && (
         <div className="card">
           <h2 className="heading-sm mb-3">Materials</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="responsive-scroll">
+            <table className="w-full min-w-[560px] text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-xs text-[var(--text-secondary)]">
                   <th className="text-left py-2 font-semibold">Item</th>

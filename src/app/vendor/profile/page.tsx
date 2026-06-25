@@ -71,7 +71,7 @@ export default function VendorProfilePage() {
         <p className="body-sm">Manage your business profile</p>
       </div>
 
-      <div className="card flex items-center gap-4">
+      <div className="card flex flex-col sm:flex-row sm:items-center gap-4 text-center sm:text-left">
         <ProfileImageUploader
           currentUrl={user?.profile_image}
           name={user?.name}
@@ -82,7 +82,7 @@ export default function VendorProfilePage() {
             if (user && token) setAuth({ ...user, profile_image: url }, token)
           }}
         />
-        <div>
+        <div className="min-w-0">
           <p className="font-bold text-navy">{user?.name || 'Vendor'}</p>
           <p className="text-sm text-[var(--text-secondary)]">+91 {user?.mobile}</p>
         </div>
@@ -93,7 +93,7 @@ export default function VendorProfilePage() {
         <Input label="Company Name" value={form.company_name} onChange={set('company_name')} />
         <Textarea label="Description" rows={3} value={form.description} onChange={set('description')} />
         <Input label="Email" type="email" value={form.email_id} onChange={set('email_id')} />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Select label="State" value={form.state_id} onChange={set('state_id')}
             options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
           <Select label="City" value={form.city_id} onChange={set('city_id')}

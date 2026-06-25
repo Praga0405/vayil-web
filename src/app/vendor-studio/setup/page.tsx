@@ -151,7 +151,7 @@ export default function VendorStudioSetupPage() {
 
       {tab === 'bank' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
             <h2 className="text-base font-bold text-navy">Bank Details</h2>
             {bank && !editing && (
               <button onClick={() => setEditing(true)}
@@ -170,9 +170,9 @@ export default function VendorStudioSetupPage() {
                 { label: 'Bank Name',      value: bank.bank_name },
                 { label: 'Branch',         value: bank.branch },
               ].map(({ label, value }) => value ? (
-                <div key={label} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                <div key={label} className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 py-2 border-b border-gray-100 last:border-0">
                   <span className="text-sm text-gray-500">{label}</span>
-                  <span className="text-sm font-semibold text-navy">{value}</span>
+                  <span className="text-sm font-semibold text-navy break-words xs:text-right">{value}</span>
                 </div>
               ) : null)}
               <div className="flex items-center gap-2 mt-3">
@@ -187,7 +187,7 @@ export default function VendorStudioSetupPage() {
               <Input label="IFSC Code *"           value={bankForm.ifsc_code}      onChange={setBankField('ifsc_code')}      placeholder="e.g. HDFC0001234" />
               <Input label="Bank Name *"           value={bankForm.bank_name}      onChange={setBankField('bank_name')}      placeholder="e.g. HDFC Bank" />
               <Input label="Branch"                value={bankForm.branch}         onChange={setBankField('branch')}         placeholder="Branch name (optional)" />
-              <div className="flex gap-3">
+              <div className="flex flex-col xs:flex-row gap-3">
                 <Button full loading={saving} onClick={saveBank}>Save Bank Details</Button>
                 {bank && (
                   <Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button>

@@ -33,18 +33,18 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
     <>
       {/* Announcement bar */}
       <div className="bg-[#183954] text-white text-xs">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] h-[30px] flex items-center justify-between">
+        <div className="app-container min-h-[30px] py-1 flex items-center justify-between gap-3">
           <span className="text-white/70 hidden sm:inline">Alerts and Promotion banners</span>
-          <div className="flex items-center gap-6 text-white/80 ml-auto">
+          <div className="flex items-center gap-3 sm:gap-6 text-white/80 ml-auto min-w-0">
             <Link href="/search" className="hover:text-white transition hidden md:inline">Weekly Offers</Link>
             <Link href="/account/enquiries" className="hover:text-white transition hidden md:inline">Order Status</Link>
-            <Link href="/search" className="hover:text-white transition flex items-center gap-1">
-              <Plus className="w-3 h-3" /> Post a Job
+            <Link href="/search" className="hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap">
+              <Plus className="w-3 h-3" /> <span className="hidden xs:inline">Post a Job</span><span className="xs:hidden">Post</span>
             </Link>
             {!isVendor && !user && (
               <Link href="/become-a-vendor"
-                className="hover:text-white transition flex items-center gap-1">
-                <Plus className="w-3 h-3" /> Become a vendor
+                className="hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap">
+                <Plus className="w-3 h-3" /> <span className="hidden phone:inline">Become a vendor</span><span className="phone:hidden">Vendor</span>
               </Link>
             )}
           </div>
@@ -53,15 +53,15 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
 
       {/* Main header */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] h-[80px] flex items-center gap-4 lg:gap-6">
+        <div className="app-container min-h-[68px] sm:min-h-[80px] py-3 flex items-center gap-3 lg:gap-6">
           {/* Logo + city */}
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0 min-w-0">
             <Link href="/"><VayilLogo size={36} textSize="text-xl" /></Link>
             <CityDropdown showIcon responsive />
           </div>
 
           {/* Nav */}
-          <nav className="hidden lg:flex items-center gap-8 text-sm font-medium text-navy ml-4">
+          <nav className="hidden xl:flex items-center gap-8 text-sm font-medium text-navy ml-4">
             <Link href="/" className="hover:text-orange transition">Home</Link>
             <Link href="/search" className="hover:text-orange transition">All Services</Link>
             <Link href="/#how-it-works" className="hover:text-orange transition">How it works</Link>
@@ -106,7 +106,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
               </button>
 
               {/* Dropdown */}
-              <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+              <div className="hidden group-hover:block absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
                 {/* User info */}
                 <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                   <p className="text-sm font-bold text-navy truncate">{user.name}</p>
@@ -149,7 +149,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
             </div>
           ) : (
             <button onClick={() => { setLoginTab('customer'); setLoginOpen(true) }}
-              className="bg-[#183954] text-white px-4 lg:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
+              className="bg-[#183954] text-white px-3 sm:px-4 lg:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
               Sign in
             </button>
           )}

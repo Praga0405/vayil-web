@@ -5,8 +5,8 @@
  * same chrome without duplicating the markup.
  *
  * Differs from `PublicHeader` in three deliberate ways:
- *   - Announcement bar always shows all 4 secondary links (no
- *     `hidden md:` clipping at narrow widths).
+ *   - Announcement bar uses the same compact-phone clipping rules as
+ *     PublicHeader so 320px Android viewports do not overflow.
  *   - Main header nav is "Download App · How it works · For Vendors"
  *     instead of "Home · All Services · How it works · Vendor Studio".
  *   - Search box is a fixed 300px width instead of flex-1.
@@ -47,18 +47,18 @@ export default function MarketplaceHeader({ defaultQuery = '' }: Props) {
     <>
       {/* ── 1. Top announcement bar ── */}
       <div className="bg-[#183954] text-white text-xs">
-        <div className="max-w-[1440px] mx-auto px-[46px] h-[30px] flex items-center justify-between">
-          <span className="text-white/70">Alerts and Promotion banners</span>
-          <div className="flex items-center gap-6 text-white/80">
-            <a href="#" className="hover:text-white transition">Weekly Offers</a>
-            <a href="#" className="hover:text-white transition">Order Status</a>
-            <a href="#" className="hover:text-white transition flex items-center gap-1">
-              <Plus className="w-3 h-3" /> Post a Job
+        <div className="app-container min-h-[30px] py-1 flex items-center justify-between gap-3">
+          <span className="text-white/70 hidden sm:inline">Alerts and Promotion banners</span>
+          <div className="flex items-center gap-3 sm:gap-6 text-white/80 ml-auto min-w-0">
+            <a href="#" className="hover:text-white transition hidden md:inline">Weekly Offers</a>
+            <a href="#" className="hover:text-white transition hidden md:inline">Order Status</a>
+            <a href="#" className="hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap">
+              <Plus className="w-3 h-3" /> <span className="hidden xs:inline">Post a Job</span><span className="xs:hidden">Post</span>
             </a>
             {!user && (
               <Link href="/become-a-vendor"
-                className="hover:text-white transition flex items-center gap-1">
-                <Plus className="w-3 h-3" /> Become a vendor
+                className="hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap">
+                <Plus className="w-3 h-3" /> <span className="hidden phone:inline">Become a vendor</span><span className="phone:hidden">Vendor</span>
               </Link>
             )}
           </div>
@@ -67,15 +67,15 @@ export default function MarketplaceHeader({ defaultQuery = '' }: Props) {
 
       {/* ── 2. Main header ── */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-[1440px] mx-auto px-[46px] h-[80px] flex items-center gap-6">
+        <div className="app-container min-h-[68px] sm:min-h-[80px] py-3 flex items-center gap-3 lg:gap-6">
           {/* Logo + city */}
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0 min-w-0">
             <Link href="/"><VayilLogo size={36} textSize="text-xl" /></Link>
-            <CityDropdown />
+            <CityDropdown responsive />
           </div>
 
           {/* Centre nav */}
-          <nav className="hidden lg:flex items-center gap-8 text-sm font-medium text-navy ml-8">
+          <nav className="hidden xl:flex items-center gap-8 text-sm font-medium text-navy ml-8">
             <a href="#" className="hover:text-orange transition">Download App</a>
             <Link href="/#how-it-works" className="hover:text-orange transition">How it works</Link>
             <Link href="/become-a-vendor" className="hover:text-orange transition">For Vendors</Link>
@@ -106,7 +106,7 @@ export default function MarketplaceHeader({ defaultQuery = '' }: Props) {
                 <Avatar name={user.name} src={user.profile_image} size={8} />
                 <span className="text-sm font-medium text-navy">{user.name.split(' ')[0]}</span>
               </button>
-              <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <div className="hidden group-hover:block absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 z-50">
                 <div className="p-2">
                   {user.type === 'vendor' ? (
                     <>
@@ -132,7 +132,7 @@ export default function MarketplaceHeader({ defaultQuery = '' }: Props) {
             </div>
           ) : (
             <button onClick={() => { setLoginTab('customer'); setLoginOpen(true) }}
-              className="bg-[#183954] text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
+              className="bg-[#183954] text-white px-3 sm:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
               Sign in
             </button>
           )}

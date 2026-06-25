@@ -255,7 +255,7 @@ function AppBadges({ dark = false }: { dark?: boolean }) {
     ? 'border border-white/30 text-white hover:bg-white/10'
     : 'border border-gray-300 text-navy hover:bg-gray-50'
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-3">
       <a href="#" aria-label="Download on the App Store"
         className={`inline-flex items-center gap-2.5 px-3.5 py-2 rounded-lg ${base} text-xs font-medium transition`}>
         <AppleLogo className="w-6 h-6 shrink-0" />
@@ -341,18 +341,18 @@ export default function HomePage() {
 
       {/* ── 1. Top announcement bar ── */}
       <div className="bg-[#183954] text-white text-xs">
-        <div className="max-w-[1440px] mx-auto px-[46px] h-[30px] flex items-center justify-between">
-          <span className="text-white/70">Alerts and Promotion banners</span>
-          <div className="flex items-center gap-6 text-white/80">
-            <a href="#" className="hover:text-white transition">Weekly Offers</a>
-            <a href="#" className="hover:text-white transition">Order Status</a>
-            <a href="#" className="hover:text-white transition flex items-center gap-1">
-              <Plus className="w-3 h-3" /> Post a Job
+        <div className="app-container min-h-[30px] py-1 flex items-center justify-between gap-3">
+          <span className="text-white/70 hidden sm:inline">Alerts and Promotion banners</span>
+          <div className="flex items-center gap-3 sm:gap-6 text-white/80 ml-auto min-w-0">
+            <a href="#" className="hover:text-white transition hidden md:inline">Weekly Offers</a>
+            <a href="#" className="hover:text-white transition hidden md:inline">Order Status</a>
+            <a href="#" className="hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap">
+              <Plus className="w-3 h-3" /> <span className="hidden xs:inline">Post a Job</span><span className="xs:hidden">Post</span>
             </a>
             {!user && (
               <Link href="/become-a-vendor"
-                className="hover:text-white transition flex items-center gap-1">
-                <Plus className="w-3 h-3" /> Become a vendor
+                className="hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap">
+                <Plus className="w-3 h-3" /> <span className="hidden phone:inline">Become a vendor</span><span className="phone:hidden">Vendor</span>
               </Link>
             )}
           </div>
@@ -361,15 +361,15 @@ export default function HomePage() {
 
       {/* ── 2. Main header ── */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-[1440px] mx-auto px-[46px] h-[80px] flex items-center gap-6">
+        <div className="app-container min-h-[68px] sm:min-h-[80px] py-3 flex items-center gap-3 lg:gap-6">
           {/* Logo + city */}
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0 min-w-0">
             <Link href="/"><VayilLogo size={36} textSize="text-xl" /></Link>
-            <CityDropdown />
+            <CityDropdown responsive />
           </div>
 
           {/* Centre nav */}
-          <nav className="hidden lg:flex items-center gap-8 text-sm font-medium text-navy ml-8">
+          <nav className="hidden xl:flex items-center gap-8 text-sm font-medium text-navy ml-8">
             <a href="#" className="hover:text-orange transition">Download App</a>
             <a href="#how-it-works" className="hover:text-orange transition">How it works</a>
             <Link href="/become-a-vendor" className="hover:text-orange transition">For Vendors</Link>
@@ -400,7 +400,7 @@ export default function HomePage() {
                 <Avatar name={user.name} src={user.profile_image} size={8} />
                 <span className="text-sm font-medium text-navy">{user.name.split(' ')[0]}</span>
               </button>
-              <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <div className="hidden group-hover:block absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 z-50">
                 <div className="p-2">
                   {user.type === 'vendor' ? (
                     <>
@@ -426,7 +426,7 @@ export default function HomePage() {
             </div>
           ) : (
             <button onClick={() => { setLoginTab('customer'); setLoginOpen(true) }}
-              className="bg-[#183954] text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
+              className="bg-[#183954] text-white px-3 sm:px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-navy-700 transition shrink-0">
               Sign in
             </button>
           )}
@@ -436,11 +436,11 @@ export default function HomePage() {
       {/* ── 3. Popular services bar ── */}
       <div className="relative overflow-hidden bg-orange-100/80 border-y border-orange-200/60">
         <div className="absolute inset-0 bg-orange/15 pointer-events-none" />
-        <div className="relative max-w-[1440px] mx-auto px-[46px] h-[44px] flex items-center gap-6 text-sm">
-          <span className="font-bold text-navy tracking-wide uppercase text-xs">Popular Services:</span>
+        <div className="relative app-container min-h-[44px] py-2 flex items-center gap-4 sm:gap-6 text-sm overflow-x-auto whitespace-nowrap">
+          <span className="font-bold text-navy tracking-wide uppercase text-xs shrink-0">Popular Services:</span>
           {POPULAR.map((s, i) => (
             <button key={s} onClick={() => goToCategory(s)}
-              className="text-navy hover:text-orange font-medium transition">
+              className="text-navy hover:text-orange font-medium transition shrink-0">
               {s}
             </button>
           ))}
@@ -448,7 +448,7 @@ export default function HomePage() {
       </div>
 
       {/* ── 4. Hero banner ── */}
-      <section className="bg-[#f7f4ee] h-[clamp(430px,43.7vw,560px)] px-[46px] rounded-b-[30px] relative overflow-hidden flex items-center">
+      <section className="bg-[#f7f4ee] min-h-[460px] sm:min-h-[520px] lg:h-[clamp(430px,43.7vw,560px)] px-4 sm:px-6 lg:px-[46px] rounded-b-[30px] relative overflow-hidden flex items-center">
         {/* Background image */}
         <div className="absolute inset-0">
           <img
@@ -461,9 +461,9 @@ export default function HomePage() {
 
         <div className="max-w-[1440px] w-full mx-auto flex items-center justify-between gap-8 relative z-10">
           {/* Left text */}
-          <div className="max-w-[440px] py-16">
+          <div className="max-w-[440px] py-12 sm:py-16">
             <p className="text-xs font-bold tracking-[0.18em] text-orange uppercase mb-3">Coimbatore pilot</p>
-            <h1 className="text-[44px] font-semibold text-navy leading-[1.08] mb-4">
+            <h1 className="text-[34px] xs:text-[38px] sm:text-[44px] font-semibold text-navy leading-[1.08] mb-4">
               Renovation Without<br />the Usual Chaos.
             </h1>
             <p className="text-navy/75 text-sm mb-8 leading-relaxed max-w-[390px]">
@@ -482,7 +482,7 @@ export default function HomePage() {
 
       {/* ── 5. Trust bar ── */}
       <div className="bg-white border-y border-gray-100">
-        <div className="max-w-[1440px] mx-auto px-[46px] py-8">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px] py-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {TRUST_PILLARS.map(({ title, desc, icon: Icon }) => (
               <div key={title} className="flex items-start gap-3 rounded-2xl bg-[#F4F7FA] border border-gray-100 p-4">
@@ -501,9 +501,9 @@ export default function HomePage() {
 
       {/* ── 5b. Personalized logged-in rail ── */}
       {user && (
-        <section className="bg-orange/5 border-b border-orange/10 py-8 px-[46px]">
+        <section className="bg-orange/5 border-b border-orange/10 py-8 px-4 sm:px-6 lg:px-[46px]">
           <div className="max-w-[1440px] mx-auto">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 mb-5">
               <div>
                 <h2 className="text-lg font-bold text-navy">
                   Welcome back, {user.name.split(' ')[0]}! 👋
@@ -551,7 +551,7 @@ export default function HomePage() {
             )}
 
             {user.type === 'vendor' && (
-              <div className="mt-4 bg-navy rounded-2xl p-5 flex items-center justify-between text-white">
+              <div className="mt-4 bg-navy rounded-2xl p-5 flex flex-col xs:flex-row xs:items-center xs:justify-between gap-4 text-white">
                 <div>
                   <p className="font-bold">Vendor Studio</p>
                   <p className="text-white/60 text-sm mt-0.5">Manage your listing, enquiries & earnings</p>
@@ -567,7 +567,7 @@ export default function HomePage() {
       )}
 
       {/* ── 6. Quick Service Categories ── */}
-      <section className="bg-[#F4F7FA] py-20 px-[46px]">
+      <section className="bg-[#F4F7FA] py-20 px-4 sm:px-6 lg:px-[46px]">
         <div className="max-w-[1440px] mx-auto">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 lg:gap-8 mb-10">
             <div>
@@ -617,12 +617,12 @@ export default function HomePage() {
 
       {/* ── 7. Quick Link Cards + Promo Banner ── */}
       <section className="bg-white py-0">
-        <div className="max-w-[1440px] mx-auto px-[46px]">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[46px]">
           {/* 3 quick link cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 py-10">
             {QUICK_LINKS.map(({ tag, title, desc, img, dark }) => (
               <div key={title}
-                className={`rounded-2xl overflow-hidden flex hover:shadow-md transition-shadow cursor-pointer ${dark ? 'bg-[#183954]' : 'bg-[#FAF7F2]'}`}
+                  className={`rounded-2xl overflow-hidden flex flex-col xs:flex-row hover:shadow-md transition-shadow cursor-pointer ${dark ? 'bg-[#183954]' : 'bg-[#FAF7F2]'}`}
                 onClick={() => goToCategory(title)}>
                 <img
                   src={img}
@@ -633,7 +633,7 @@ export default function HomePage() {
                   decoding="async"
                   // v4.5.22 — explicit width/height HTML attrs reserve
                   // pre-CSS layout space; was a Lighthouse CLS culprit.
-                  className="w-[140px] h-[160px] object-cover shrink-0"
+                  className="w-full xs:w-[140px] h-36 xs:h-[160px] object-cover xs:shrink-0"
                 />
                 <div className="flex-1 p-5 flex flex-col justify-center">
                   <p className={`text-[10px] font-bold tracking-widest uppercase mb-1 ${dark ? 'text-orange' : 'text-orange'}`}>{tag}</p>
@@ -652,9 +652,9 @@ export default function HomePage() {
               className="absolute inset-0 w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-[#183954]/90 via-[#183954]/60 to-[#183954]/10" />
-            <div className="relative z-10 p-10 max-w-[560px]">
+            <div className="relative z-10 p-5 sm:p-8 lg:p-10 max-w-[560px]">
               <p className="text-xs font-bold tracking-[0.18em] text-orange uppercase mb-3">Launch offer</p>
-              <h2 className="text-3xl font-bold text-white mb-3">Get 3 Verified Quotes in 48 Hours</h2>
+              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-3">Get 3 Verified Quotes in 48 Hours</h2>
               <p className="text-white/70 text-sm mb-6">
                 Tell us about your project and receive multiple structured quotes from verified vendors. Compare pricing, scope, and timelines before you decide.
               </p>
@@ -668,7 +668,7 @@ export default function HomePage() {
       </section>
 
       {/* ── 8. Verified Service Provider Profiles ── */}
-      <section className="bg-white py-20 px-[46px]">
+      <section className="bg-white py-20 px-4 sm:px-6 lg:px-[46px]">
         <div className="max-w-[1440px] mx-auto">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 lg:gap-8 mb-12">
             <div>
@@ -683,7 +683,7 @@ export default function HomePage() {
             {PROVIDERS.map(({ role, name, projects, desc, avatar }) => (
               <div key={role} className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-gray-100">
                   <h3 className="text-xl font-bold text-navy">{role}</h3>
                   <BadgeCheck className="w-6 h-6 text-orange" />
                 </div>
@@ -715,7 +715,7 @@ export default function HomePage() {
       </section>
 
       {/* ── 9. How it works ── */}
-      <section id="how-it-works" className="bg-orange py-20 px-[46px] relative overflow-hidden">
+      <section id="how-it-works" className="bg-orange py-20 px-4 sm:px-6 lg:px-[46px] relative overflow-hidden">
         <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-10 lg:gap-16 items-start">
           {/* Left ── heading + creative customer-experience snapshot
              The 6 cards on the right describe the PROCESS; this snapshot
@@ -874,8 +874,8 @@ export default function HomePage() {
       </section>
 
       {/* ── 10. Customer Benefits ── */}
-      <section className="bg-white py-20 px-[46px]">
-        <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-10 lg:gap-16 items-center">
+      <section className="bg-white py-20 px-4 sm:px-6 lg:px-[46px]">
+        <div className="max-w-[1440px] mx-auto flex flex-col xl:flex-row gap-10 xl:gap-16 items-center">
           {/* Left content */}
           <div className="flex-1">
             <p className="text-xs font-bold tracking-widest text-orange uppercase mb-3">For Homeowners</p>
@@ -896,7 +896,7 @@ export default function HomePage() {
             <div className="mt-8"><AppBadges /></div>
           </div>
           {/* Right — real image */}
-          <div className="hidden lg:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
+          <div className="hidden xl:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
             <img
               src="/vayil-homeowners-milestone.jpg"
               alt="Indian homeowner documenting renovation milestone progress"
@@ -907,10 +907,10 @@ export default function HomePage() {
       </section>
 
       {/* ── 11. Vendor Value ── */}
-      <section className="bg-[#F4F7FA] py-20 px-[46px]">
-        <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-10 lg:gap-16 items-center">
+      <section className="bg-[#F4F7FA] py-20 px-4 sm:px-6 lg:px-[46px]">
+        <div className="max-w-[1440px] mx-auto flex flex-col xl:flex-row gap-10 xl:gap-16 items-center">
           {/* Left — real image */}
-          <div className="hidden lg:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
+          <div className="hidden xl:block w-[626px] h-[504px] rounded-[30px] overflow-hidden shrink-0">
             <img
               src="/vayil-professionals-growth.jpg"
               alt="Indian service professional preparing project documentation"
@@ -940,7 +940,7 @@ export default function HomePage() {
       </section>
 
       {/* ── 12. Trust Infrastructure ── */}
-      <section className="bg-white py-20 px-[46px]">
+      <section className="bg-white py-20 px-4 sm:px-6 lg:px-[46px]">
         <div className="max-w-[1440px] mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-[0.85fr_1.15fr] gap-10 items-start">
             <div>
@@ -966,8 +966,8 @@ export default function HomePage() {
       </section>
 
       {/* ── 13. App Download CTA ── */}
-      <section className="bg-[#F4F7FA] py-14 px-[46px]">
-        <div className="max-w-[1440px] mx-auto rounded-2xl bg-white border border-gray-100 p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <section className="bg-[#F4F7FA] py-14 px-4 sm:px-6 lg:px-[46px]">
+        <div className="max-w-[1440px] mx-auto rounded-2xl bg-white border border-gray-100 p-5 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div>
             <p className="text-xs font-bold tracking-[0.18em] text-orange uppercase mb-3">Mobile workflow</p>
             <h2 className="text-[28px] sm:text-[34px] font-bold text-navy mb-3">Manage Your Home Project on the Go</h2>
@@ -982,7 +982,7 @@ export default function HomePage() {
       </section>
 
       {/* ── 14. Final CTA ── */}
-      <section className="bg-[#183954] py-20 px-[46px]">
+      <section className="bg-[#183954] py-20 px-4 sm:px-6 lg:px-[46px]">
         <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-8">
           <div className="max-w-[720px]">
             <p className="text-xs font-bold tracking-[0.18em] text-orange uppercase mb-3">Start with clarity</p>
@@ -1007,7 +1007,7 @@ export default function HomePage() {
       </section>
 
       {/* ── 15. Blogs From Community ── */}
-      <section className="bg-white py-20 px-[46px]">
+      <section className="bg-white py-20 px-4 sm:px-6 lg:px-[46px]">
         <div className="max-w-[1440px] mx-auto">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 lg:gap-8 mb-10">
             <div>

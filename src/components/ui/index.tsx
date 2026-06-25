@@ -141,7 +141,7 @@ interface EmptyProps {
 }
 export function EmptyState({ icon: Icon, title, description, action }: EmptyProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+    <div className="flex flex-col items-center justify-center px-3 py-12 sm:py-16 gap-4 text-center">
       {Icon && (
         <div className="w-16 h-16 rounded-2xl bg-navy-50 flex items-center justify-center">
           <Icon className="w-8 h-8 text-[var(--text-secondary)]" />
@@ -200,9 +200,9 @@ export function Amount({ value, size='md', compact }: { value: number; size?: 's
 // ── Info row ────────────────────────────────────────────────
 export function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2 border-b border-[var(--border)] last:border-0">
+    <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-1 xs:gap-4 py-2 border-b border-[var(--border)] last:border-0">
       <span className="text-sm text-[var(--text-secondary)] shrink-0">{label}</span>
-      <span className="text-sm font-semibold text-navy text-right">{value}</span>
+      <span className="text-sm font-semibold text-navy xs:text-right break-words">{value}</span>
     </div>
   )
 }
@@ -235,15 +235,15 @@ export function Modal({ open, onClose, title, children, size='md' }: ModalProps)
   if (!open) return null
   const widths = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' }
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
-      <div className={cn('bg-white rounded-3xl w-full shadow-2xl animate-slide-up', widths[size])}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-3 py-4 sm:p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
+      <div className={cn('bg-white rounded-t-3xl sm:rounded-3xl w-full max-h-[92dvh] overflow-y-auto shadow-2xl animate-slide-up', widths[size])}>
         {title && (
-          <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[var(--border)]">
+          <div className="flex items-center justify-between gap-3 px-4 sm:px-6 pt-5 sm:pt-6 pb-4 border-b border-[var(--border)]">
             <h3 className="heading-md">{title}</h3>
             <button onClick={onClose} className="btn-ghost btn-sm rounded-full p-2">✕</button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="p-4 sm:p-6">{children}</div>
       </div>
     </div>
   )
@@ -254,19 +254,19 @@ export function PageHeader({ title, subtitle, action, back }: {
   title: string; subtitle?: string; action?: React.ReactNode; back?: () => void
 }) {
   return (
-    <div className="flex items-center justify-between mb-6">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+      <div className="flex items-center gap-3 min-w-0">
         {back && (
           <button onClick={back} className="w-9 h-9 rounded-xl bg-white border border-[var(--border)] flex items-center justify-center hover:bg-navy-50 transition">
             <span className="text-navy">←</span>
           </button>
         )}
-        <div>
+        <div className="min-w-0">
           <h1 className="heading-lg">{title}</h1>
           {subtitle && <p className="body-sm mt-0.5">{subtitle}</p>}
         </div>
       </div>
-      {action}
+      {action && <div className="w-full sm:w-auto flex flex-col xs:flex-row gap-2 sm:justify-end">{action}</div>}
     </div>
   )
 }
@@ -309,7 +309,7 @@ export function OTPInput({ value, onChange, length=6 }: { value: string; onChang
     if (c && i < length - 1) refs.current[i+1]?.focus()
   }
   return (
-    <div className="flex gap-3 justify-center">
+    <div className="flex gap-1.5 xs:gap-2 sm:gap-3 justify-center">
       {digits.map((d, i) => (
         <input
           key={i}

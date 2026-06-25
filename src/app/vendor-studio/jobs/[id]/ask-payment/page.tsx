@@ -75,17 +75,17 @@ export default function AskPaymentPage() {
               const on = isSelected('milestone', m.id)
               return (
                 <button key={m.id} onClick={() => toggle(sel)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
+                  className={`w-full flex flex-col xs:flex-row xs:items-center gap-3 p-3 rounded-xl border transition text-left ${
                     on ? 'border-orange bg-orange/5' : 'border-gray-200 hover:border-gray-300'
                   }`}>
                   <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${on ? 'bg-orange border-orange' : 'border-gray-300'}`}>
                     {on && <span className="text-white text-xs">✓</span>}
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-navy">{m.title}</p>
                     <p className="text-xs text-gray-500">{m.percentage}% · {m.days} days</p>
                   </div>
-                  <span className="text-sm font-bold text-navy">{formatCurrency(m.amount)}</span>
+                  <span className="text-sm font-bold text-navy xs:ml-auto">{formatCurrency(m.amount)}</span>
                 </button>
               )
             })}
@@ -102,18 +102,18 @@ export default function AskPaymentPage() {
               const on = isSelected('material', m.id)
               return (
                 <button key={m.id} onClick={() => toggle(sel)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
+                  className={`w-full flex flex-col xs:flex-row xs:items-center gap-3 p-3 rounded-xl border transition text-left ${
                     on ? 'border-orange bg-orange/5' : 'border-gray-200 hover:border-gray-300'
                   }`}>
                   <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${on ? 'bg-orange border-orange' : 'border-gray-300'}`}>
                     {on && <span className="text-white text-xs">✓</span>}
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-navy">{m.name}</p>
                     <p className="text-xs text-gray-500">{m.quantity} {m.unit} × {formatCurrency(m.rate)}</p>
                   </div>
                   <StatusBadge status={m.status} />
-                  <span className="text-sm font-bold text-navy ml-2">{formatCurrency(m.total)}</span>
+                  <span className="text-sm font-bold text-navy xs:ml-2">{formatCurrency(m.total)}</span>
                 </button>
               )
             })}
@@ -128,7 +128,7 @@ export default function AskPaymentPage() {
       )}
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 sticky bottom-4 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1">
           <span className="text-sm text-gray-500">Total Request</span>
           <span className="text-lg font-bold text-navy">{formatCurrency(total)}</span>
         </div>

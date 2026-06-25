@@ -62,7 +62,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
     <div className="min-h-screen bg-[#F4F7FA]">
       <PublicHeader />
 
-      <div className="max-w-[1440px] mx-auto px-6 lg:px-[46px] py-6 flex gap-6">
+      <div className="app-container py-4 sm:py-6 flex gap-6">
         {/* Sidebar nav (desktop) */}
         <aside className="hidden lg:block w-[220px] shrink-0">
           <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">

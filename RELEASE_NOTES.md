@@ -1,5 +1,123 @@
 # Release Notes
 
+## v4.5.50 - Responsive coverage across target devices (2026-06-25)
+
+### Research Baseline
+
+The responsive target list was selected for the Vayil customer, vendor,
+and ops/admin workflows based on current India web-usage and screen-size
+patterns:
+
+- StatCounter India platform share for May 2026 shows mobile as the
+  primary web platform at 66.85%, with desktop at 32.58% and tablet at
+  0.57%.
+  Source: https://gs.statcounter.com/platform-market-share/desktop-mobile-tablet/india
+- StatCounter India mobile screen-resolution share for May 2026 shows
+  360x800 as the leading mobile resolution at 18.55%, followed by
+  393x873 at 7.77%, 360x804 at 4.08%, 393x876 at 3.82%, and 432x960 at
+  3.08%.
+  Source: https://gs.statcounter.com/screen-resolution-stats/mobile/india
+- StatCounter India desktop screen-resolution share for May 2026 shows
+  1366x768 at 8.02% and 1536x864 at 7.01%, with 1920x1080 next at
+  5.67%.
+  Source: https://gs.statcounter.com/screen-resolution-stats/desktop/india
+- StatCounter India tablet screen-resolution data for April 2026 shows
+  tablet usage concentrated around medium-width layouts such as 601x1007
+  and 800x1280, so the app is guarded at 768px and 1024px tablet
+  breakpoints.
+  Source: https://gs.statcounter.com/screen-resolution-stats/tablet/india
+
+### Responsive Device Coverage
+
+The release validates these target viewport widths:
+
+| Class | Widths | Primary users covered |
+|---|---:|---|
+| Small mobile | 320, 360 | Customers browsing/searching, vendors handling work from budget Android phones, login/onboarding flows |
+| Large mobile | 393, 430 | Modern Android/iPhone-class customer and vendor usage, marketplace/vendor detail pages, action-heavy vendor screens |
+| Tablet | 768, 1024 | Vendor review, vendor-studio operations, account/project detail views, admin/ops table review |
+| Desktop/laptop | 1366, 1536 | Admin/ops review, vendor-studio management, customer account and project workflows |
+
+### What Changed
+
+- Added shared Tailwind breakpoints for narrow phones, compact phones,
+  tablets, and wide desktop layouts.
+- Hardened global responsive behavior in `globals.css`:
+  - prevents page-level horizontal overflow
+  - constrains media/forms/cards on 320px screens
+  - adds safer responsive containers and scroll wrappers
+  - protects long text, form controls, and tabular content from breaking
+    the viewport
+- Updated public customer-facing pages:
+  - home page
+  - search
+  - bucket
+  - public vendor profile
+  - become-a-vendor
+  - vendor onboarding landing
+- Updated customer/account pages:
+  - customer login/signup shell compatibility
+  - profile
+  - enquiries
+  - enquiry payment
+  - projects
+  - project details
+  - project materials
+  - project plan
+  - vendor detail from customer flow
+- Updated vendor and vendor-studio pages:
+  - vendor onboarding
+  - bank/profile/earnings/services pages
+  - service add/detail pages
+  - vendor-studio dashboard, listing, setup, earnings, payout
+  - enquiries, quote, jobs, materials, plan, ask-payment, milestones
+- Updated shared layout/header/footer components:
+  - public header and marketplace header collapse later on wide layouts
+    to avoid cramped navigation
+  - customer, account, vendor, and vendor-studio shells now preserve
+    mobile sidebar behavior
+  - footer and page wrappers fit narrow mobile without horizontal bleed
+- Fixed route handling that affected responsive rendering:
+  - middleware no longer treats `/vendors/*` public routes as protected
+    `/vendor/*` routes
+  - legacy rewrites in `next.config.js` are narrowed so app pages render
+    correctly instead of being captured by broad API rewrite patterns
+
+### User Impact
+
+- Customers can browse, search, compare vendors, manage bucket items,
+  view projects, and complete payment-related screens on 320px through
+  desktop layouts without clipped controls or sideways page overflow.
+- Vendors can complete onboarding, manage services, respond to enquiries,
+  review job details, manage plans/materials, and request payments from
+  mobile, tablet, and desktop layouts.
+- Admin/ops users retain horizontally scrollable review tables where
+  needed, while the login/header/action layout remains usable on mobile
+  and tablet screens.
+
+### Verification
+
+Validation completed on the rebased `main` branch before release:
+
+```bash
+git diff --check
+npm run lint
+npm run build
+```
+
+Lint completed with existing warnings only:
+
+- pre-existing `react-hooks/exhaustive-deps` warnings
+- pre-existing `@next/next/no-img-element` warnings
+
+Final responsive browser audit passed:
+
+```text
+Responsive audit passed: 63 routes x 8 viewports (504 checks)
+```
+
+---
+
 ## v4.5.49 - Align vendor approval with existing admin module (2026-06-25)
 
 ### Why

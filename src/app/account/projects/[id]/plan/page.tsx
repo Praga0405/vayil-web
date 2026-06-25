@@ -104,10 +104,10 @@ export default function CustomerPlanApprovalPage() {
               <div className="w-7 h-7 rounded-full bg-orange/10 text-orange flex items-center justify-center text-xs font-bold shrink-0">
                 {i + 1}
               </div>
-              <div className="flex-1">
-                <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-1 xs:gap-3">
                   <p className="text-sm font-semibold text-navy">{m.title}</p>
-                  <p className="text-sm font-bold text-navy shrink-0">{formatCurrency(m.amount)}</p>
+                  <p className="text-sm font-bold text-navy xs:shrink-0">{formatCurrency(m.amount)}</p>
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {m.days} day{m.days !== 1 ? 's' : ''} · {m.percentage}% of total
@@ -121,7 +121,7 @@ export default function CustomerPlanApprovalPage() {
 
       {/* Actions */}
       {!showReject ? (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 flex gap-3 sticky bottom-4">
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 flex flex-col xs:flex-row gap-3 sticky bottom-4">
           <Button full onClick={approve} loading={pending === 'approve'}>
             <CheckCircle className="w-4 h-4" /> Approve Plan
           </Button>
@@ -134,7 +134,7 @@ export default function CustomerPlanApprovalPage() {
           <Textarea label="What would you like the vendor to change?" rows={3}
             value={reason} onChange={e => setReason(e.target.value)}
             placeholder="e.g. Painting should come before tiling, swap milestones 3 and 4." />
-          <div className="flex gap-3">
+          <div className="flex flex-col xs:flex-row gap-3">
             <Button full variant="outline" onClick={() => setShowReject(false)}>Cancel</Button>
             <Button full onClick={reject} loading={pending === 'reject'}>Send Revision Request</Button>
           </div>

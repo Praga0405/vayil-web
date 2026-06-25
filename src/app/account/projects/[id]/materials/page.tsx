@@ -121,7 +121,7 @@ export default function CustomerMaterialsPage() {
       )}
 
       {state.locked && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center">
+        <div className="bg-white border border-gray-100 rounded-2xl p-6 sm:p-8 text-center">
           <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Lock className="w-8 h-8 text-gray-400" />
           </div>
@@ -142,7 +142,7 @@ export default function CustomerMaterialsPage() {
 
       {!state.locked && unpaid.length > 0 && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 mb-3">
             <h2 className="text-base font-bold text-navy">Unpaid items</h2>
             <p className="text-xs text-gray-500">Select to include in payment</p>
           </div>
@@ -151,17 +151,17 @@ export default function CustomerMaterialsPage() {
               const on = selected.includes(m.id)
               return (
                 <button key={m.id} onClick={() => toggle(m.id)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition text-left ${
+                  className={`w-full flex flex-col xs:flex-row xs:items-center gap-3 p-3 rounded-xl border transition text-left ${
                     on ? 'border-orange bg-orange/5' : 'border-gray-200 hover:border-gray-300'
                   }`}>
                   <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${on ? 'bg-orange border-orange' : 'border-gray-300'}`}>
                     {on && <span className="text-white text-xs">✓</span>}
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-navy">{m.name}</p>
                     <p className="text-xs text-gray-500">{m.quantity} {m.unit} × {formatCurrency(m.rate)}</p>
                   </div>
-                  <span className="text-sm font-bold text-navy">{formatCurrency(m.total)}</span>
+                  <span className="text-sm font-bold text-navy xs:ml-auto">{formatCurrency(m.total)}</span>
                 </button>
               )
             })}
@@ -174,13 +174,13 @@ export default function CustomerMaterialsPage() {
           <h2 className="text-base font-bold text-navy mb-3">Already paid / awaiting</h2>
           <div className="space-y-2">
             {[...awaiting, ...paid].map(m => (
-              <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 opacity-70">
-                <div className="flex-1">
+              <div key={m.id} className="flex flex-col xs:flex-row xs:items-center gap-3 p-3 rounded-xl border border-gray-100 opacity-70">
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-navy">{m.name}</p>
                   <p className="text-xs text-gray-500">{m.quantity} {m.unit} × {formatCurrency(m.rate)}</p>
                 </div>
                 <StatusBadge status={m.status} />
-                <span className="text-sm font-bold text-navy ml-2">{formatCurrency(m.total)}</span>
+                <span className="text-sm font-bold text-navy xs:ml-2">{formatCurrency(m.total)}</span>
               </div>
             ))}
           </div>
@@ -213,7 +213,7 @@ export default function CustomerMaterialsPage() {
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div className="flex items-center justify-between text-sm">
+    <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 text-sm">
       <span className={bold ? 'font-bold text-navy' : 'text-gray-500'}>{label}</span>
       <span className={bold ? 'font-bold text-navy text-base' : 'text-navy'}>{value}</span>
     </div>

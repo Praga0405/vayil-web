@@ -92,7 +92,7 @@ export default function ProjectDetailPage() {
       </button>
 
       {/* Header card */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-6">
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-navy">Project #{order.order_id}</h1>
@@ -105,11 +105,11 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Two-column main workspace */}
-      <div className="grid lg:grid-cols-[1fr,340px] gap-6 items-start">
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start">
         {/* Left: plan, milestones, materials */}
         <div className="space-y-6 min-w-0">
-          <section className="bg-white border border-gray-100 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
+          <section className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-6">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 mb-4">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-orange" />
                 <h2 className="text-base font-bold text-navy">Implementation plan</h2>
@@ -127,16 +127,16 @@ export default function ProjectDetailPage() {
                 </p>
                 <ol className="space-y-3">
                   {plan.map((m, i) => (
-                    <li key={m.plan_id} className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
+                    <li key={m.plan_id} className="flex flex-col xs:flex-row xs:items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
                       <div className={cn('w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center shrink-0',
                         m.vendor_status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-orange/10 text-orange')}>
                         {i + 1}
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <p className="font-semibold text-navy text-sm">{m.title}</p>
                         <p className="text-xs text-gray-500">{m.days || 0} day{(m.days ?? 0) === 1 ? '' : 's'} · {m.percentage || 0}% of total</p>
                       </div>
-                      <p className="font-bold text-navy text-sm">{formatCurrency(Number(m.amount || 0))}</p>
+                      <p className="font-bold text-navy text-sm xs:ml-auto">{formatCurrency(Number(m.amount || 0))}</p>
                     </li>
                   ))}
                 </ol>
@@ -149,8 +149,8 @@ export default function ProjectDetailPage() {
             )}
           </section>
 
-          <section className="bg-white border border-gray-100 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
+          <section className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-6">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 mb-4">
               <div className="flex items-center gap-2">
                 <Boxes className="w-5 h-5 text-orange" />
                 <h2 className="text-base font-bold text-navy">Materials</h2>
@@ -166,12 +166,12 @@ export default function ProjectDetailPage() {
             ) : (
               <ul className="space-y-2 text-sm">
                 {materials.map((m: any) => (
-                  <li key={m.material_id} className="flex items-center justify-between border-b border-gray-100 pb-2 last:border-0">
-                    <div>
+                  <li key={m.material_id} className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-2 border-b border-gray-100 pb-2 last:border-0">
+                    <div className="min-w-0">
                       <p className="font-semibold text-navy">{m.name}</p>
                       <p className="text-xs text-gray-500">{m.quantity} {m.unit} × {formatCurrency(Number(m.rate))}</p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 xs:shrink-0">
                       <span className="text-xs uppercase font-bold tracking-widest text-gray-400">{m.status}</span>
                       <span className="font-bold text-navy">{formatCurrency(Number(m.total))}</span>
                     </div>

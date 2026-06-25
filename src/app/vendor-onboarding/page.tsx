@@ -107,7 +107,7 @@ export default function VendorOnboardingWizard() {
         </div>
 
         {/* Stepper */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-2 overflow-x-auto">
+        <div className="bg-white border border-gray-100 rounded-2xl p-3 sm:p-4 flex items-center gap-2 overflow-x-auto">
           {STEPS.map((s, i) => {
             const Icon = s.icon
             const active = i === stepIdx
@@ -130,7 +130,7 @@ export default function VendorOnboardingWizard() {
         </div>
 
         {/* Step content */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
+        <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5 space-y-4">
           {step === 'business' && (
             <>
               <h2 className="text-base font-bold text-navy">Business Profile</h2>
@@ -146,7 +146,7 @@ export default function VendorOnboardingWizard() {
             <>
               <h2 className="text-base font-bold text-navy">Services You Offer</h2>
               <p className="text-xs text-gray-500">Add tags for what your business does. Type and press Enter.</p>
-              <div className="flex gap-2">
+              <div className="flex flex-col xs:flex-row gap-2">
                 <input value={tagInput} onChange={e => setTagInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
                   placeholder="e.g. AC servicing"
@@ -227,7 +227,7 @@ export default function VendorOnboardingWizard() {
 
         {/* Footer nav */}
         {step !== 'submitted' && (
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
             <Button variant="outline" onClick={prev} disabled={stepIdx === 0}>
               <ChevronLeft className="w-4 h-4" /> Back
             </Button>

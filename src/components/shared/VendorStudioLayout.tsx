@@ -39,7 +39,7 @@ export default function VendorStudioLayout({ children }: { children: React.React
     <div className="min-h-screen bg-gray-50">
       <PublicHeader />
 
-      <div className="max-w-[1440px] mx-auto px-4 lg:px-[46px] py-6 flex gap-6">
+      <div className="app-container py-4 sm:py-6 flex gap-6">
         {/* Desktop sidebar */}
         <aside className="hidden lg:flex flex-col w-[220px] shrink-0">
           <div className="bg-white border border-gray-100 rounded-2xl p-3 sticky top-24">

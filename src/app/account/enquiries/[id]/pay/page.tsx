@@ -226,12 +226,12 @@ function OptionCard({ active, onClick, title, subtitle, amount, children }: any)
   return (
     <button onClick={onClick}
       className={`w-full text-left p-4 rounded-2xl border-2 transition ${active ? 'border-orange bg-orange/5' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
+        <div className="flex items-start xs:items-center gap-3 min-w-0">
           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${active ? 'border-orange' : 'border-gray-300'}`}>
             {active && <div className="w-2 h-2 rounded-full bg-orange" />}
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="font-semibold text-navy text-sm">{title}</p>
             <p className="text-xs text-gray-500">{subtitle}</p>
           </div>
@@ -245,7 +245,7 @@ function OptionCard({ active, onClick, title, subtitle, amount, children }: any)
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div className="flex items-center justify-between text-sm">
+    <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 text-sm">
       <span className={bold ? 'font-bold text-navy' : 'text-gray-500'}>{label}</span>
       <span className={bold ? 'font-bold text-navy text-base' : 'text-navy'}>{value}</span>
     </div>

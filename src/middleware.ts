@@ -14,7 +14,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Customer portal
-  if (pathname.startsWith('/customer')) {
+  if (pathname === '/customer' || pathname.startsWith('/customer/')) {
     if (CUSTOMER_PUBLIC.some(p => pathname.startsWith(p))) return NextResponse.next()
     const tok = request.cookies.get('vayil_token')?.value
       || request.headers.get('x-vayil-token')
@@ -22,7 +22,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Vendor portal
-  if (pathname.startsWith('/vendor')) {
+  if (pathname === '/vendor' || pathname.startsWith('/vendor/')) {
     if (VENDOR_PUBLIC.some(p => pathname.startsWith(p))) return NextResponse.next()
     const tok = request.cookies.get('vayil_token')?.value
       || request.headers.get('x-vayil-token')

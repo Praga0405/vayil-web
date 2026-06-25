@@ -167,7 +167,7 @@ export default function VendorOnboardingPage() {
         </div>
         <p className="text-center text-white text-sm font-semibold mb-4">{STEPS[step]}</p>
 
-        <div className="bg-white rounded-3xl p-8 animate-slide-up">
+        <div className="bg-white rounded-3xl p-5 sm:p-8 animate-slide-up">
           {/* Step 0 — Company */}
           {step === 0 && (
             <div className="space-y-4">
@@ -178,7 +178,7 @@ export default function VendorOnboardingPage() {
                 onChange={e => setCompany(c => ({ ...c, description: e.target.value }))} />
               <Input label="Business Email" type="email" value={company.email_id}
                 onChange={e => setCompany(c => ({ ...c, email_id: e.target.value }))} />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
                 <Select label="State" value={company.state_id}
                   onChange={e => {
                     setCompany(c => ({ ...c, state_id: e.target.value, city_id: '' }))
@@ -246,7 +246,7 @@ export default function VendorOnboardingPage() {
                   ))}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
                 <Input label="Start Time" type="time" value={availability.start_time}
                   onChange={e => setAvailability(a => ({ ...a, start_time: e.target.value }))} />
                 <Input label="End Time" type="time" value={availability.end_time}
@@ -282,7 +282,7 @@ export default function VendorOnboardingPage() {
             </div>
           )}
 
-          <div className="flex gap-3 mt-6">
+          <div className="flex flex-col xs:flex-row gap-3 mt-6">
             {step > 0 && (
               <Button variant="outline" onClick={() => setStep(s => s - 1)} disabled={loading}>Back</Button>
             )}

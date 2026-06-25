@@ -179,16 +179,68 @@ const nextConfig = {
     // Both use only the standard path-to-regexp shapes that Next.js
     // supports unambiguously: `:name(regex)` for the letter-anchored
     // first segment and `:rest*` for the optional remainder.
-    const forward = (prefix) => ([
+    const endpointPattern = (exclude = []) =>
+      `${exclude.map((name) => `(?!${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$)`).join('')}[A-Za-z_][^/]*`
+    const forward = (prefix, exclude = []) => {
+      const endpoint = endpointPattern(exclude)
+      return [
       {
-        source: `/${prefix}/:endpoint([A-Za-z_][^/]*)`,
+        source: `/${prefix}/:endpoint(${endpoint})`,
         destination: `/api/${prefix}/:endpoint`,
       },
       {
-        source: `/${prefix}/:endpoint([A-Za-z_][^/]*)/:rest*`,
+        source: `/${prefix}/:endpoint(${endpoint})/:rest*`,
         destination: `/api/${prefix}/:endpoint/:rest*`,
       },
-    ])
+      ]
+    }
+    const forwardOnly = (prefix, endpoints) =>
+      endpoints.flatMap((endpoint) => ([
+        {
+          source: `/${prefix}/${endpoint}`,
+          destination: `/api/${prefix}/${endpoint}`,
+        },
+        {
+          source: `/${prefix}/${endpoint}/:rest*`,
+          destination: `/api/${prefix}/${endpoint}/:rest*`,
+        },
+      ]))
+    const customerLegacyEndpoints = [
+      'register', 'verifyCustomerOTP', 'logincustomerWithOTP',
+      'verifyLogincustomerOTP', 'resendcustomerOTP', 'getSettings',
+      'upload_files', 'ServiceList', 'ServiceInfo', 'vendorInfo',
+      'enquiryList', 'sendEnquiry', 'QuotationList', 'updateQuotation',
+      'getPlan', 'CustomerupdatePlan', 'placeOrder', 'orderDetails',
+      'getPaymentDetails', 'NeedPaymentSummary', 'payment_update',
+      'finalStep', 'addReview', 'customerNotificationList', 'addToCart',
+      'getCart', 'removeCartItem', 'clearCart',
+    ]
+    const vendorLegacyEndpoints = [
+      'vendorGetSettings', 'step1', 'serviceTagStep', 'step2', 'step3',
+      'step4', 'saveServiceListing', 'updateServiceListing',
+      'getVendorServiceList', 'ServiceStatusUpdate', 'ServiceDetails',
+      'VendorAddServiceTag', 'vendorEnuqiryList',
+      'AcceptEnquiredStatusUpdate', 'vendorRejectEnquiry',
+      'sendQuotationToCustomer', 'createPlan', 'updatePlan',
+      'updatePlanStatus', 'vendorgetPlan', 'vendorPlanDetails',
+      'createAcceptPlan', 'addPlanMaterial', 'editPlanMaterial',
+      'vendorgetMaterial', 'vendorMaterialDetails', 'vendorOrderDetails',
+      'AskPyament', 'vendorPaymentSummary', 'vendorBalance',
+      'getVendorRevenueChart', 'vendorTransactionHistory',
+      'vendorTransHistoryCurMon', 'vendorPayout', 'AddBankDetails',
+      'EditBankDetails', 'GetBankDetails', 'EditBankDetailsReq',
+      'vendorNotificationList',
+    ]
+    const publicVendorSlugs = [
+      'carpentry-1', 'carpentry-2', 'carpentry-3', 'carpentry-4', 'carpentry-5',
+      'electrical-1', 'electrical-2', 'electrical-3', 'electrical-4', 'electrical-5',
+      'plumbing-1', 'plumbing-2', 'plumbing-3', 'plumbing-4', 'plumbing-5',
+      'painting-1', 'painting-2', 'painting-3', 'painting-4', 'painting-5',
+      'home-renovation-1', 'home-renovation-2', 'home-renovation-3', 'home-renovation-4', 'home-renovation-5',
+      'cleaning-1', 'cleaning-2', 'cleaning-3', 'cleaning-4', 'cleaning-5',
+      'interior-design-1', 'interior-design-2', 'interior-design-3', 'interior-design-4', 'interior-design-5',
+      'home-repair-1', 'home-repair-2', 'home-repair-3', 'home-repair-4', 'home-repair-5',
+    ]
     const bareMobilePaths = [
       '/register',
       '/resendVendorOTP',
@@ -240,10 +292,10 @@ const nextConfig = {
     ]
     return {
       afterFiles: [
-        ...forward('customer'),    // legacy mobile customer routes
-        ...forward('vendor'),      // legacy mobile vendor routes
+        ...forwardOnly('customer', customerLegacyEndpoints), // legacy mobile customer routes
+        ...forwardOnly('vendor', vendorLegacyEndpoints),     // legacy mobile vendor routes
         ...forward('customers'),   // canonical customer API
-        ...forward('vendors'),     // canonical vendor API
+        ...forward('vendors', publicVendorSlugs),     // canonical vendor API
         ...forward('auth'),        // OTP send/verify
         ...forward('Admin'),       // admin (camelCase legacy)
         ...forward('admin'),       // admin (lowercase)

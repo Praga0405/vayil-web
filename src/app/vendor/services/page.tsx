@@ -38,8 +38,8 @@ export default function VendorServicesPage() {
 
   return (
     <div className="animate-fade-in space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="heading-lg">My Services</h1>
           <p className="body-sm">{services.length} service{services.length !== 1 ? 's' : ''} listed</p>
         </div>
@@ -61,7 +61,7 @@ export default function VendorServicesPage() {
             const sid = s.id || s.service_id
             const active = serviceIsActive(s)
             return (
-              <div key={sid} className="card flex items-center gap-4">
+              <div key={sid} className="card flex items-center gap-3 sm:gap-4">
                 <div className="w-14 h-14 rounded-xl bg-navy-50 overflow-hidden shrink-0">
                   {s.images?.[0]
                     ? <img src={s.images[0]} className="w-full h-full object-cover" alt={s.title} />
@@ -73,7 +73,7 @@ export default function VendorServicesPage() {
                   {s.price && <p className="text-xs text-orange font-semibold">₹{Number(s.price).toLocaleString('en-IN')}</p>}
                   <StatusBadge status={active ? 'active' : 'inactive'} />
                 </div>
-                <button onClick={() => toggleStatus(sid, active)} className="text-[var(--text-secondary)] hover:text-navy transition">
+                <button onClick={() => toggleStatus(sid, active)} className="text-[var(--text-secondary)] hover:text-navy transition shrink-0">
                   {active ? <ToggleRight className="w-6 h-6 text-green-500" /> : <ToggleLeft className="w-6 h-6" />}
                 </button>
               </div>

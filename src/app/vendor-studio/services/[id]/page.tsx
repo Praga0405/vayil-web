@@ -204,17 +204,17 @@ export default function EditServicePage() {
             <div className="h-px bg-gray-100 my-5" />
 
             <ul className="space-y-2 text-xs">
-              <li className="flex items-center justify-between text-gray-500">
+              <li className="flex items-start justify-between gap-3 text-gray-500">
                 <span>Status</span>
-                <span className="font-semibold text-navy capitalize">{status}</span>
+                <span className="font-semibold text-navy capitalize text-right">{status}</span>
               </li>
-              <li className="flex items-center justify-between text-gray-500">
+              <li className="flex items-start justify-between gap-3 text-gray-500">
                 <span>Photos on file</span>
-                <span className="font-semibold text-navy">{existingImages.length}</span>
+                <span className="font-semibold text-navy text-right">{existingImages.length}</span>
               </li>
-              <li className="flex items-center justify-between text-gray-500">
+              <li className="flex items-start justify-between gap-3 text-gray-500">
                 <span>Pricing</span>
-                <span className="font-semibold text-navy">
+                <span className="font-semibold text-navy text-right">
                   {form.price_type === 'quote_based' ? 'Quote based' : `₹${form.price || '—'}`}
                 </span>
               </li>
@@ -270,7 +270,7 @@ export default function EditServicePage() {
 
             <PageSection title="Photos" description="Add more images or replace existing ones.">
               {existingImages.length > 0 && (
-                <div className="grid grid-cols-3 md:grid-cols-4 gap-3 mb-4">
+                <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-4">
                   {existingImages.map((src, i) => (
                     <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100">
                       <img src={src} alt={`Service photo ${i + 1}`} className="w-full h-full object-cover" />
@@ -298,9 +298,9 @@ export default function EditServicePage() {
               )}
             </PageSection>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex flex-col xs:flex-row xs:items-center xs:justify-end gap-3 pt-2">
               <Link href="/vendor-studio/listing"
-                className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">
+                className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition text-center">
                 Cancel
               </Link>
               <Button loading={saving} onClick={save}>Save Changes</Button>

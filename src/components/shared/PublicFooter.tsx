@@ -21,7 +21,7 @@ interface Props { compact?: boolean }
 export default function PublicFooter({ compact = false }: Props) {
   return (
     <footer className="bg-[#183954] mt-12">
-      <div className="max-w-[1440px] mx-auto px-6 lg:px-[112px] py-10 lg:py-12">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[112px] py-10 lg:py-12">
 
         {/* App-download + addresses — public pages only */}
         {!compact && (
@@ -43,12 +43,12 @@ export default function PublicFooter({ compact = false }: Props) {
         )}
 
         {/* Brand strip — present in both modes */}
-        <div className={`${compact ? '' : 'pt-8'} flex flex-col-reverse md:flex-row md:items-center md:justify-between gap-4`}>
-          <div className="flex items-center gap-3 text-white/60 text-sm">
+        <div className={`${compact ? '' : 'pt-8'} flex flex-col-reverse md:flex-row md:items-center md:justify-between gap-4 min-w-0`}>
+          <div className="flex items-center gap-3 text-white/60 text-sm min-w-0">
             {compact && <VayilLogo size={28} textSize="text-lg" />}
             <p>© 2026 Vayil. All rights reserved.</p>
           </div>
-          <div className="flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
             <div className="flex items-center gap-4">
               {[Youtube, Linkedin, Facebook, Instagram].map((Icon, i) => (
                 <Link key={i} href="#" aria-label="social"
@@ -57,7 +57,7 @@ export default function PublicFooter({ compact = false }: Props) {
                 </Link>
               ))}
             </div>
-            <div className="flex items-center gap-4 text-sm text-white/50">
+            <div className="flex items-center gap-3 sm:gap-4 text-sm text-white/50 flex-wrap">
               <Link href="#" className="hover:text-white transition">Terms</Link>
               <Link href="#" className="hover:text-white transition">Privacy</Link>
               <Link href="#" className="hover:text-white transition">Cookies</Link>

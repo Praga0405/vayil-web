@@ -290,10 +290,10 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
 
   /* ── Render ───────────────────────────────────────────── */
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center px-3 py-4 sm:p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm animate-slide-up overflow-hidden">
+      <div className="relative bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm max-h-[92dvh] animate-slide-up overflow-y-auto overflow-x-hidden">
         <button
           type="button"
           onClick={onClose}
@@ -310,7 +310,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
         </button>
 
         {/* Header */}
-        <div className="bg-navy px-6 pt-8 pb-6 text-white text-center">
+        <div className="bg-navy px-5 sm:px-6 pt-8 pb-6 text-white text-center">
           <div className="flex justify-center mb-3"><VayilIcon size={48} /></div>
           <h2 className="text-xl font-bold">
             {stage === 'phone'  ? 'Welcome to Vayil' :
@@ -337,7 +337,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
         )}
 
         {/* Form body */}
-        <div className="px-6 py-6 space-y-4">
+        <div className="px-4 sm:px-6 py-5 sm:py-6 space-y-4">
           {SHOW_DEV_OTP_BANNER && (stage === 'phone' || stage === 'otp') && (
             <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 font-medium">
               🛠 Dev mode — OTP delivery is bypassed. Enter <span className="font-mono font-bold">{DEV_OTP}</span> to {stage === 'phone' ? 'sign in or sign up' : 'continue'}.
@@ -385,7 +385,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
                   value={otp} autoFocus
                   onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
                   onKeyDown={e => e.key === 'Enter' && verifyOTP()}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-center text-lg font-mono tracking-[0.4em] focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange transition" />
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-center text-lg font-mono tracking-[0.25em] xs:tracking-[0.4em] focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange transition" />
               </div>
               {error && <p className="text-xs text-red-600">{error}</p>}
               <button onClick={verifyOTP} disabled={loading}

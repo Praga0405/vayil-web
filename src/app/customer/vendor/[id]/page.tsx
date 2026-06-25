@@ -91,7 +91,7 @@ export default function VendorProfilePage() {
 
       {/* Hero */}
       <div className="card">
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col xs:flex-row xs:items-start gap-4">
           <div className="w-16 h-16 rounded-2xl bg-navy-50 overflow-hidden shrink-0 flex items-center justify-center">
             {vendor.logo || vendor.profile_image ? (
               <img src={vendor.logo || vendor.profile_image} alt={vendor.company_name} className="w-full h-full object-cover" />
@@ -130,10 +130,10 @@ export default function VendorProfilePage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 bg-white rounded-2xl p-1 border border-[var(--border)]">
+      <div className="flex gap-2 bg-white rounded-2xl p-1 border border-[var(--border)] overflow-x-auto">
         {(['services','portfolio','reviews'] as const).map(t => (
           <button key={t} onClick={() => setActiveTab(t)}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all capitalize ${
+            className={`min-w-[96px] flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all capitalize ${
               activeTab === t ? 'bg-navy text-white' : 'text-[var(--text-secondary)] hover:text-navy'
             }`}>
             {t}
@@ -147,7 +147,7 @@ export default function VendorProfilePage() {
           {services.length === 0 ? (
             <EmptyState icon={Shield} title="No services listed yet" />
           ) : services.map((s: any) => (
-            <div key={s.id || s.service_id} className="card flex items-center gap-4">
+            <div key={s.id || s.service_id} className="card flex flex-col xs:flex-row xs:items-center gap-4">
               <div className="w-14 h-14 bg-navy-50 rounded-xl overflow-hidden shrink-0">
                 {s.images?.[0] ? (
                   <img src={s.images[0]} className="w-full h-full object-cover" alt={s.title} />
@@ -162,7 +162,7 @@ export default function VendorProfilePage() {
                   </p>
                 )}
               </div>
-              <Button size="sm" variant="outline" onClick={() => openEnquiry(s)}>Enquire</Button>
+              <Button size="sm" variant="outline" className="w-full xs:w-auto" onClick={() => openEnquiry(s)}>Enquire</Button>
             </div>
           ))}
         </div>
@@ -173,7 +173,7 @@ export default function VendorProfilePage() {
         portfolio.length === 0 ? (
           <EmptyState icon={ImgIcon} title="No portfolio items" />
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-3">
             {portfolio.map((p: any, i: number) => (
               <div key={i} className="aspect-square rounded-2xl overflow-hidden bg-gray-100">
                 {p.images?.[0] ? (

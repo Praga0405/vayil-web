@@ -24,11 +24,14 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
   const router   = useRouter()
   const { user, clearAuth } = useUserAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const bypassShell = pathname.startsWith('/customer/login') || pathname.startsWith('/customer/signup')
 
   const logout = () => {
     clearAuth()
     router.push('/customer/login')
   }
+
+  if (bypassShell) return <>{children}</>
 
   return (
     <div className="sidebar-layout">
@@ -73,7 +76,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-72 sidebar flex z-10">
+          <aside className="absolute left-0 top-0 bottom-0 w-[min(18rem,88vw)] sidebar flex z-10">
             <div className="p-5 border-b border-navy-600 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-orange flex items-center justify-center">
@@ -126,20 +129,20 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       {/* ── Main Content ── */}
       <div className="main-content">
         {/* Top bar */}
-        <header className="sticky top-0 z-40 bg-white border-b border-[var(--border)] shadow-nav px-4 py-3 flex items-center gap-3">
-          <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-xl hover:bg-gray-100">
+        <header className="sticky top-0 z-40 bg-white border-b border-[var(--border)] shadow-nav px-2 xs:px-3 sm:px-4 py-3 flex items-center gap-2 xs:gap-3 w-full max-w-full overflow-hidden">
+          <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-xl hover:bg-gray-100 shrink-0">
             <Menu className="w-5 h-5 text-navy" />
           </button>
-          <div className="flex-1" />
-          <Link href="/customer/notifications" className="relative p-2 rounded-xl hover:bg-gray-100">
+          <div className="flex-1 min-w-0" />
+          <Link href="/customer/notifications" className="relative p-2 rounded-xl hover:bg-gray-100 shrink-0">
             <Bell className="w-5 h-5 text-navy" />
           </Link>
-          <Link href="/customer/profile">
+          <Link href="/customer/profile" className="shrink-0">
             <Avatar name={user?.name} src={user?.profile_image} size={9} />
           </Link>
         </header>
 
-        <main className="flex-1 p-4 lg:p-6 max-w-6xl mx-auto w-full">
+        <main className="flex-1 p-3 sm:p-4 lg:p-6 max-w-6xl mx-auto w-full min-w-0">
           {children}
         </main>
       </div>

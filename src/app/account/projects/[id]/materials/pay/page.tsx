@@ -228,7 +228,7 @@ export default function MaterialsPaymentPage() {
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1 text-sm">
       <span className={bold ? 'font-bold text-navy' : 'text-gray-500'}>{label}</span>
       <span className={bold ? 'font-bold text-navy text-base' : 'text-navy'}>{value}</span>
     </div>

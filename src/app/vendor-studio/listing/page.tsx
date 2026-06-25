@@ -128,10 +128,10 @@ export default function VendorListingPage() {
         title="My Listing"
         subtitle="Manage your business profile and the services you offer"
         meta={
-          <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 max-w-2xl">
+          <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 max-w-2xl overflow-x-auto">
             {(['profile', 'services', 'reviews'] as Tab[]).map(t => (
               <button key={t} onClick={() => setTab(t)}
-                className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
+                className={`min-w-[136px] flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
                   tab === t ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
                 }`}>
                 {t === 'profile'  ? 'Business Profile'
@@ -162,18 +162,18 @@ export default function VendorListingPage() {
               </div>
               <div className="h-px bg-gray-100 my-5" />
               <ul className="space-y-2 text-xs">
-                <li className="flex items-center justify-between text-gray-500">
+                <li className="flex items-start justify-between gap-3 text-gray-500">
                   <span>Listing visibility</span>
-                  <span className="font-semibold text-navy">Live</span>
+                  <span className="font-semibold text-navy text-right">Live</span>
                 </li>
-                <li className="flex items-center justify-between text-gray-500">
+                <li className="flex items-start justify-between gap-3 text-gray-500">
                   <span>Services live</span>
-                  <span className="font-semibold text-navy">{activeCount} of {services.length}</span>
+                  <span className="font-semibold text-navy text-right">{activeCount} of {services.length}</span>
                 </li>
-                <li className="flex items-center justify-between text-gray-500">
+                <li className="flex items-start justify-between gap-3 text-gray-500">
                   <span>Public profile</span>
                   <Link href={user?.id ? `/vendors/${user.id}` : '/search'}
-                    className="font-semibold text-orange hover:underline">
+                    className="font-semibold text-orange hover:underline text-right">
                     View as customer
                   </Link>
                 </li>
@@ -253,9 +253,9 @@ export default function VendorListingPage() {
                           <p className="text-xs text-gray-500 truncate">{s.category_name || 'Service'}</p>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
+                      <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
                         <StatusBadge status={active ? 'active' : 'inactive'} />
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between xs:justify-end gap-2 w-full xs:w-auto">
                           <button onClick={() => toggleStatus(sid, active)}
                             className="text-gray-400 hover:text-navy transition p-1" aria-label="Toggle status">
                             {active ? <ToggleRight className="w-6 h-6 text-orange" /> : <ToggleLeft className="w-6 h-6" />}
@@ -290,7 +290,7 @@ export default function VendorListingPage() {
                   <li key={r.review_id} className="py-4 flex items-start gap-4">
                     <Avatar name={r.customer_name} src={r.customer_image} size={12} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
                         <p className="font-semibold text-navy">{r.customer_name || `Customer #${r.customer_id}`}</p>
                         <div className="flex">
                           {[1,2,3,4,5].map(n => (
@@ -298,7 +298,7 @@ export default function VendorListingPage() {
                                   className={`w-4 h-4 ${n <= Number(r.rating ?? 0) ? 'fill-orange text-orange' : 'text-gray-300'}`} />
                           ))}
                         </div>
-                        <span className="text-xs text-gray-400 ml-auto">{formatDate(r.created_at)}</span>
+                        <span className="text-xs text-gray-400 sm:ml-auto">{formatDate(r.created_at)}</span>
                       </div>
                       {r.title && <p className="font-semibold text-sm text-navy">{r.title}</p>}
                       {r.comment && <p className="text-sm text-gray-600 mt-1 leading-relaxed">{r.comment}</p>}

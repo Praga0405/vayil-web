@@ -92,7 +92,7 @@ export default function CustomerProfilePage() {
       </div>
 
       {/* Avatar */}
-      <div className="card flex items-center gap-4">
+      <div className="card flex flex-col sm:flex-row sm:items-center gap-4 text-center sm:text-left">
         <ProfileImageUploader
           currentUrl={user?.profile_image}
           name={user?.name}
@@ -103,7 +103,7 @@ export default function CustomerProfilePage() {
             if (user && token) setAuth({ ...user, profile_image: url }, token)
           }}
         />
-        <div>
+        <div className="min-w-0">
           <p className="font-bold text-navy">{user?.name || 'Customer'}</p>
           <p className="text-sm text-[var(--text-secondary)]">+91 {user?.mobile}</p>
         </div>
@@ -114,7 +114,7 @@ export default function CustomerProfilePage() {
         <h2 className="heading-sm">Personal Details</h2>
         <Input label="Full Name"    value={form.name}    onChange={set('name')}    placeholder="Your name" />
         <Input label="Email"        value={form.email}   onChange={set('email')}   placeholder="you@email.com" type="email" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Select label="State" value={form.state_id} onChange={set('state_id')}
             options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
           <Select label="City" value={form.city_id} onChange={set('city_id')}
@@ -126,9 +126,9 @@ export default function CustomerProfilePage() {
       {/* Mobile (read-only) */}
       <div className="card">
         <label className="label">Mobile Number</label>
-        <div className="input bg-gray-50 text-[var(--text-secondary)] flex items-center">
+        <div className="input bg-gray-50 text-[var(--text-secondary)] flex flex-col sm:flex-row sm:items-center gap-2">
           +91 {user?.mobile}
-          <span className="ml-auto text-xs badge badge-success">Verified</span>
+          <span className="sm:ml-auto text-xs badge badge-success">Verified</span>
         </div>
         <p className="text-xs text-[var(--text-muted)] mt-1">Mobile number cannot be changed</p>
       </div>
