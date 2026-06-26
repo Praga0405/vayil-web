@@ -199,9 +199,22 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
 
 vendorRouter.post('/kyc', async (req: AuthRequest, res, next) => {
   try {
-    const { proofType, proofNumber, documentUrl } = req.body;
-    await exec(`UPDATE vendors SET proof_type = :proofType, proof_number = :proofNumber, kyc_document_url = :documentUrl, status = 'kyc_submitted' WHERE vendor_id = :id`, { proofType, proofNumber, documentUrl, id: req.user!.id });
-    ok(res, { message: 'KYC submitted' });
+    const proofType = req.body?.proofType ?? req.body?.proof_type ?? req.body?.kyc_id_type ?? null;
+    const proofNumber = req.body?.proofNumber ?? req.body?.proof_number ?? req.body?.kyc_id_number ?? null;
+    const documentUrl = req.body?.documentUrl ?? req.body?.document_url ?? req.body?.kyc_document_url ?? req.body?.kyc_id_image ?? null;
+    const selfieUrl = req.body?.selfieUrl ?? req.body?.selfie_url ?? req.body?.kyc_selfie ?? null;
+    await vendorSvc.updateVendor(req.user!.id, {
+      proof_type: proofType,
+      proof_number: proofNumber,
+      kyc_document_url: documentUrl,
+      kyc_id_type: proofType,
+      kyc_id_number: proofNumber,
+      kyc_id_image: documentUrl,
+      kyc_selfie: selfieUrl,
+      kyc_status: 'pending',
+    });
+    const { queueId } = await vendorSvc.submitVendorForReview(req.user!.id, 'web_kyc');
+    ok(res, { message: 'KYC submitted', queue_id: queueId });
   } catch (err) { next(err); }
 });
 

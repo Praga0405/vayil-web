@@ -136,10 +136,12 @@ adminRouter.post('/VendorKycUpdate', async (req, res, next) => {
       await conn.query(
         `UPDATE vendors
             SET status = ?,
+                kyc_status = ?,
                 kyc_approved_at = CASE WHEN ? IN ('verified', 'approved', 'active', 'kyc_approved') THEN NOW() ELSE kyc_approved_at END,
+                kyc_verified_at = CASE WHEN ? = 'approved' THEN NOW() ELSE kyc_verified_at END,
                 rejection_reason = CASE WHEN ? = 'rejected' THEN ? ELSE NULL END
           WHERE vendor_id = ?`,
-        [vendorStatus, vendorStatus, vendorStatus, reason, id],
+        [vendorStatus, kyc_status, vendorStatus, kyc_status, vendorStatus, reason, id],
       )
       const [pendingRows]: any = await conn.query(
         `SELECT id FROM vendor_review_queue WHERE vendor_id = ? AND status = 'PENDING' LIMIT 1`,

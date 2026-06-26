@@ -1,5 +1,102 @@
 # Release Notes
 
+## v4.5.53 - Fix vendor KYC truncation during mobile verification (2026-06-26)
+
+### Why
+
+The mobile vendor identity verification screen failed with:
+
+```json
+{
+  "success": false,
+  "message": "Data truncated for column '%s' at row %d (WARN_DATA_TRUNCATED)"
+}
+```
+
+The final KYC submit path was still writing `vendors.status =
+'kyc_submitted'`. Migration `006_full_mobile_parity.sql` had already
+normalized that legacy value to `pending_approval` and converted
+`vendors.status` to an enum containing only:
+
+- `pending`
+- `verified`
+- `pending_approval`
+- `approved`
+- `rejected`
+
+So when mobile submitted step 4, MySQL/TiDB rejected the invalid enum
+value and surfaced it as `WARN_DATA_TRUNCATED`.
+
+The same mobile screen also sends/depends on the mobile KYC field names
+from the legacy schema:
+
+- `kyc_id_type`
+- `kyc_id_number`
+- `kyc_id_image`
+- `kyc_selfie`
+- `kyc_status`
+
+The shim was only reading the newer web names:
+
+- `proof_type`
+- `proof_number`
+- `kyc_document_url`
+
+That meant even successful submissions could miss some of the values the
+mobile/admin flow expects.
+
+### What Changed
+
+- Updated shared `submitVendorForReview()` to write:
+  - `vendors.status = 'pending_approval'`
+  - `vendors.kyc_status = 'pending'`
+  - `vendors.kyc_submitted_at = NOW()` when first submitted
+  - `rejection_reason = NULL`
+- Kept the existing admin review queue as the single approval path by
+  creating/updating the `vendor_review_queue` `PENDING` row on final KYC
+  submission.
+- Updated legacy mobile `POST /vendor/step4` to accept both field naming
+  styles:
+  - `proof_type` and `kyc_id_type`
+  - `proof_number` and `kyc_id_number`
+  - `kyc_document_url` and `kyc_id_image`
+  - `kyc_selfie` / `selfie_url` / `selfieUrl` / `selfie`
+- Updated canonical `POST /vendors/kyc` to use the same shared
+  `submitVendorForReview()` flow instead of directly writing the vendor
+  status.
+- Updated `POST /Admin/VendorKycUpdate` so approval/rejection also
+  updates `vendors.kyc_status` and `kyc_verified_at`.
+- Updated older ops KYC views to look for `pending_approval` and
+  `kyc_status='pending'`, while still tolerating historical
+  `kyc_submitted` rows.
+- Added migration `010_vendor_kyc_status_align.sql` to:
+  - convert existing `kyc_submitted` rows to `pending_approval`
+  - convert `vendors.status` back to `VARCHAR(40)` so admin/vendor status
+    aliases cannot trigger enum truncation again
+  - keep `vendors.kyc_status` constrained to the valid KYC lifecycle
+  - widen `kyc_id_image`, `kyc_selfie`, and `profile_photo` to `TEXT`
+    for S3/upload URL compatibility
+
+### Impact
+
+- Mobile vendor KYC step 4 should no longer fail with
+  `WARN_DATA_TRUNCATED`.
+- Submitted vendors now appear in the existing admin approval queue using
+  the `pending_approval` state.
+- Admin approval/rejection keeps both account status and KYC status in
+  sync, reducing stale `kyc_status` values in vendor profile responses.
+- Mobile can continue sending the legacy KYC request field names without
+  requiring an app-side change.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+---
+
 ## v4.5.52 - Mobile account menu viewport clamp (2026-06-25)
 
 Commit: `8e3b1a0` - `Fix mobile account menu clipping`

@@ -36,6 +36,10 @@ function pickId(b: any, ...keys: string[]): string {
   for (const k of keys) if (b && b[k] !== undefined && b[k] !== null && b[k] !== '') return String(b[k]);
   return '';
 }
+function pickNullable(b: any, ...keys: string[]): string | null {
+  const value = pickId(b, ...keys);
+  return value || null;
+}
 function num(v: any, fb = 0): number {
   if (v === undefined || v === null || v === '') return fb;
   const n = Number(v); return Number.isFinite(n) ? n : fb;
@@ -540,8 +544,14 @@ async function handleStep(step: number, req: AuthRequest, res: any, next: any) {
       gst_number: req.body?.gst_number,
       is_gst_registered: req.body?.is_gst_registered === 'true' || req.body?.is_gst_registered === true,
       experience_years: req.body?.experience_years ? num(req.body.experience_years) : null,
-      proof_type: req.body?.proof_type, proof_number: req.body?.proof_number,
-      kyc_document_url: req.body?.kyc_document_url,
+      proof_type: pickNullable(req.body, 'proof_type', 'kyc_id_type', 'id_type'),
+      proof_number: pickNullable(req.body, 'proof_number', 'kyc_id_number', 'id_number'),
+      kyc_document_url: pickNullable(req.body, 'kyc_document_url', 'kyc_id_image', 'document_url', 'documentUrl'),
+      kyc_id_type: pickNullable(req.body, 'kyc_id_type', 'proof_type', 'id_type'),
+      kyc_id_number: pickNullable(req.body, 'kyc_id_number', 'proof_number', 'id_number'),
+      kyc_id_image: pickNullable(req.body, 'kyc_id_image', 'kyc_document_url', 'document_url', 'documentUrl'),
+      kyc_selfie: pickNullable(req.body, 'kyc_selfie', 'selfie_url', 'selfieUrl', 'selfie'),
+      kyc_status: step >= 4 ? 'pending' : pickNullable(req.body, 'kyc_status'),
       fcm_token: req.body?.fcm_token,
     });
     send(res, { message: `Step ${step} saved`, data: vendor });

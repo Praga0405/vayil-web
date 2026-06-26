@@ -12,6 +12,21 @@ function numericId(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function firstString(...values: any[]): string | null {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return String(value);
+  }
+  return null;
+}
+
+function normalizedKycStatus(value: any): 'not_submitted' | 'pending' | 'approved' | 'rejected' | null {
+  const status = String(value ?? '').toLowerCase();
+  if (status === 'not_submitted' || status === 'pending' || status === 'approved' || status === 'rejected') {
+    return status;
+  }
+  return null;
+}
+
 export interface VendorProfileUpdate {
   name?: string | null;
   company_name?: string | null;
@@ -29,6 +44,11 @@ export interface VendorProfileUpdate {
   proof_type?: string | null;
   proof_number?: string | null;
   kyc_document_url?: string | null;
+  kyc_id_type?: string | null;
+  kyc_id_number?: string | null;
+  kyc_id_image?: string | null;
+  kyc_selfie?: string | null;
+  kyc_status?: string | null;
 }
 
 export async function getVendor(vendorId: number | string) {
@@ -53,9 +73,14 @@ export async function updateVendor(vendorId: number | string, b: VendorProfileUp
     is_gst_registered: b.is_gst_registered ?? null,
     experience_years: b.experience_years ?? null,
     fcm_token: b.fcm_token ?? null,
-    proof_type: b.proof_type ?? null,
-    proof_number: b.proof_number ?? null,
-    kyc_document_url: b.kyc_document_url ?? null,
+    proof_type: firstString(b.proof_type, b.kyc_id_type),
+    proof_number: firstString(b.proof_number, b.kyc_id_number),
+    kyc_document_url: firstString(b.kyc_document_url, b.kyc_id_image),
+    kyc_id_type: firstString(b.kyc_id_type, b.proof_type),
+    kyc_id_number: firstString(b.kyc_id_number, b.proof_number),
+    kyc_id_image: firstString(b.kyc_id_image, b.kyc_document_url),
+    kyc_selfie: firstString(b.kyc_selfie),
+    kyc_status: normalizedKycStatus(b.kyc_status),
   };
   await exec(
     `UPDATE vendors SET
@@ -74,7 +99,12 @@ export async function updateVendor(vendorId: number | string, b: VendorProfileUp
        fcm_token         = COALESCE(:fcm_token, fcm_token),
        proof_type        = COALESCE(:proof_type, proof_type),
        proof_number      = COALESCE(:proof_number, proof_number),
-       kyc_document_url  = COALESCE(:kyc_document_url, kyc_document_url)
+       kyc_document_url  = COALESCE(:kyc_document_url, kyc_document_url),
+       kyc_id_type       = COALESCE(:kyc_id_type, kyc_id_type),
+       kyc_id_number     = COALESCE(:kyc_id_number, kyc_id_number),
+       kyc_id_image      = COALESCE(:kyc_id_image, kyc_id_image),
+       kyc_selfie        = COALESCE(:kyc_selfie, kyc_selfie),
+       kyc_status        = COALESCE(:kyc_status, kyc_status)
      WHERE vendor_id = :id`,
     params,
   );
@@ -90,7 +120,9 @@ export async function submitVendorForReview(
 
   await exec(
     `UPDATE vendors
-        SET status = 'kyc_submitted',
+        SET status = 'pending_approval',
+            kyc_status = 'pending',
+            kyc_submitted_at = COALESCE(kyc_submitted_at, NOW()),
             rejection_reason = NULL
       WHERE vendor_id = :id`,
     { id: vendorId },
@@ -129,8 +161,7 @@ export async function submitVendorForReview(
  * accepts whichever fields were sent and stamps the appropriate status. */
 export async function onboardingStep(vendorId: number | string, step: number, b: VendorProfileUpdate) {
   await updateVendor(vendorId, b);
-  // Stamp status only on the final step; mobile expects 'kyc_submitted'
-  // so the admin queue picks it up.
+  // Final mobile step enters the same admin review queue as web signup.
   if (step >= 4) {
     await submitVendorForReview(vendorId, 'mobile_step4');
   }

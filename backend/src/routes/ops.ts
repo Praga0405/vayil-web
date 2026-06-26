@@ -15,7 +15,7 @@ opsRouter.get('/dashboard/stats', async (_req, res, next) => {
       one<any>('SELECT COUNT(*) total FROM customers'),
       one<any>('SELECT COUNT(*) total FROM vendors'),
       one<any>("SELECT COUNT(*) total FROM orders WHERE status NOT IN ('completed','cancelled')"),
-      one<any>("SELECT COUNT(*) total FROM vendors WHERE status = 'kyc_submitted'"),
+      one<any>("SELECT COUNT(*) total FROM vendors WHERE status IN ('pending_approval','kyc_submitted') OR kyc_status = 'pending'"),
       one<any>("SELECT COUNT(*) total FROM disputes WHERE status = 'open'"),
       one<any>('SELECT COUNT(*) total FROM customers WHERE DATE(created_at)=CURDATE()'),
       one<any>('SELECT COALESCE(SUM(amount),0) todayRevenue FROM payment_log WHERE DATE(created_at)=CURDATE()'),
@@ -72,19 +72,20 @@ opsRouter.get('/vendors/:id', async (req, res, next) => {
 });
 opsRouter.patch('/vendors/:id/status', async (req, res, next) => {
   try {
-    const { status, reason } = z.object({ status: z.enum(['pending','kyc_submitted','verified','rejected','suspended']), reason: z.string().optional() }).parse(req.body);
-    await exec('UPDATE vendors SET status = :status, rejection_reason = :reason WHERE vendor_id = :id', { id: req.params.id, status, reason });
+    const { status, reason } = z.object({ status: z.enum(['pending','pending_approval','kyc_submitted','verified','approved','rejected','suspended']), reason: z.string().optional() }).parse(req.body);
+    const normalizedStatus = status === 'kyc_submitted' ? 'pending_approval' : status;
+    await exec('UPDATE vendors SET status = :status, kyc_status = CASE WHEN :status = \'pending_approval\' THEN \'pending\' WHEN :status IN (\'verified\',\'approved\') THEN \'approved\' WHEN :status = \'rejected\' THEN \'rejected\' ELSE kyc_status END, rejection_reason = :reason WHERE vendor_id = :id', { id: req.params.id, status: normalizedStatus, reason });
     ok(res, { message: 'Vendor status updated' });
   } catch (err) { next(err); }
 });
 opsRouter.get('/kyc/pending', async (_req, res, next) => {
-  try { ok(res, { vendors: await query<any>("SELECT * FROM vendors WHERE status = 'kyc_submitted' ORDER BY vendor_id DESC") }); } catch (err) { next(err); }
+  try { ok(res, { vendors: await query<any>("SELECT * FROM vendors WHERE status IN ('pending_approval','kyc_submitted') OR kyc_status = 'pending' ORDER BY vendor_id DESC") }); } catch (err) { next(err); }
 });
 opsRouter.post('/kyc/:vendorId/approve', async (req, res, next) => {
-  try { await exec("UPDATE vendors SET status = 'verified', kyc_approved_at = NOW() WHERE vendor_id = :id", { id: req.params.vendorId }); ok(res, { message: 'Vendor KYC approved' }); } catch (err) { next(err); }
+  try { await exec("UPDATE vendors SET status = 'verified', kyc_status = 'approved', kyc_approved_at = NOW(), kyc_verified_at = NOW() WHERE vendor_id = :id", { id: req.params.vendorId }); ok(res, { message: 'Vendor KYC approved' }); } catch (err) { next(err); }
 });
 opsRouter.post('/kyc/:vendorId/reject', async (req, res, next) => {
-  try { await exec("UPDATE vendors SET status = 'rejected', rejection_reason = :reason WHERE vendor_id = :id", { id: req.params.vendorId, reason: req.body.reason || 'Rejected by operations team' }); ok(res, { message: 'Vendor KYC rejected' }); } catch (err) { next(err); }
+  try { await exec("UPDATE vendors SET status = 'rejected', kyc_status = 'rejected', rejection_reason = :reason WHERE vendor_id = :id", { id: req.params.vendorId, reason: req.body.reason || 'Rejected by operations team' }); ok(res, { message: 'Vendor KYC rejected' }); } catch (err) { next(err); }
 });
 
 opsRouter.get('/projects', async (_req, res, next) => {
