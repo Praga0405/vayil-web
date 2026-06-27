@@ -50,6 +50,46 @@ loading.
 - Existing working APIs, including `/customer/getSettings` and
   `/customer/ServiceList`, keep their current route names.
 
+### Live Verification
+
+After deployment, production was checked against the exact
+customer-prefixed URLs reported by the mobile team:
+
+- `GET https://vayil-web.vercel.app/customer/ServiceCategories`
+  - HTTP `200`
+  - `content-type: application/json`
+  - `x-matched-path: /api/[...all]`
+  - response contains `success`, `categories[]`, and `data[]`
+- `GET https://vayil-web.vercel.app/customer/get_states_by_country_id?country_id=101`
+  - HTTP `200`
+  - `content-type: application/json`
+  - `x-matched-path: /api/[...all]`
+  - response contains `success`, `states_list[]`, and `data[]`
+- `POST https://vayil-web.vercel.app/customer/get_states_by_country_id`
+  with `{ "country_id": "101" }`
+  - HTTP `200`
+  - response contains the same `states_list[]` and `data[]` shape
+- `POST https://vayil-web.vercel.app/customer/get_city`
+  with `{ "state_id": "1" }`
+  - HTTP `200`
+  - `content-type: application/json`
+  - `x-matched-path: /api/[...all]`
+  - response contains `success`, `city[]`, and `data[]`
+- `POST https://vayil-web.vercel.app/customer/ServiceList`
+  with `{ "search": "", "category_id": "", "location": "Coimbatore" }`
+  - HTTP `200`
+  - records that previously returned `service_image: null` now return
+    `service_image: ""`
+
+### Operational Notes
+
+- The production `states` table currently returns Tamil Nadu as
+  `id: 1`. A test using the old mobile dump value `state_id: 4035`
+  correctly reached the API and returned JSON, but the city list was
+  empty because that ID does not exist in the current production table.
+- Mobile should use the `id` returned from
+  `/customer/get_states_by_country_id` when calling `/customer/get_city`.
+
 ### Verification
 
 ```bash
