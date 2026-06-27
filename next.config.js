@@ -208,7 +208,9 @@ const nextConfig = {
     const customerLegacyEndpoints = [
       'register', 'verifyCustomerOTP', 'logincustomerWithOTP',
       'verifyLogincustomerOTP', 'resendcustomerOTP', 'getSettings',
-      'upload_files', 'ServiceList', 'ServiceInfo', 'vendorInfo',
+      'upload_files', 'ServiceList', 'ServiceCategories',
+      'ServiceSubcategories', 'ServiceInfo', 'vendorInfo',
+      'get_states_by_country_id', 'get_city',
       'enquiryList', 'sendEnquiry', 'QuotationList', 'updateQuotation',
       'getPlan', 'CustomerupdatePlan', 'placeOrder', 'orderDetails',
       'getPaymentDetails', 'NeedPaymentSummary', 'payment_update',

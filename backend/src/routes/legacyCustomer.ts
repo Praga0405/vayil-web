@@ -52,6 +52,11 @@ function toNumberSafe(v: any, fallback = 0): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+function imageUrlOrEmpty(v: any): string {
+  const value = String(v ?? '').trim();
+  if (!value || value.toLowerCase() === 'null' || value.toLowerCase() === 'undefined') return '';
+  return value;
+}
 /** Send a legacy mobile success response. Mobile parses `success`, `message`,
  *  `data`, `result`, and `token` — include whichever apply. */
 function send(res: any, payload: { message?: string; data?: any; result?: any; token?: string; [k: string]: any } = {}, status = 200) {
@@ -180,6 +185,7 @@ function normalizeLegacyService(row: any, includeBookingText = false) {
   const { booking_count, ...item } = row;
   const out: any = {
     ...item,
+    service_image: imageUrlOrEmpty(item.service_image),
     rating: Number(row?.rating ?? 0).toFixed(1),
   };
   if (includeBookingText) out.booking_text = `${n} ${n === 1 ? 'booking' : 'bookings'}`;
@@ -533,6 +539,7 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
       const { booking_count, ...item } = r;
       return {
         ...item,
+        service_image: imageUrlOrEmpty(item.service_image),
         rating: Number(r.rating ?? 0).toFixed(1),
         booking_text: `${n} ${n === 1 ? 'booking' : 'bookings'}`,
       };
@@ -543,6 +550,10 @@ legacyCustomerRouter.post('/ServiceList', async (req, res, next) => {
     if (!data.length) {
       data = await fetchLegacyCustomerServiceList(req.body) ?? data;
     }
+    data = data.map((item: any) => ({
+      ...item,
+      service_image: imageUrlOrEmpty(item?.service_image),
+    }));
 
     res.status(200).json({
       success: true,
@@ -609,7 +620,7 @@ const publicServiceCategoriesHandler = async (_req: any, res: any, next: any) =>
         WHERE COALESCE(is_deleted, 0) = 0
         ORDER BY name ASC`,
     );
-    res.status(200).json({ success: true, categories: cats });
+    res.status(200).json({ success: true, categories: cats, data: cats });
   } catch (err) { next(err); }
 };
 legacyCustomerRouter.get('/ServiceCategories',  publicServiceCategoriesHandler);
@@ -635,34 +646,61 @@ legacyCustomerRouter.post('/ServiceSubcategories', async (req, res, next) => {
 });
 
 /* ---- Public location pickers ---- */
-legacyCustomerRouter.get('/get_states_by_country_id', async (req, res, next) => {
+const customerStatesHandler = async (req: any, res: any, next: any) => {
   try {
-    const cid = Number((req.query as any)?.country_id ?? 101);
+    const cid = Number((req.query as any)?.country_id ?? (req.body as any)?.country_id ?? 101);
     const rows = await query<any>(
-      `SELECT id, name, country_id, country_code, state_code FROM states
+      `SELECT id, name, country_id, country_code,
+              NULL AS fips_code, NULL AS iso2, state_code, NULL AS type,
+              NULL AS latitude, NULL AS longitude,
+              created_at, updated_at, NULL AS flag, NULL AS wikiDataId,
+              COALESCE(status, 1) AS status, created_at AS created_on,
+              updated_at AS updated_on, COALESCE(is_deleted, 0) AS is_deleted
+         FROM states
         WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
       { cid } as any,
     );
-    send(res, { data: rows });
+    res.status(200).json({ success: true, states_list: rows, data: rows });
   } catch (err) { next(err); }
-});
+};
+legacyCustomerRouter.get('/get_states_by_country_id', customerStatesHandler);
+legacyCustomerRouter.post('/get_states_by_country_id', customerStatesHandler);
 
-legacyCustomerRouter.post('/get_city', async (req, res, next) => {
+const customerCityHandler = async (req: any, res: any, next: any) => {
   try {
-    const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
+    const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id
+      ?? (req.query as any)?.state_id ?? (req.query as any)?.city_state_id;
+    const stateName = String((req.body as any)?.state_name || (req.body as any)?.city_state
+      || (req.query as any)?.state_name || (req.query as any)?.city_state || '').trim();
     const rows = sid
       ? await query<any>(
-          `SELECT city_id, city_name, city_state, city_state_id FROM city
+          `SELECT city_id, city_name, city_state, city_state_id,
+                  COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+             FROM city
             WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
           { sid },
         )
-      : await query<any>(
-          `SELECT city_id, city_name, city_state, city_state_id FROM city
-            WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
-        );
-    send(res, { data: rows });
+      : stateName
+        ? await query<any>(
+            `SELECT city_id, city_name, city_state, city_state_id,
+                    COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+               FROM city
+              WHERE LOWER(city_state) = LOWER(:stateName)
+                AND COALESCE(is_deleted,0)=0 AND status=1
+              ORDER BY city_name`,
+            { stateName },
+          )
+        : await query<any>(
+            `SELECT city_id, city_name, city_state, city_state_id,
+                    COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+               FROM city
+              WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
+          );
+    res.status(200).json({ success: true, city: rows, data: rows });
   } catch (err) { next(err); }
-});
+};
+legacyCustomerRouter.post('/get_city', customerCityHandler);
+legacyCustomerRouter.get('/get_city', customerCityHandler);
 
 /* ---- Public settings — v4.5.34 ----
  *

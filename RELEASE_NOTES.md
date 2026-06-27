@@ -1,5 +1,65 @@
 # Release Notes
 
+## v4.5.54 - Restore customer mobile category and location APIs (2026-06-27)
+
+### Why
+
+The mobile app reported HTML 404 responses for:
+
+- `GET|POST /customer/ServiceCategories`
+- `GET|POST /customer/get_states_by_country_id`
+- `POST /customer/get_city`
+
+Production confirmed the failure for the reported routes: Vercel matched
+`/404` instead of the Express API catch-all. The backend handlers existed,
+but `next.config.js` only forwarded selected customer legacy endpoints.
+`/customer/getSettings` and `/customer/ServiceList` were in the allow-list,
+which is why those two worked, while the category/state/city routes did
+not reach the backend.
+
+The live `POST /customer/ServiceList` response also contained
+`service_image: null` for some records, which can break mobile image
+loading.
+
+### What Changed
+
+- Added the missing customer legacy rewrites:
+  - `/customer/ServiceCategories`
+  - `/customer/ServiceSubcategories`
+  - `/customer/get_states_by_country_id`
+  - `/customer/get_city`
+- Kept the backend routes public and available under the customer prefix.
+- Updated `ServiceCategories` to return both:
+  - `categories`
+  - `data`
+- Updated `get_states_by_country_id` to support GET and POST, and return:
+  - `states_list`
+  - `data`
+- Updated `get_city` to support POST and GET, and return:
+  - `city`
+  - `data`
+- Normalized customer service image fields so `null`, `"null"`, and
+  `"undefined"` are returned as an empty string.
+
+### Impact
+
+- Mobile category loading can use `/customer/ServiceCategories` again.
+- Mobile state and city pickers can load data using the customer-prefixed
+  URLs.
+- Service listing cards no longer receive `null` for `service_image`.
+- Existing working APIs, including `/customer/getSettings` and
+  `/customer/ServiceList`, keep their current route names.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+npm run build
+git diff --check
+```
+
+---
+
 ## v4.5.53 - Fix vendor KYC truncation during mobile verification (2026-06-26)
 
 ### Why
