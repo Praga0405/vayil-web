@@ -1,5 +1,48 @@
 # Release Notes
 
+## v4.5.59 - De-duplicate city list API responses (2026-06-27)
+
+### Why
+
+The mobile team reported duplicate city options in the dropdown backed by:
+
+- `POST /customer/get_city`
+
+The endpoint was returning raw rows from the `city` master table. If the
+table had more than one active row with the same city name, every row was
+sent to the app and the same city appeared multiple times.
+
+### What Changed
+
+- Added a shared city response normalizer:
+  - trims city display names,
+  - drops blank city names,
+  - keeps one stable row per normalized `city_name`,
+  - prefers the lowest `city_id` when duplicates exist.
+- Applied the same de-duplication to all mobile/admin city-list surfaces:
+  - `POST /customer/get_city`
+  - `GET /customer/get_city`
+  - `POST /vendor/get_city`
+  - `POST /get_city`
+  - `POST /Admin/get_city`
+- Updated `POST /Admin/addCity` to avoid inserting a new active city row
+  when an active non-deleted city with the same trimmed name and state id
+  already exists.
+
+### Impact
+
+Mobile dropdowns now receive unique city records even if duplicate rows
+still exist in the database. This fixes duplicate options immediately
+without requiring a production data write.
+
+### Data Cleanup Note
+
+No production DB cleanup was run from Codex because the clean repo clone
+does not contain a local `backend/.env` or DB target credentials. If the
+team still wants the underlying master table cleaned, run a guarded
+soft-delete/backfill against the production DB after confirming the
+target database and backup.
+
 ## v4.5.58 - Temporary admin vendor-status testing bypass (2026-06-27)
 
 ### Why

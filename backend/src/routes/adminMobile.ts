@@ -20,6 +20,7 @@ import { exec, one, query } from '../db';
 import { config } from '../config';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
+import { uniqueCityRows } from '../utils/city';
 
 export const adminMobileRouter = Router();
 
@@ -230,9 +231,25 @@ adminMobileRouter.post('/addCity', async (req, res, next) => {
   try {
     const { city_name, city_state, city_state_id } = req.body || {};
     if (!city_name) throw new ApiError(400, 'city_name required');
+    const normalizedName = String(city_name).replace(/\s+/g, ' ').trim();
+    if (!normalizedName) throw new ApiError(400, 'city_name required');
+    const stateId = city_state_id ?? 0;
+    const existing = await one<any>(
+      `SELECT * FROM city
+        WHERE LOWER(TRIM(city_name)) = LOWER(:name)
+          AND COALESCE(city_state_id, 0) = :sid
+          AND COALESCE(is_deleted, 0) = 0
+        ORDER BY city_id ASC
+        LIMIT 1`,
+      { name: normalizedName, sid: stateId },
+    );
+    if (existing) {
+      send(res, { message: 'City already exists', data: existing, city_id: existing.city_id });
+      return;
+    }
     const r: any = await exec(
       `INSERT INTO city (city_name, city_state, city_state_id) VALUES (:n, :s, :sid)`,
-      { n: city_name, s: city_state ?? null, sid: city_state_id ?? 0 },
+      { n: normalizedName, s: city_state ?? null, sid: stateId },
     );
     send(res, { message: 'City added', data: { city_id: r.insertId } }, 201);
   } catch (err) { next(err); }
@@ -272,7 +289,7 @@ adminMobileRouter.post('/get_city', async (req, res, next) => {
     const rows = id
       ? await query(`SELECT * FROM city WHERE city_state_id = :id AND is_deleted = 0 ORDER BY city_name`, { id })
       : await query(`SELECT * FROM city WHERE is_deleted = 0 ORDER BY city_name`);
-    send(res, { data: rows });
+    send(res, { data: uniqueCityRows(rows) });
   } catch (err) { next(err); }
 });
 

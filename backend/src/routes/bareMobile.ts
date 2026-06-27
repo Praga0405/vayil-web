@@ -17,6 +17,7 @@ import { AuthRequest } from '../types';
 import { one, query } from '../db';
 import { publicSettingsSafe } from './common';
 import { legacyVendorRouter } from './legacyVendor';
+import { uniqueCityRows } from '../utils/city';
 
 export const bareMobileRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -109,7 +110,7 @@ bareMobileRouter.post('/get_city', async (req, res, next) => {
              FROM city
             WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
         );
-    res.status(200).json({ success: true, city: rows });
+    res.status(200).json({ success: true, city: uniqueCityRows(rows) });
   } catch (err) { next(err); }
 });
 

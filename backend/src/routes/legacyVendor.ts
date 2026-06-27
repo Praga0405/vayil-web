@@ -13,6 +13,7 @@ import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { exec, one, query } from '../db';
 import { publicSettingsSafe } from './common';
+import { uniqueCityRows } from '../utils/city';
 
 import * as authService from '../services/authService';
 import * as vendorSvc from '../services/vendorService';
@@ -427,7 +428,7 @@ legacyVendorRouter.post('/get_city', async (req, res, next) => {
              FROM city
             WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
         );
-    res.status(200).json({ success: true, city: rows });
+    res.status(200).json({ success: true, city: uniqueCityRows(rows) });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.post('/listProofTypes', async (_req, res, next) => {

@@ -21,6 +21,7 @@ import { requireAuth, softAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { exec, one, query } from '../db';
 import { publicSettingsSafe } from './common';
+import { uniqueCityRows } from '../utils/city';
 
 import * as authService from '../services/authService';
 import * as customerSvc from '../services/customerService';
@@ -697,7 +698,8 @@ const customerCityHandler = async (req: any, res: any, next: any) => {
                FROM city
               WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
           );
-    res.status(200).json({ success: true, city: rows, data: rows });
+    const uniqueRows = uniqueCityRows(rows);
+    res.status(200).json({ success: true, city: uniqueRows, data: uniqueRows });
   } catch (err) { next(err); }
 };
 legacyCustomerRouter.post('/get_city', customerCityHandler);
