@@ -799,10 +799,12 @@ legacyCustomerRouter.use(requireAuth(['customer']));
 legacyCustomerRouter.post('/saveCustomerInfo', async (req: AuthRequest, res, next) => {
   try {
     await customerSvc.updateCustomer(req.user!.id, {
-      name: req.body?.name, email: req.body?.email, city: req.body?.city,
+      name: req.body?.name, email: req.body?.email,
+      state: req.body?.state ?? req.body?.state_id ?? req.body?.stateId,
+      city: req.body?.city,
       address: req.body?.address, pincode: req.body?.pincode,
-      profile_image: req.body?.profile_image || req.body?.profile_photo,
-      profile_photo: req.body?.profile_photo,
+      profile_image: req.body?.profile_image || req.body?.profile_photo || req.body?.profile_photo_url,
+      profile_photo: req.body?.profile_photo || req.body?.profile_photo_url,
       fcm_token: req.body?.fcm_token,
     });
     res.status(200).json({
@@ -909,7 +911,7 @@ legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => 
     const enquiryId = toNumberSafe(pickId(req.body, 'enquiry_id', 'enquiryId'));
     const orderId = toNumberSafe(pickId(req.body, 'order_id', 'orderId'));
     const milestoneId = toNumberSafe(pickId(req.body, 'milestone_id', 'milestoneId', 'plan_id'));
-    const amount = toNumberSafe(req.body?.amount);
+    const amount = toNumberSafe(req.body?.amount ?? req.body?.order_amount ?? req.body?.orderAmount);
     if (!amount) throw new ApiError(400, 'amount required');
     const purpose = (req.body?.purpose
       || (milestoneId ? 'milestone' : enquiryId ? 'quote' : 'materials')) as paymentSvc.Purpose;
@@ -924,6 +926,7 @@ legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => 
       order_id: orderId || undefined,
       milestone_id: milestoneId || undefined,
       material_ids: Array.isArray(req.body?.material_ids) ? req.body.material_ids.map(Number) : undefined,
+      currency: req.body?.currency || undefined,
       idempotency_key,
     });
     send(res, {
@@ -1032,7 +1035,7 @@ legacyCustomerRouter.post('/finalStep', async (req: AuthRequest, res, next) => {
     const out = await projectSvc.signoffOrder(
       orderId, req.user!.id,
       req.body?.rating ? toNumberSafe(req.body.rating) : undefined,
-      req.body?.comment || undefined,
+      req.body?.comment || req.body?.review_description || undefined,
     );
     // Release any held escrow.
     const intents = await query<any>(
@@ -1053,7 +1056,7 @@ legacyCustomerRouter.post('/addReview', async (req: AuthRequest, res, next) => {
       order_id: pickId(req.body, 'order_id', 'orderId') || undefined,
       rating: toNumberSafe(req.body?.rating),
       title: req.body?.title,
-      comment: req.body?.comment || req.body?.review || req.body?.feedback,
+      comment: req.body?.comment || req.body?.review_description || req.body?.review || req.body?.feedback,
     });
     send(res, { message: 'Review submitted', data: review }, 201);
   } catch (err) { next(err); }
@@ -1131,7 +1134,43 @@ legacyCustomerRouter.get('/_ping', softAuth(), (_req, res) => res.json({ ok: tru
 legacyCustomerRouter.post('/sendQuotation', async (req: AuthRequest, res, next) => {
   try {
     const quotationId = pickId(req.body, 'quotation_id', 'quotationId', 'id');
-    if (!quotationId) throw new ApiError(400, 'quotation_id required');
+    if (!quotationId) {
+      const vendorId = pickId(req.body, 'vendor_id', 'vendorId');
+      if (!vendorId) throw new ApiError(400, 'quotation_id or vendor_id required');
+      const enquiry = await enquirySvc.createEnquiry({
+        customer_id: req.user!.id,
+        vendor_id: vendorId,
+        service_id: pickId(req.body, 'service_id', 'serviceId') || null,
+        category: req.body?.category || null,
+        description: req.body?.description || req.body?.message || 'Quotation requested',
+        location: req.body?.location || null,
+        email: req.body?.email || null,
+        budget: req.body?.budget ? toNumberSafe(req.body.budget) : null,
+      });
+      await exec(
+        `UPDATE enquiries
+            SET first_name = COALESCE(:firstName, first_name),
+                last_name = COALESCE(:lastName, last_name),
+                phone = COALESCE(:phone, phone),
+                files = COALESCE(:files, files),
+                message = COALESCE(:message, message),
+                status_int = COALESCE(status_int, 1)
+          WHERE enquiry_id = :id`,
+        {
+          id: enquiry?.enquiry_id,
+          firstName: req.body?.first_name ?? null,
+          lastName: req.body?.last_name ?? null,
+          phone: req.body?.phone ?? null,
+          files: req.body?.files ?? req.body?.file ?? null,
+          message: req.body?.message ?? req.body?.description ?? null,
+        },
+      ).catch(() => undefined);
+      return send(res, {
+        message: 'Quotation request sent to vendor',
+        data: enquiry,
+        enquiry_id: enquiry?.enquiry_id,
+      });
+    }
     const action = String(req.body?.action || req.body?.status || 'accept').toLowerCase();
     const out = (action === 'reject' || action === 'rejected')
       ? await quoteSvc.rejectQuote(req.user!.id, quotationId, req.body?.reason || req.body?.message)

@@ -10,6 +10,7 @@ import { ApiError } from '../utils/http';
 export interface CustomerProfileUpdate {
   name?: string | null;
   email?: string | null;
+  state?: string | null;
   city?: string | null;
   address?: string | null;
   pincode?: string | null;
@@ -32,6 +33,7 @@ export async function updateCustomer(customerId: number | string, body: Customer
     id: customerId,
     name: body.name ?? null,
     email: body.email ?? null,
+    state: body.state ?? null,
     city: body.city ?? null,
     address: body.address ?? null,
     pincode: body.pincode ?? null,
@@ -42,6 +44,7 @@ export async function updateCustomer(customerId: number | string, body: Customer
     `UPDATE customers SET
        name          = COALESCE(:name, name),
        email         = COALESCE(:email, email),
+       state         = COALESCE(:state, state),
        city          = COALESCE(:city, city),
        address       = COALESCE(:address, address),
        pincode       = COALESCE(:pincode, pincode),

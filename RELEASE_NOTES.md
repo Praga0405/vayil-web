@@ -1,5 +1,113 @@
 # Release Notes
 
+## v4.5.57 - Close remaining mobile request-field parity gaps (2026-06-27)
+
+### Why
+
+After fixing the vendor onboarding Step 1-4 issue, we audited the rest
+of the mobile OpenAPI/Postman collection for the same failure pattern:
+the mobile app sends one field name, but the backend route reads another
+field name or interprets the endpoint differently. That can make API
+calls succeed with missing data, fail with misleading validation errors,
+or return stale/null values in the response.
+
+Remaining examples found in the audit:
+
+- `POST /customer/saveCustomerInfo` sent `profile_photo_url` and `state`,
+  but the backend only read `profile_image` / `profile_photo` and did
+  not update `state`.
+- `POST /customer/placeOrder` sent `order_amount`, but the backend
+  required `amount`.
+- `POST /customer/addReview` sent `review_description`, but the backend
+  only read `comment`, `review`, or `feedback`.
+- `POST /customer/sendQuotation` in the collection sent vendor/contact
+  fields, but the backend only handled quote accept/reject via
+  `quotation_id`.
+- Vendor plan APIs used top-level legacy fields such as `title`,
+  `completion_days`, `amount_percentage`, `plan_id`, and `status`, while
+  the backend expected full `milestones` arrays or `order_id`.
+- Material APIs sent `title`, `qty`, `unit_type`, and `unit_cost`, while
+  the backend read `name`, `quantity`, `unit`, and `rate`.
+- `POST /vendorPayout` sent `payout_amount`, while the backend read
+  `amount`.
+- Bank APIs sent `pan_number` and `swift_code`, and sometimes omitted
+  `account_holder`; the service required `account_holder` and dropped
+  PAN/SWIFT.
+- Admin service-tag APIs could still add/update blank service-tag names.
+- `/Admin/saveVendor` did not write all mobile-parity vendor profile
+  columns, so admin edits could still return nulls in mobile responses.
+
+### What Changed
+
+- Customer profile:
+  - `saveCustomerInfo` now accepts `profile_photo_url`.
+  - `saveCustomerInfo` now writes `state`.
+  - `customerService.updateCustomer()` now persists `state`.
+
+- Customer payment/review/quote flows:
+  - `placeOrder` now accepts `order_amount` / `orderAmount` as aliases
+    for `amount`.
+  - `placeOrder` passes through `currency` when present.
+  - `addReview` and `finalStep` now accept `review_description`.
+  - `sendQuotation` keeps the existing `quotation_id` accept/reject
+    behavior, but now also supports the collection payload containing
+    `vendor_id`, `first_name`, `last_name`, `email`, `phone`, `message`,
+    and `files` by creating a quotation/enquiry request for that vendor.
+
+- Vendor plan flows:
+  - `createPlan` now supports the old top-level mobile fields:
+    `title`, `completion_days`, `amount_percentage`, `amount`,
+    `update_photo`, `update_comments`, and `status`.
+  - Full `milestones`/`plan`/`plans` payloads still use the existing
+    canonical full-plan path.
+  - `updatePlan` can resolve `order_id` from `plan_id` and update legacy
+    plan columns without requiring the mobile app to resend `order_id`.
+  - `updatePlanStatus` now accepts `plan_id` + `status`.
+  - `vendorPlanDetails` now accepts `id` as an alias for `order_id`.
+  - `AskPyament` now accepts `order_id`; when no `plan_id` is provided,
+    it resolves the latest plan for that order.
+
+- Vendor material/payment/bank flows:
+  - `addPlanMaterial` and `editPlanMaterial` now accept `title`, `qty`,
+    `unit_type`, and `unit_cost`.
+  - `vendorPayout` now accepts `payout_amount` / `payoutAmount`.
+  - Bank add/edit/request-edit now accept and persist `pan_number` and
+    `swift_code`.
+  - Bank add now derives a safe account-holder value from the vendor
+    profile when the old mobile payload omits `account_holder`.
+
+- Service tags and admin vendor edits:
+  - `saveServiceListing` and `updateServiceListing` now parse `tag_ids`
+    when sent as a JSON string or CSV string through multipart.
+  - Admin service-tag add/update now trims names and rejects blank names.
+  - Admin service-tag list now filters blank names.
+  - `/Admin/saveVendor` now dual-writes mobile profile columns including
+    `full_name`, `state`, `profile_photo`, `service_tag`,
+    `service_category`, `sub_service`, `years_of_experience`,
+    `short_bio`, `languages`, `area_of_service`, working hours, tools,
+    certifications, and KYC mobile aliases.
+
+### Impact
+
+- Mobile profile screens should no longer see submitted profile/photo
+  values return as null because of field-name mismatches.
+- Customer order, review, and quote-request payloads from the collection
+  are now accepted without requiring mobile request changes.
+- Vendor plan/material/payment/bank screens can continue sending the old
+  mobile field names.
+- Admin changes to vendor profile fields now remain visible in mobile
+  profile responses.
+- Blank service tags are blocked at both vendor and admin write paths.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+---
+
 ## v4.5.56 - Fix vendor onboarding step field parity (2026-06-27)
 
 ### Why

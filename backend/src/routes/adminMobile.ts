@@ -398,7 +398,7 @@ adminMobileRouter.post('/service-subcategories', async (req, res, next) => {
 
 adminMobileRouter.post('/service-tag/add', async (req, res, next) => {
   try {
-    const { name } = req.body || {};
+    const name = String((req.body || {}).name || '').trim();
     if (!name) throw new ApiError(400, 'name required');
     const r: any = await exec(`INSERT INTO service_tags (name) VALUES (:n)`, { n: name });
     send(res, { message: 'Tag added', data: { id: r.insertId } }, 201);
@@ -406,8 +406,10 @@ adminMobileRouter.post('/service-tag/add', async (req, res, next) => {
 });
 adminMobileRouter.post('/service-tag/update', async (req, res, next) => {
   try {
-    const { id, name } = req.body || {};
+    const { id } = req.body || {};
+    const name = req.body?.name === undefined || req.body?.name === null ? null : String(req.body.name).trim();
     if (!id) throw new ApiError(400, 'id required');
+    if (name !== null && !name) throw new ApiError(400, 'name required');
     await exec(`UPDATE service_tags SET name = COALESCE(:n, name) WHERE id = :id`, { id, n: name ?? null });
     send(res, { message: 'Tag updated' });
   } catch (err) { next(err); }
@@ -421,7 +423,15 @@ adminMobileRouter.post('/service-tag/toggleUpdate', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 adminMobileRouter.post('/service-tags', async (_req, res, next) => {
-  try { send(res, { data: await query(`SELECT * FROM service_tags WHERE is_deleted = 0 ORDER BY name`) }); }
+  try {
+    send(res, {
+      data: await query(
+        `SELECT * FROM service_tags
+          WHERE is_deleted = 0 AND TRIM(COALESCE(name, '')) <> ''
+          ORDER BY name`,
+      ),
+    });
+  }
   catch (err) { next(err); }
 });
 adminMobileRouter.post('/Deletetags', async (req, res, next) => {

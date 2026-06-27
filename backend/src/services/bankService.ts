@@ -13,12 +13,14 @@ export interface BankDetailsInput {
   bank_name?: string;
   branch?: string;
   upi_id?: string;
+  pan_number?: string;
+  swift_code?: string;
   is_primary?: boolean;
 }
 
 export async function addBankDetails(vendorId: number | string, b: BankDetailsInput) {
-  if (!b.account_holder || !b.account_number || !b.ifsc_code) {
-    throw new ApiError(400, 'account_holder, account_number, ifsc_code required');
+  if (!b.account_number || !b.ifsc_code) {
+    throw new ApiError(400, 'account_number, ifsc_code required');
   }
   // If marked primary (or first row), demote others.
   const existing = await query<any>('SELECT bank_id FROM bank_details WHERE vendor_id = :id', { id: vendorId });
@@ -28,11 +30,14 @@ export async function addBankDetails(vendorId: number | string, b: BankDetailsIn
   }
   const result: any = await exec(
     `INSERT INTO bank_details (vendor_id, account_holder, account_number, ifsc_code,
-                                bank_name, branch, upi_id, is_primary, status)
-     VALUES (:vid, :holder, :acct, :ifsc, :bank, :branch, :upi, :primary, 'active')`,
+                                bank_name, branch, upi_id, pan_number, swift_code,
+                                is_primary, status)
+     VALUES (:vid, :holder, :acct, :ifsc, :bank, :branch, :upi, :pan, :swift,
+             :primary, 'active')`,
     {
-      vid: vendorId, holder: b.account_holder, acct: b.account_number, ifsc: b.ifsc_code,
+      vid: vendorId, holder: b.account_holder || 'Vendor', acct: b.account_number, ifsc: b.ifsc_code,
       bank: b.bank_name ?? null, branch: b.branch ?? null, upi: b.upi_id ?? null,
+      pan: b.pan_number ?? null, swift: b.swift_code ?? null,
       primary: makePrimary,
     },
   );
@@ -64,12 +69,13 @@ export async function editBankDetails(vendorId: number | string, bankId: number 
   await exec(
     `UPDATE bank_details SET account_holder = :holder, account_number = :acct,
                               ifsc_code = :ifsc, bank_name = :bank, branch = :branch,
-                              upi_id = :upi, status = 'active'
+                              upi_id = :upi, pan_number = :pan, swift_code = :swift,
+                              status = 'active'
        WHERE bank_id = :id`,
     {
       id: bankId, holder: merged.account_holder, acct: merged.account_number,
       ifsc: merged.ifsc_code, bank: merged.bank_name, branch: merged.branch,
-      upi: merged.upi_id,
+      upi: merged.upi_id, pan: merged.pan_number ?? null, swift: merged.swift_code ?? null,
     },
   );
   return one<any>('SELECT * FROM bank_details WHERE bank_id = :id', { id: bankId });

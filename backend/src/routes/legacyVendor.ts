@@ -62,6 +62,17 @@ function num(v: any, fb = 0): number {
   if (v === undefined || v === null || v === '') return fb;
   const n = Number(v); return Number.isFinite(n) ? n : fb;
 }
+function optionalNum(v: any): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+function numberListFromBody(b: any, ...keys: string[]): number[] | undefined {
+  const value = pickCsv(b, ...keys);
+  if (!value) return undefined;
+  const ids = value.split(',').map((v) => Number(v.trim())).filter((v) => Number.isFinite(v));
+  return ids.length ? ids : undefined;
+}
 function mobileFlag(v: any): number | null {
   if (v === undefined || v === null || v === '') return null;
   const s = String(v).trim().toLowerCase();
@@ -70,6 +81,15 @@ function mobileFlag(v: any): number | null {
 function activeFlag(v: any): boolean | undefined {
   if (v === undefined || v === null || v === '') return undefined;
   return v === '1' || v === 1 || v === true || v === 'true';
+}
+async function defaultBankHolder(vendorId: number | string) {
+  const row = await one<any>(
+    `SELECT COALESCE(NULLIF(full_name, ''), NULLIF(owner_name, ''), NULLIF(name, ''),
+                     NULLIF(company_name, ''), 'Vendor') AS holder
+       FROM vendors WHERE vendor_id = :id LIMIT 1`,
+    { id: vendorId },
+  ).catch(() => null);
+  return row?.holder || 'Vendor';
 }
 function send(res: any, payload: any = {}, status = 200) {
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
@@ -639,7 +659,7 @@ legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, nex
       pricing_type: req.body?.pricing_type,
       certificate_url: req.body?.certificate_url || req.body?.certificate,
       minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
-      tag_ids: Array.isArray(req.body?.tag_ids) ? req.body.tag_ids.map(Number) : undefined,
+      tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds'),
       status: active,
     });
     const rows = await legacyVendorServiceRows(req.user!.id, String(out?.vendor_service_id ?? out?.id));
@@ -666,7 +686,7 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
       pricing_type: req.body?.pricing_type,
       certificate_url: req.body?.certificate_url || req.body?.certificate,
       minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
-      tag_ids: Array.isArray(req.body?.tag_ids) ? req.body.tag_ids.map(Number) : undefined,
+      tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds'),
       status: active,
     });
     const rows = await legacyVendorServiceRows(req.user!.id, serviceId);
@@ -835,12 +855,122 @@ function parseMilestones(body: any): projectSvc.MilestoneInput[] {
   return [];
 }
 
+function legacyPlanRowsFromBody(body: any): any[] {
+  const raw = body?.milestones ?? body?.plan ?? body?.plans;
+  const rows = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? (() => { try { return JSON.parse(raw); } catch { return []; } })()
+      : [];
+  const list = Array.isArray(rows) && rows.length ? rows : [body];
+  return list
+    .filter((row: any) => row && (pickId(row, 'plan_id', 'id') || row.title || row.amount || row.amount_percentage || row.completion_days || row.status))
+    .map((row: any) => ({
+      plan_id: pickId(row, 'plan_id', 'planId', 'id') || null,
+      title: row.title ?? '',
+      description: row.description ?? null,
+      amount: optionalNum(row.amount),
+      days: optionalNum(row.days ?? row.completion_days ?? row.completionDays),
+      percentage: optionalNum(row.percentage ?? row.amount_percentage ?? row.amountPercentage),
+      update_photo: row.update_photo ?? row.updatePhoto ?? null,
+      update_comments: row.update_comments ?? row.updateComments ?? row.comments ?? null,
+      status: optionalNum(row.status),
+    }));
+}
+
+async function resolveOrderIdFromPlanBody(body: any): Promise<string> {
+  let orderId = pickId(body, 'order_id', 'orderId');
+  if (orderId) return orderId;
+  const rows = legacyPlanRowsFromBody(body);
+  const planId = rows.map((r) => r.plan_id).find(Boolean);
+  if (!planId) return '';
+  const row = await one<any>(
+    `SELECT order_id FROM order_plan WHERE plan_id = :id OR id = :id LIMIT 1`,
+    { id: planId },
+  ).catch(() => null);
+  return row?.order_id ? String(row.order_id) : '';
+}
+
+async function createLegacyPlanRows(orderId: number | string, rows: any[]) {
+  for (const row of rows) {
+    if (!row.title && row.amount === undefined && row.percentage === undefined) continue;
+    const result: any = await exec(
+      `INSERT INTO order_plan
+         (order_id, title, description, amount, days, percentage, mandatory,
+          vendor_status, customer_status, completion_days, amount_percentage,
+          balance_cost, update_photo, update_comments, status, created_at)
+       VALUES
+         (:orderId, :title, :description, :amount, :days, :percentage, 1,
+          'draft', 'pending', :completionDays, :amountPercentage,
+          :balanceCost, :updatePhoto, :updateComments, COALESCE(:status, 0), NOW())`,
+      {
+        orderId,
+        title: row.title || 'Plan',
+        description: row.description,
+        amount: row.amount ?? 0,
+        days: row.days ?? 0,
+        percentage: row.percentage ?? 0,
+        completionDays: row.days === undefined ? null : String(row.days),
+        amountPercentage: row.percentage ?? null,
+        balanceCost: row.amount ?? 0,
+        updatePhoto: row.update_photo,
+        updateComments: row.update_comments,
+        status: row.status ?? null,
+      },
+    );
+    await exec(`UPDATE order_plan SET id = plan_id WHERE plan_id = :id AND (id IS NULL OR id = 0)`, { id: result.insertId }).catch(() => undefined);
+  }
+  return query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: orderId });
+}
+
+async function updateLegacyPlanRows(orderId: number | string, rows: any[]) {
+  for (const row of rows) {
+    if (!row.plan_id) continue;
+    await exec(
+      `UPDATE order_plan SET
+          title = COALESCE(:title, title),
+          description = COALESCE(:description, description),
+          amount = COALESCE(:amount, amount),
+          days = COALESCE(:days, days),
+          percentage = COALESCE(:percentage, percentage),
+          completion_days = COALESCE(:completionDays, completion_days),
+          amount_percentage = COALESCE(:amountPercentage, amount_percentage),
+          balance_cost = COALESCE(:balanceCost, balance_cost),
+          update_photo = COALESCE(:updatePhoto, update_photo),
+          update_comments = COALESCE(:updateComments, update_comments),
+          status = COALESCE(:status, status),
+          updated_at = NOW()
+        WHERE (plan_id = :planId OR id = :planId) AND order_id = :orderId`,
+      {
+        orderId,
+        planId: row.plan_id,
+        title: row.title || null,
+        description: row.description ?? null,
+        amount: row.amount ?? null,
+        days: row.days ?? null,
+        percentage: row.percentage ?? null,
+        completionDays: row.days === undefined ? null : String(row.days),
+        amountPercentage: row.percentage ?? null,
+        balanceCost: row.amount ?? null,
+        updatePhoto: row.update_photo ?? null,
+        updateComments: row.update_comments ?? null,
+        status: row.status ?? null,
+      },
+    );
+  }
+  return query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: orderId });
+}
+
 legacyVendorRouter.post('/createPlan', async (req: AuthRequest, res, next) => {
   try {
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = await projectSvc.createPlan(orderId, parseMilestones(req.body));
+    const milestones = parseMilestones(req.body);
+    const legacyRows = legacyPlanRowsFromBody(req.body);
+    const data = milestones.length
+      ? await projectSvc.createPlan(orderId, milestones)
+      : await createLegacyPlanRows(orderId, legacyRows);
     // v4.5.35 — mobile bridge: Create_Plan_List_Model.dart reads
     // total_base_amount, used_percentage, current_plan_amount, remaining_percentage
     // at top level. Compute from the order + new plan.
@@ -862,16 +992,37 @@ legacyVendorRouter.post('/createPlan', async (req: AuthRequest, res, next) => {
 
 legacyVendorRouter.post('/updatePlan', async (req: AuthRequest, res, next) => {
   try {
-    const orderId = pickId(req.body, 'order_id', 'orderId');
+    const orderId = await resolveOrderIdFromPlanBody(req.body);
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = await projectSvc.updatePlan(orderId, parseMilestones(req.body));
+    const data = await updateLegacyPlanRows(orderId, legacyPlanRowsFromBody(req.body));
     send(res, { message: 'Plan updated', data });
   } catch (err) { next(err); }
 });
 
 legacyVendorRouter.post('/updatePlanStatus', async (req: AuthRequest, res, next) => {
   try {
+    const planId = pickId(req.body, 'plan_id', 'planId', 'id');
+    if (planId) {
+      const owner = await one<any>(
+        `SELECT p.order_id FROM order_plan p JOIN orders o ON o.order_id = p.order_id
+          WHERE (p.plan_id = :id OR p.id = :id) AND o.vendor_id = :vendorId LIMIT 1`,
+        { id: planId, vendorId: req.user!.id },
+      );
+      if (!owner) throw new ApiError(404, 'Plan not found');
+      const status = optionalNum(req.body?.status);
+      await exec(
+        `UPDATE order_plan
+            SET status = COALESCE(:status, status),
+                updated_at = NOW()
+          WHERE plan_id = :id OR id = :id`,
+        { id: planId, status: status ?? null },
+      );
+      return send(res, {
+        message: 'Plan status updated',
+        data: await query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: owner.order_id }),
+      });
+    }
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
@@ -908,7 +1059,7 @@ legacyVendorRouter.post('/vendorgetPlan', async (req: AuthRequest, res, next) =>
 
 legacyVendorRouter.post('/vendorPlanDetails', async (req: AuthRequest, res, next) => {
   try {
-    const orderId = pickId(req.body, 'order_id', 'orderId');
+    const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const data = await projectSvc.getProject(orderId);
@@ -935,10 +1086,10 @@ legacyVendorRouter.post('/addPlanMaterial', async (req: AuthRequest, res, next) 
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const m = await materialSvc.addMaterial(orderId, {
-      name: req.body?.name || req.body?.material_name || '',
-      quantity: req.body?.quantity ? num(req.body.quantity) : 1,
-      unit: req.body?.unit,
-      rate: req.body?.rate ? num(req.body.rate) : 0,
+      name: req.body?.name || req.body?.material_name || req.body?.title || '',
+      quantity: req.body?.quantity || req.body?.qty ? num(req.body.quantity ?? req.body.qty) : 1,
+      unit: req.body?.unit || req.body?.unit_type || req.body?.unitType,
+      rate: req.body?.rate || req.body?.unit_cost ? num(req.body.rate ?? req.body.unit_cost) : 0,
     });
     send(res, { message: 'Material added', data: m, material_id: m?.material_id }, 201);
   } catch (err) { next(err); }
@@ -951,10 +1102,10 @@ legacyVendorRouter.post('/editPlanMaterial', async (req: AuthRequest, res, next)
     if (!orderId || !materialId) throw new ApiError(400, 'order_id and material_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const m = await materialSvc.updateMaterial(orderId, materialId, {
-      name: req.body?.name,
-      quantity: req.body?.quantity ? num(req.body.quantity) : undefined,
-      unit: req.body?.unit,
-      rate: req.body?.rate ? num(req.body.rate) : undefined,
+      name: req.body?.name || req.body?.material_name || req.body?.title,
+      quantity: req.body?.quantity || req.body?.qty ? num(req.body.quantity ?? req.body.qty) : undefined,
+      unit: req.body?.unit || req.body?.unit_type || req.body?.unitType,
+      rate: req.body?.rate || req.body?.unit_cost ? num(req.body.rate ?? req.body.unit_cost) : undefined,
     });
     send(res, { message: 'Material updated', data: m });
   } catch (err) { next(err); }
@@ -1015,7 +1166,18 @@ legacyVendorRouter.get('/vendorInfo', async (req: AuthRequest, res, next) => {
 /* ───── Payment request (vendor → customer) ───── */
 legacyVendorRouter.post('/AskPyament', async (req: AuthRequest, res, next) => {
   try {
-    const planId = pickId(req.body, 'plan_id', 'planId', 'milestone_id');
+    let planId = pickId(req.body, 'plan_id', 'planId', 'milestone_id');
+    if (!planId) {
+      const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
+      if (orderId) {
+        await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
+        const plan = await one<any>(
+          `SELECT plan_id FROM order_plan WHERE order_id = :id ORDER BY plan_id DESC LIMIT 1`,
+          { id: orderId },
+        );
+        if (plan?.plan_id) planId = String(plan.plan_id);
+      }
+    }
     if (!planId) throw new ApiError(400, 'plan_id required');
     const out = await projectSvc.requestMilestonePayment(planId, req.user!.id);
     send(res, { message: 'Payment requested', data: out });
@@ -1151,7 +1313,7 @@ legacyVendorRouter.post('/vendorTransHistoryCurMon', async (req: AuthRequest, re
 
 legacyVendorRouter.post('/vendorPayout', async (req: AuthRequest, res, next) => {
   try {
-    const amount = num(req.body?.amount);
+    const amount = num(req.body?.amount ?? req.body?.payout_amount ?? req.body?.payoutAmount);
     const out = await payoutSvc.requestPayout(req.user!.id, amount, pickId(req.body, 'bank_id', 'bankId') || undefined, req.body?.note);
     send(res, { message: 'Payout requested', data: out }, 201);
   } catch (err) { next(err); }
@@ -1161,12 +1323,14 @@ legacyVendorRouter.post('/vendorPayout', async (req: AuthRequest, res, next) => 
 legacyVendorRouter.post('/AddBankDetails', async (req: AuthRequest, res, next) => {
   try {
     const out = await bankSvc.addBankDetails(req.user!.id, {
-      account_holder: req.body?.account_holder || req.body?.holder_name,
+      account_holder: req.body?.account_holder || req.body?.holder_name || req.body?.account_name || await defaultBankHolder(req.user!.id),
       account_number: req.body?.account_number,
       ifsc_code: req.body?.ifsc_code || req.body?.ifsc,
       bank_name: req.body?.bank_name,
       branch: req.body?.branch,
       upi_id: req.body?.upi_id,
+      pan_number: req.body?.pan_number,
+      swift_code: req.body?.swift_code,
       is_primary: req.body?.is_primary === 'true' || req.body?.is_primary === true,
     });
     send(res, { message: 'Bank added', data: out }, 201);
@@ -1181,6 +1345,7 @@ legacyVendorRouter.post('/EditBankDetails', async (req: AuthRequest, res, next) 
       account_holder: req.body?.account_holder, account_number: req.body?.account_number,
       ifsc_code: req.body?.ifsc_code, bank_name: req.body?.bank_name,
       branch: req.body?.branch, upi_id: req.body?.upi_id,
+      pan_number: req.body?.pan_number, swift_code: req.body?.swift_code,
     });
     send(res, { message: 'Bank updated', data: out });
   } catch (err) { next(err); }
@@ -1201,6 +1366,7 @@ legacyVendorRouter.post('/EditBankDetailsReq', async (req: AuthRequest, res, nex
       account_holder: req.body?.account_holder, account_number: req.body?.account_number,
       ifsc_code: req.body?.ifsc_code, bank_name: req.body?.bank_name,
       branch: req.body?.branch, upi_id: req.body?.upi_id,
+      pan_number: req.body?.pan_number, swift_code: req.body?.swift_code,
     });
     send(res, { message: 'Edit requested', data: out });
   } catch (err) { next(err); }
