@@ -1,5 +1,67 @@
 # Release Notes
 
+## v4.5.64 - Expose customer enquiry details API (2026-06-27)
+
+### Why
+
+The mobile app was calling:
+
+- `POST /customer/enquiryDetails`
+
+with payload:
+
+```json
+{
+  "enquiry_id": 90001,
+  "quotation_id": 60001
+}
+```
+
+Production returned an HTML 404 page instead of JSON. This blocked the
+Order Confirmation Payment screen because Flutter expected an API JSON
+response and received the frontend application's not-found page.
+
+### Issue Identified
+
+The backend route already existed in `legacyCustomer.ts`, but
+`next.config.js` did not include `enquiryDetails` in the customer legacy
+rewrite allow-list.
+
+Because of that, Vercel did not forward:
+
+- `/customer/enquiryDetails`
+
+to:
+
+- `/api/customer/enquiryDetails`
+
+The request therefore never reached the Express/customer API route.
+
+### What Changed
+
+- Added `enquiryDetails` to the customer legacy endpoint rewrite list so
+  production forwards the mobile endpoint to the backend API handler.
+- Kept the existing authenticated customer route path:
+  - `POST /customer/enquiryDetails`
+  - `POST /api/customer/enquiryDetails`
+- Updated the handler to return JSON for missing enquiry records:
+
+```json
+{
+  "success": false,
+  "message": "Enquiry not found",
+  "data": []
+}
+```
+
+### Impact
+
+- The endpoint no longer falls through to the frontend HTML 404 page.
+- Missing or unauthorized customer enquiry lookups now return a JSON
+  response that the mobile app can parse safely.
+- The route still requires a valid customer bearer token. Requests without
+  authentication should return JSON `401` instead of HTML.
+
 ## v4.5.63 - Correct vendor enquiry display-field types (2026-06-27)
 
 ### Why

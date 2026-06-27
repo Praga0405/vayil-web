@@ -964,7 +964,12 @@ legacyCustomerRouter.post('/enquiryDetails', async (req: AuthRequest, res, next)
   try {
     const enquiryId = pickId(req.body, 'enquiry_id', 'enquiryId', 'id');
     if (!enquiryId) throw new ApiError(400, 'enquiry_id required');
-    res.status(200).json({ success: true, data: await legacyCustomerEnquiryRows(req.user!.id, enquiryId) });
+    const data = await legacyCustomerEnquiryRows(req.user!.id, enquiryId);
+    if (!data.length) {
+      res.status(200).json({ success: false, message: 'Enquiry not found', data: [] });
+      return;
+    }
+    res.status(200).json({ success: true, data });
   } catch (err) { next(err); }
 });
 
