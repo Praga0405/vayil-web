@@ -1,5 +1,171 @@
 # Release Notes
 
+## v4.5.62 - Normalize vendor enquiry API numeric fields (2026-06-27)
+
+### Why
+
+The vendor mobile app reported a crash while parsing:
+
+- `POST /vendorEnuqiryList`
+- `POST /vendor/vendorEnuqiryList`
+
+The API was reachable and returned HTTP 200 with `success: true`, but
+some numeric values were serialized as strings:
+
+```json
+{
+  "status": "1",
+  "price": "150.00"
+}
+```
+
+The Flutter model expects:
+
+- `status`: integer
+- `price`: numeric / double
+
+So the app failed with:
+
+```text
+type 'String' is not a subtype of type 'int?'
+```
+
+and then crashed with:
+
+```text
+Null check operator used on a null value
+```
+
+### Issue Identified
+
+This was not a route or authentication issue. The endpoint returned data,
+but the response body had mixed JSON types.
+
+`vendorEnuqiryList` builds three legacy mobile buckets:
+
+- `new_enquiry`
+- `ongoing`
+- `request_quotation`
+
+The bucket rows come from multiple tables:
+
+- `enquiries`
+- `quotation`
+- `orders`
+- `order_step_logs`
+- `order_plan`
+- `vendor_services`
+
+Several of those columns are `DECIMAL`, nullable IDs, or legacy string
+status columns. MySQL/TiDB and `mysql2` can return decimal values such
+as `price` and `amount` as strings, and raw nested `orders` rows could
+still expose string statuses such as `"active"`.
+
+That meant one response could contain both numeric and string versions
+of the same logical field depending on which table/row produced it.
+
+### What Changed
+
+- Added vendor enquiry response normalization helpers in
+  `backend/src/routes/legacyVendor.ts`.
+- Cast key enquiry and quotation aliases to unsigned integers in SQL.
+- Normalized top-level vendor enquiry rows before returning them.
+- Normalized nested rows before attaching them to each bucket:
+  - `quotations`
+  - `orders`
+  - `order_step_logs`
+  - `plans`
+- Updated bucket classification comparisons to compare numeric IDs and
+  numeric step values, instead of relying on strict equality between
+  possibly mixed string/number DB values.
+- Preserved the existing legacy response envelope:
+
+```json
+{
+  "success": true,
+  "new_enquiry": [],
+  "ongoing": [],
+  "request_quotation": []
+}
+```
+
+### Fields Normalized
+
+Top-level enquiry rows:
+
+- `enquiry_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `service_id`: integer or `null`
+- `status`: integer
+- `price`: number or `null`
+- `minimum_fee`: number or `null`
+- `budget`: number or `null`
+
+Nested quotation rows:
+
+- `id`: integer or `null`
+- `quotation_id`: integer or `null`
+- `enquiry_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `service_id`: integer or `null`
+- `estimated_days`: integer or `null`
+- `status`: integer
+- `amount`: number or `null`
+- `final_amount`: number or `null`
+- `total`: number or `null`
+- `advance_amount`: number or `null`
+- `gst_amount`: number or `null`
+- `platform_fee`: number or `null`
+
+Nested order rows:
+
+- `id`: integer or `null`
+- `order_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `enquiry_id`: integer or `null`
+- `quotation_id`: integer or `null`
+- `service_id`: integer or `null`
+- `status`: integer
+- `amount`: number or `null`
+- `total`: number or `null`
+- `paid_amount`: number or `null`
+- `balance_amount`: number or `null`
+
+Nested step logs:
+
+- `id`: integer or `null`
+- `order_id`: integer or `null`
+- `step`: integer or `null`
+- `performed_by_id`: integer or `null`
+
+Nested plans:
+
+- `id`: integer or `null`
+- `plan_id`: integer or `null`
+- `order_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `completion_days`: integer or `null`
+- `status`: integer or `null`
+- `amount`: number or `null`
+- `amount_percentage`: number or `null`
+- `balance_cost`: number or `null`
+
+### Impact
+
+The vendor app should no longer crash when parsing enquiry bucket data
+because numeric fields now have consistent JSON number types across all
+records and nested rows.
+
+No mobile request-body change is required.
+
+### Files Changed
+
+- `backend/src/routes/legacyVendor.ts`
+
 ## v4.5.61 - Normalize customer enquiry list numeric fields (2026-06-27)
 
 ### Why
