@@ -276,11 +276,75 @@ function enquiryStatusExpr(alias: string) {
     END)`;
 }
 
+function intOrNull(value: any): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
+}
+
+function intOrDefault(value: any, fallback = 1): number {
+  return intOrNull(value) ?? fallback;
+}
+
+function normalizeNumericFields<T extends Record<string, any>>(row: T, keys: string[]): T {
+  const out: Record<string, any> = { ...row };
+  for (const key of keys) out[key] = intOrNull(row[key]);
+  return out as T;
+}
+
+function normalizeQuotationRow(row: any) {
+  const out = normalizeNumericFields(row, [
+    'id',
+    'quotation_id',
+    'enquiry_id',
+    'customer_id',
+    'vendor_id',
+    'service_id',
+    'estimated_days',
+  ]);
+  out.status = intOrDefault(row.status_int ?? row.status);
+  if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
+  return out;
+}
+
+function normalizeOrderRow(row: any) {
+  const out = normalizeNumericFields(row, [
+    'id',
+    'order_id',
+    'customer_id',
+    'vendor_id',
+    'enquiry_id',
+    'quotation_id',
+    'service_id',
+  ]);
+  out.status = intOrDefault(row.status_int ?? row.status);
+  if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
+  return out;
+}
+
+function normalizeEnquiryRow(row: any) {
+  const out = normalizeNumericFields(row, [
+    'enquiry_id',
+    'customer_id',
+    'vendor_id',
+    'service_id',
+  ]);
+  out.status = intOrDefault(row.status);
+  out.quotations = (row.quotations ?? []).map(normalizeQuotationRow);
+  out.orders = (row.orders ?? []).map(normalizeOrderRow);
+  return out;
+}
+
 async function legacyQuotationRows(enquiryId: number | string) {
-  return query<any>(
-    `SELECT COALESCE(q.id, q.quotation_id) AS id, q.enquiry_id, q.customer_id,
+  const rows = await query<any>(
+    `SELECT CAST(COALESCE(q.id, q.quotation_id) AS UNSIGNED) AS id,
+            CAST(q.quotation_id AS UNSIGNED) AS quotation_id,
+            CAST(q.enquiry_id AS UNSIGNED) AS enquiry_id,
+            CAST(q.customer_id AS UNSIGNED) AS customer_id,
+            CAST(q.vendor_id AS UNSIGNED) AS vendor_id,
             q.message, q.files, COALESCE(q.amount, q.final_amount, q.total) AS amount,
-            q.service_time, ${enquiryStatusExpr('q')} AS status, q.created_at,
+            q.service_time, CAST(${enquiryStatusExpr('q')} AS UNSIGNED) AS status, q.created_at,
             COALESCE(sm.status_name,
               CASE
                 WHEN q.status IN ('quoted', 'quote_received') THEN 'Quote Received'
@@ -291,11 +355,12 @@ async function legacyQuotationRows(enquiryId: number | string) {
             v.company_name
        FROM quotation q
        LEFT JOIN vendors v ON v.vendor_id = q.vendor_id
-       LEFT JOIN status_master sm ON sm.id = ${enquiryStatusExpr('q')}
+       LEFT JOIN status_master sm ON sm.id = CAST(${enquiryStatusExpr('q')} AS UNSIGNED)
       WHERE q.enquiry_id = :id
       ORDER BY COALESCE(q.id, q.quotation_id) DESC`,
     { id: enquiryId },
   ).catch(() => []);
+  return rows.map(normalizeQuotationRow);
 }
 
 async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?: string) {
@@ -303,15 +368,18 @@ async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?
     ? `e.customer_id = :customerId AND e.enquiry_id = :enquiryId`
     : `e.customer_id = :customerId`;
   const rows = await query<any>(
-    `SELECT COALESCE(e.id, e.enquiry_id) AS enquiry_id, e.customer_id,
+    `SELECT CAST(COALESCE(e.id, e.enquiry_id) AS UNSIGNED) AS enquiry_id,
+            CAST(e.customer_id AS UNSIGNED) AS customer_id,
             COALESCE(e.first_name, c.name) AS first_name,
             COALESCE(e.last_name, '') AS last_name,
             COALESCE(e.email, c.email) AS email,
             COALESCE(e.phone, c.phone, c.mobile) AS phone,
             COALESCE(e.message, e.description) AS message,
             e.files,
-            ${enquiryStatusExpr('e')} AS status,
-            e.created_at, e.service_id, e.vendor_id,
+            CAST(${enquiryStatusExpr('e')} AS UNSIGNED) AS status,
+            e.created_at,
+            CAST(e.service_id AS UNSIGNED) AS service_id,
+            CAST(e.vendor_id AS UNSIGNED) AS vendor_id,
             COALESCE(sm.status_name,
               CASE
                 WHEN e.status IN ('new', 'pending') THEN 'Pending'
@@ -332,19 +400,22 @@ async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?
        LEFT JOIN customers c ON c.customer_id = e.customer_id
        LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
        LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id OR vs.id = e.service_id
-       LEFT JOIN status_master sm ON sm.id = ${enquiryStatusExpr('e')}
+       LEFT JOIN status_master sm ON sm.id = CAST(${enquiryStatusExpr('e')} AS UNSIGNED)
       WHERE ${where}
       ORDER BY COALESCE(e.id, e.enquiry_id) DESC`,
     { customerId, enquiryId },
   );
-  return Promise.all(rows.map(async (row: any) => ({
-    ...row,
-    quotations: await legacyQuotationRows(row.enquiry_id),
-    orders: await query<any>(
+  return Promise.all(rows.map(async (row: any) => {
+    const orders = await query<any>(
       `SELECT * FROM orders WHERE enquiry_id = :id ORDER BY order_id DESC`,
       { id: row.enquiry_id },
-    ).catch(() => []),
-  })));
+    ).catch(() => []);
+    return normalizeEnquiryRow({
+      ...row,
+      quotations: await legacyQuotationRows(row.enquiry_id),
+      orders,
+    });
+  }));
 }
 
 /* ─────────────────────────────────────────────────────────────

@@ -1,5 +1,122 @@
 # Release Notes
 
+## v4.5.61 - Normalize customer enquiry list numeric fields (2026-06-27)
+
+### Why
+
+The customer mobile app reported a crash while parsing:
+
+- `POST /customer/enquiryList`
+
+The API returned HTTP 200 and enquiry data was present, but Flutter
+failed during model parsing with:
+
+```text
+type 'String' is not a subtype of type 'int?'
+```
+
+### Issue Identified
+
+The endpoint was not failing at the route or auth layer. The issue was
+response type drift.
+
+The customer enquiry list handler already tried to expose mobile-friendly
+numeric status codes through `status_int`, but the response still had two
+mixed-type risks:
+
+- MySQL/TiDB can return numeric-looking values as strings depending on
+  expression type, casts, nullable columns, and driver behavior.
+- Nested `orders` were attached with `SELECT *`, so their `status` could
+  remain a string such as `"active"` while top-level enquiry `status`
+  was numeric.
+
+That produced records where the same logical field could be an integer
+in one row and a string in another row, for example:
+
+```json
+{
+  "status": "1",
+  "customer_id": 1,
+  "service_id": 150001,
+  "vendor_id": 420001
+}
+```
+
+The mobile model expects integer-compatible values for these fields, so
+the mixed response crashed parsing even though the API returned success.
+
+### What Changed
+
+- Cast key SQL aliases to unsigned integers in the enquiry list query:
+  - `enquiry_id`
+  - `customer_id`
+  - `vendor_id`
+  - `service_id`
+  - `status`
+- Cast key quotation aliases to unsigned integers:
+  - `id`
+  - `quotation_id`
+  - `enquiry_id`
+  - `customer_id`
+  - `vendor_id`
+  - `status`
+- Added response-level normalization helpers so the JSON payload is
+  stable even if the DB driver returns numeric-looking values as strings.
+- Normalized nested `quotations` and `orders` under each enquiry so they
+  cannot reintroduce string `status` or string ID values.
+- Preserved the existing response envelope:
+
+```json
+{
+  "success": true,
+  "data": []
+}
+```
+
+### Fields Normalized
+
+For every top-level enquiry row:
+
+- `enquiry_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `service_id`: integer or `null`
+- `status`: integer
+
+For nested quotation rows:
+
+- `id`: integer or `null`
+- `quotation_id`: integer or `null`
+- `enquiry_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `service_id`: integer or `null`
+- `estimated_days`: integer or `null`
+- `status`: integer
+
+For nested order rows:
+
+- `id`: integer or `null`
+- `order_id`: integer or `null`
+- `customer_id`: integer or `null`
+- `vendor_id`: integer or `null`
+- `enquiry_id`: integer or `null`
+- `quotation_id`: integer or `null`
+- `service_id`: integer or `null`
+- `status`: integer
+
+### Impact
+
+The customer app should no longer crash when parsing enquiry list data
+because the same ID/status fields now use consistent numeric JSON types
+across all records.
+
+No mobile request-body change is required.
+
+### Files Changed
+
+- `backend/src/routes/legacyCustomer.ts`
+
 ## v4.5.60 - Fix customer profile route and bucket null-safety (2026-06-27)
 
 ### Why
