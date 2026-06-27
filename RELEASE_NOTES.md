@@ -19,6 +19,41 @@ The bug was in the OTP-send step. It sent OTP before proving that the
 phone belonged to the requested login role, so a successful OTP-send
 response could still be unusable by the mobile app.
 
+### Issue Identified
+
+The backend already enforced the correct cross-role rule during OTP
+verification:
+
+- customer verification checks the `customers` table first
+- vendor verification checks the `vendors` table first
+- if the requested-role user does not exist but the phone exists in the
+  opposite role, verification returns `409`
+
+However, the login OTP generation routes did not perform the same
+role-aware account check before sending OTP:
+
+- `/customer/logincustomerWithOTP` called `authService.requestOtp(phone, 'customer')`
+  immediately.
+- Only after sending/storing the OTP did it call
+  `legacyCustomerIdByPhone(phone)`.
+- For a vendor-only phone, that lookup correctly returned `null`, because
+  there was no matching customer row.
+- The route still returned HTTP `200`, so the mobile app treated the OTP
+  send as successful even though the required `customerId` was missing.
+
+The same risk existed on the vendor login OTP route:
+
+- `/vendor-login-otp` sent OTP first.
+- Then it looked up `legacyVendorIdByPhone(phone)`.
+- A customer-only phone could therefore produce a successful OTP-send
+  response with `vendorId: null`.
+
+This created a bad mobile state: the app moved to the OTP verification
+screen without a valid role-specific user ID. The first verification call
+could return the correct `409` cross-role error, and repeated attempts
+could degrade into `"phone or user id is required"` if the request no
+longer carried usable phone/user context.
+
 ### What Changed
 
 - Added `authService.requestLoginOtp(phone, userType)` as the shared
@@ -33,6 +68,55 @@ response could still be unusable by the mobile app.
   - no vendor account exists -> return `404 Vendor not found. Please register first.`
 - Reused the same cross-role conflict message in both OTP send and OTP
   verify paths so mobile gets a consistent API error.
+
+### How It Was Implemented
+
+Implementation was intentionally kept small and centralized:
+
+- `backend/src/services/authService.ts`
+  - Added `roleConflictMessage(userType)` so the send and verify paths
+    use the same cross-role error text.
+  - Added `requestLoginOtp(phone, userType)`.
+  - The helper validates the phone, looks for an existing user in the
+    requested role, checks the opposite role only when the requested-role
+    user is missing, and sends OTP only after a valid same-role account
+    is found.
+  - Reused this same role-conflict message inside
+    `verifyOtpAndIssueToken()` to keep error behavior consistent.
+
+- `backend/src/routes/legacyCustomer.ts`
+  - Updated `POST /customer/logincustomerWithOTP` to call
+    `authService.requestLoginOtp(phone, 'customer')`.
+  - The response now derives `customerId` directly from the resolved
+    customer row returned by the auth service.
+  - Successful responses therefore return a string customer ID and no
+    longer depend on a second lookup after OTP has already been sent.
+
+- `backend/src/routes/legacyVendor.ts`
+  - Updated `POST /vendor-login-otp` to call
+    `authService.requestLoginOtp(phone, 'vendor')`.
+  - The response now derives `vendorId` directly from the resolved vendor
+    row returned by the auth service.
+  - Successful responses therefore return a string vendor ID and cannot
+    return `vendorId: null`.
+
+### Resulting Behavior
+
+Customer login OTP:
+
+| Phone ownership | API result |
+| --- | --- |
+| phone exists in `customers` | `200`, OTP generated, valid `customerId` returned |
+| phone exists only in `vendors` | `409`, OTP is not generated/sent |
+| phone exists in neither table | `404 Customer not found. Please register first.` |
+
+Vendor login OTP:
+
+| Phone ownership | API result |
+| --- | --- |
+| phone exists in `vendors` | `200`, OTP generated, valid `vendorId` returned |
+| phone exists only in `customers` | `409`, OTP is not generated/sent |
+| phone exists in neither table | `404 Vendor not found. Please register first.` |
 
 ### Demo OTP Behavior
 
