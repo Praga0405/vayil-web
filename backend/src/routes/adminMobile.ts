@@ -86,6 +86,35 @@ async function selectAdminService(serviceId: any) {
   );
 }
 
+const vendorStatusUpdateValues = new Set([
+  'pending',
+  'verified',
+  'pending_approval',
+  'approved',
+  'rejected',
+]);
+
+/*
+ * TEMPORARY TESTING BYPASS:
+ * adminMobileRouter is mounted before adminRouter and its router-level
+ * requireAdmin middleware intercepts unmatched /Admin/* paths. Keep this
+ * route above requireAdmin while the mobile/API team tests vendor onboarding.
+ * Re-enable auth before production by moving this below adminMobileRouter.use().
+ */
+adminMobileRouter.post('/VendorStatusUpdate', async (req, res, next) => {
+  try {
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId');
+    const status = String(req.body?.status ?? '').trim().toLowerCase();
+    if (!id || !status) throw new ApiError(400, 'id and status required');
+    if (!vendorStatusUpdateValues.has(status)) {
+      throw new ApiError(400, 'status must be one of pending, verified, pending_approval, approved, rejected');
+    }
+    await exec(`UPDATE vendors SET status = :status WHERE vendor_id = :id`, { id, status });
+    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id });
+    send(res, { message: 'Vendor status updated', data: vendor, vendor, id, status });
+  } catch (err) { next(err); }
+});
+
 /* ─── admin auth middleware (separate from our staff JWT, simpler) ─── */
 function requireAdmin(req: AuthRequest, _res: any, next: any) {
   const auth = (req.headers.authorization || '').toString();

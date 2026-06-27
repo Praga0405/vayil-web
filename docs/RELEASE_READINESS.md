@@ -21,7 +21,7 @@ Last updated: 2026-06-27 · v4.5.58.
 
 | Bypass | Where | Demo state | Production requirement | Risk |
 |---|---|---|---|---|
-| Unauthenticated vendor status update | `backend/src/routes/admin.ts` -> `POST /Admin/VendorStatusUpdate` | Route is mounted before `requireAuth(['staff', 'admin'])` so testers can update newly registered vendors without staff JWTs. | Move the route back behind admin auth before production. | Anyone with the endpoint URL could set a vendor to `pending`, `verified`, `pending_approval`, `approved`, or `rejected`. |
+| Unauthenticated vendor status update | `backend/src/routes/adminMobile.ts` and `backend/src/routes/admin.ts` -> `POST /Admin/VendorStatusUpdate` | Route is mounted before admin auth so testers can update newly registered vendors without staff JWTs. | Move both route mounts back behind admin auth before production. | Anyone with the endpoint URL could set a vendor to `pending`, `verified`, `pending_approval`, `approved`, or `rejected`. |
 
 ## Required to be set in production (currently demo-friendly defaults)
 

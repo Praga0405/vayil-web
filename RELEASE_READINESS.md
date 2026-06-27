@@ -6,12 +6,13 @@ Update statuses inline as each lands.
 ## Backend (vayil-web-backend repo)
 
 - [ ] **Re-enable auth on `POST /Admin/VendorStatusUpdate` before production.**
-  This endpoint is temporarily mounted before `requireAuth(['staff', 'admin'])`
-  so the mobile/API team can repeatedly approve/reject newly registered
-  vendors during demo testing without generating staff tokens. Before any real
-  production launch, move this route back behind the admin auth middleware.
-  Leaving it unauthenticated would allow anyone with the endpoint URL to change
-  vendor account status.
+  This endpoint is temporarily mounted before admin auth in both
+  `backend/src/routes/adminMobile.ts` and `backend/src/routes/admin.ts` so the
+  mobile/API team can repeatedly approve/reject newly registered vendors during
+  demo testing without generating staff tokens. Before any real production
+  launch, move both route mounts back behind the admin auth middleware. Leaving
+  it unauthenticated would allow anyone with the endpoint URL to change vendor
+  account status.
 
 - [ ] **Pre-existing TypeScript errors block `npm run build`.** `tsx` runtime
   works fine, but the Docker image build (`npm run build`) currently fails on:

@@ -34,7 +34,10 @@ new vendor accounts and were repeatedly blocked by missing admin tokens.
 ### What Changed
 
 - Mounted `POST /Admin/VendorStatusUpdate` before the admin auth
-  middleware as a temporary testing-only exception.
+  middleware as a temporary testing-only exception in both admin route
+  layers:
+  - `backend/src/routes/adminMobile.ts`
+  - `backend/src/routes/admin.ts`
 - Kept every other `/Admin/*` route behind the existing staff/admin auth
   middleware.
 - Added explicit request validation for the mobile-supported vendor
@@ -63,8 +66,8 @@ This is intentionally temporary and must be removed before production.
 
 Release readiness has been updated with a blocking checklist item:
 
-- Move `POST /Admin/VendorStatusUpdate` back behind
-  `requireAuth(['staff', 'admin'])` before any real launch.
+- Move `POST /Admin/VendorStatusUpdate` back behind admin auth in both
+  `adminMobile.ts` and `admin.ts` before any real launch.
 
 Leaving this endpoint unauthenticated in production would allow anyone
 with the endpoint URL to change a vendor account status.
