@@ -259,11 +259,12 @@ legacyVendorRouter.post('/verifyVendorOTP', async (req, res, next) => {
 legacyVendorRouter.post('/vendor-login-otp', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
-    await authService.requestOtp(phone, 'vendor');
+    const out = await authService.requestLoginOtp(phone, 'vendor');
+    const vendorId = out.user?.vendor_id ?? out.user?.id;
     res.status(200).json({
       success: true,
       message: 'OTP sent for login',
-      vendorId: await legacyVendorIdByPhone(phone),
+      vendorId: String(vendorId),
     });
   } catch (err) { next(err); }
 });

@@ -1,5 +1,102 @@
 # Release Notes
 
+## v4.5.55 - Role-aware mobile login OTP demo compatibility (2026-06-27)
+
+### Why
+
+The mobile customer login flow reported this sequence:
+
+- `POST /customer/logincustomerWithOTP` returned `success: true` and
+  `message: "OTP sent for login"`, but `customerId: null`.
+- The app then attempted OTP verification with an empty customer ID.
+- `POST /customer/verifyLogincustomerOTP` correctly rejected the phone
+  with `409` when the phone belonged to a vendor account.
+- A repeated verification attempt then failed with
+  `"phone or user id is required"` because the mobile request no longer
+  had a usable customer ID or phone context.
+
+The bug was in the OTP-send step. It sent OTP before proving that the
+phone belonged to the requested login role, so a successful OTP-send
+response could still be unusable by the mobile app.
+
+### What Changed
+
+- Added `authService.requestLoginOtp(phone, userType)` as the shared
+  login-only OTP entry point.
+- Customer login OTP now checks the phone before sending OTP:
+  - matching customer exists -> send OTP and return a real `customerId`
+  - phone belongs to vendor -> return `409` before sending OTP
+  - no customer account exists -> return `404 Customer not found. Please register first.`
+- Vendor login OTP now mirrors the same behavior:
+  - matching vendor exists -> send OTP and return a real `vendorId`
+  - phone belongs to customer -> return `409` before sending OTP
+  - no vendor account exists -> return `404 Vendor not found. Please register first.`
+- Reused the same cross-role conflict message in both OTP send and OTP
+  verify paths so mobile gets a consistent API error.
+
+### Demo OTP Behavior
+
+No production contract was changed for OTP verification. The existing
+demo mode remains:
+
+- `OTP_BYPASS=true`
+- `OTP_BYPASS_CODE=123456`
+- `NEXT_PUBLIC_OTP_BYPASS=true` for the web banner, if needed
+
+When bypass is enabled, login OTP still stores/verifies `123456` and
+does not send SMS. The difference is that demo login OTP success now
+requires a valid same-role account, so the mobile app receives a usable
+`customerId` or `vendorId` before moving to the verification screen.
+
+### Expected Mobile Contract
+
+Customer login demo flow:
+
+```json
+POST /customer/logincustomerWithOTP
+{
+  "phone": "customer_demo_phone"
+}
+```
+
+```json
+{
+  "success": true,
+  "message": "OTP sent for login",
+  "customerId": "29"
+}
+```
+
+```json
+POST /customer/verifyLogincustomerOTP
+{
+  "customerId": "29",
+  "otp": "123456"
+}
+```
+
+Vendor login follows the same contract with `vendorId`.
+
+### Impact
+
+- Mobile no longer receives `customerId: null` or `vendorId: null` on a
+  successful login OTP response.
+- Cross-role phones fail before OTP is sent, which prevents the app from
+  entering a dead verification state.
+- Demo/staging can continue using `123456` until real SMS OTP is enabled
+  for production.
+- Production migration is only an environment change: flip
+  `OTP_BYPASS=false` and keep the same mobile request/response shape.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+---
+
 ## v4.5.54 - Restore customer mobile category and location APIs (2026-06-27)
 
 ### Why

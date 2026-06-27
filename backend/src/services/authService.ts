@@ -39,6 +39,11 @@ async function findUserByPhone(userType: UserKind, phone: string) {
   );
 }
 
+function roleConflictMessage(userType: UserKind) {
+  const otherRole = userType === 'customer' ? 'vendor' : 'customer';
+  return `This phone is already registered as a ${otherRole}. Sign in with that role instead, or use a different phone for the new ${userType} account.`;
+}
+
 export async function findUserByLegacyId(userType: UserKind, userId: number | string) {
   const table = tableName(userType);
   const idCol = idColumn(userType);
@@ -57,6 +62,23 @@ export async function requestOtp(phone: string, userType: UserKind) {
   await storeOtp(phone, `${userType}_login`, otp);
   await sendOtp(phone, otp);
   return { phone, message: 'OTP sent successfully' };
+}
+
+export async function requestLoginOtp(phone: string, userType: UserKind) {
+  if (!phone || phone.length < 8) throw new ApiError(400, 'Phone is required');
+
+  const user = await findUserByPhone(userType, phone);
+  if (!user) {
+    const otherUserType: UserKind = userType === 'customer' ? 'vendor' : 'customer';
+    const collision = await findUserByPhone(otherUserType, phone);
+    if (collision) throw new ApiError(409, roleConflictMessage(userType));
+
+    const roleLabel = userType === 'customer' ? 'Customer' : 'Vendor';
+    throw new ApiError(404, `${roleLabel} not found. Please register first.`);
+  }
+
+  await requestOtp(phone, userType);
+  return { phone, message: 'OTP sent successfully', user };
 }
 
 export async function verifyOtpAndIssueToken(opts: {
@@ -84,16 +106,13 @@ export async function verifyOtpAndIssueToken(opts: {
     // with. Existing users (already in the same `table`) are fine —
     // they just sign back in.
     const otherTable = userType === 'customer' ? 'vendors'   : 'customers';
-    const otherRole  = userType === 'customer' ? 'vendor'    : 'customer';
     const collision  = await one<any>(
       `SELECT 1 AS hit FROM ${otherTable}
         WHERE phone = :phone OR mobile = :phone LIMIT 1`,
       { phone },
     );
     if (collision) {
-      throw new ApiError(409,
-        `This phone is already registered as a ${otherRole}. Sign in with that role instead, or use a different phone for the new ${userType} account.`,
-      );
+      throw new ApiError(409, roleConflictMessage(userType));
     }
     // v4.5.27 — supply ph_code on INSERT. Migration 006 added a NOT-NULL
     // `ph_code` column (country dialing code) to both customers + vendors

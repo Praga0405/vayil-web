@@ -369,11 +369,12 @@ legacyCustomerRouter.post('/verifyCustomerOTP', async (req, res, next) => {
 legacyCustomerRouter.post('/logincustomerWithOTP', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
-    await authService.requestOtp(phone, 'customer');
+    const out = await authService.requestLoginOtp(phone, 'customer');
+    const customerId = out.user?.customer_id ?? out.user?.id;
     res.status(200).json({
       success: true,
       message: 'OTP sent for login',
-      customerId: await legacyCustomerIdByPhone(phone),
+      customerId: String(customerId),
     });
   } catch (err) { next(err); }
 });
