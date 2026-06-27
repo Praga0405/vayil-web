@@ -120,7 +120,18 @@ export async function addToCart(customerId: number | string, body: {
 
 export async function getCart(customerId: number | string) {
   return query<any>(
-    `SELECT c.*, v.name AS vendor_name, v.company_name
+    `SELECT c.cart_id,
+            c.customer_id,
+            c.vendor_id,
+            c.service_id,
+            COALESCE(c.service_title, '') AS service_title,
+            COALESCE(c.quantity, 1) AS quantity,
+            COALESCE(c.price, 0) AS price,
+            COALESCE(c.metadata, JSON_OBJECT()) AS metadata,
+            c.created_at,
+            c.updated_at,
+            COALESCE(v.name, '') AS vendor_name,
+            COALESCE(v.company_name, '') AS company_name
        FROM customer_cart c
        LEFT JOIN vendors v ON v.vendor_id = c.vendor_id
       WHERE c.customer_id = :id

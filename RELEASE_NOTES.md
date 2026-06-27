@@ -1,5 +1,121 @@
 # Release Notes
 
+## v4.5.60 - Fix customer profile route and bucket null-safety (2026-06-27)
+
+### Why
+
+The mobile team reported that the Bucket List screen was crashing after
+calling:
+
+- `POST /customer/getCustomerInfo`
+
+Production returned a Next.js HTML 404 page instead of JSON. The Flutter
+screen then attempted to read profile/bucket fields as strings and hit:
+
+```text
+type 'Null' is not a subtype of type 'String'
+Bucket_list_screen.dart:816
+```
+
+### Issue Identified
+
+The Express backend already had the customer profile endpoints:
+
+- `GET /customer/getCustomerInfo`
+- `POST /customer/getCustomerInfo`
+- `POST /customer/saveCustomerInfo`
+
+However, the Vercel rewrite allow-list in `next.config.js` did not
+include `getCustomerInfo` or `saveCustomerInfo`. Because of that,
+requests to `https://vayil-web.vercel.app/customer/getCustomerInfo`
+fell through to the Next.js app router and returned an HTML 404 page
+with:
+
+```http
+x-matched-path: /404
+content-type: text/html; charset=utf-8
+```
+
+The API route was present, but production routing never forwarded the
+mobile URL to the Express handler.
+
+A second issue was null-safety. The customer profile and bucket/cart
+responses could still include nullable string fields, including:
+
+- `name`
+- `email`
+- `state`
+- `city`
+- `pincode`
+- `address`
+- `profile_photo`
+- `service_title`
+- `vendor_name`
+- `company_name`
+
+If the Flutter model casts those values directly to `String`, a `null`
+value can crash the screen.
+
+### What Changed
+
+- Added missing Vercel rewrites for:
+  - `/customer/getCustomerInfo`
+  - `/customer/saveCustomerInfo`
+- Kept the existing authenticated Express handlers unchanged in route
+  ownership: both endpoints still require a customer token.
+- Updated the legacy customer profile row shape so nullable string-style
+  fields return empty strings instead of `null`.
+- Updated the bucket/cart list query so display fields return safe
+  defaults:
+  - `service_title`: `""`
+  - `vendor_name`: `""`
+  - `company_name`: `""`
+  - `quantity`: `1`
+  - `price`: `0`
+  - `metadata`: `{}`
+
+### Expected Behavior After Fix
+
+No-token requests should return JSON auth errors, not HTML 404 pages.
+Valid customer-token requests should return:
+
+```json
+{
+  "success": true,
+  "message": "Customer details",
+  "data": [
+    {
+      "id": 29,
+      "name": "Logesh",
+      "email": "logeshblazing@gmail.com",
+      "ph_code": "+91",
+      "phone": "9345704991",
+      "status": "verified",
+      "state": "",
+      "city": "",
+      "pincode": "",
+      "address": "",
+      "profile_photo": ""
+    }
+  ]
+}
+```
+
+The exact values depend on the customer row; the important compatibility
+point is that profile string fields are no longer returned as `null`.
+
+### Files Changed
+
+- `next.config.js`
+- `backend/src/routes/legacyCustomer.ts`
+- `backend/src/services/customerService.ts`
+
+### Impact
+
+The Bucket List screen should stop crashing due to HTML 404 responses or
+nullable customer/cart display strings. No mobile request change is
+required.
+
 ## v4.5.59 - De-duplicate city list API responses (2026-06-27)
 
 ### Why

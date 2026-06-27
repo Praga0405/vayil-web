@@ -115,11 +115,25 @@ async function fetchLegacyCustomerJson(path: string, body: any, authorization?: 
 
 async function legacyCustomerRowsById(customerId: number | string) {
   return query<any>(
-    `SELECT COALESCE(id, customer_id) AS id, name, email, COALESCE(ph_code, '+91') AS ph_code,
-            COALESCE(phone, mobile) AS phone, status, created_at, updated_at, state, city,
-            pincode, address, COALESCE(profile_photo, profile_image) AS profile_photo,
-            COALESCE(device_id, '') AS device_id, otp, otp_expires_at, otp_attempts,
-            last_otp_sent_at, COALESCE(terms_accept, 1) AS terms_accept,
+    `SELECT COALESCE(id, customer_id) AS id,
+            COALESCE(name, '') AS name,
+            COALESCE(email, '') AS email,
+            COALESCE(ph_code, '+91') AS ph_code,
+            COALESCE(phone, mobile, '') AS phone,
+            COALESCE(status, '') AS status,
+            created_at,
+            updated_at,
+            COALESCE(CAST(state AS CHAR), '') AS state,
+            COALESCE(CAST(city AS CHAR), '') AS city,
+            COALESCE(CAST(pincode AS CHAR), '') AS pincode,
+            COALESCE(address, '') AS address,
+            COALESCE(profile_photo, profile_image, '') AS profile_photo,
+            COALESCE(device_id, '') AS device_id,
+            COALESCE(otp, '') AS otp,
+            COALESCE(CAST(otp_expires_at AS CHAR), '') AS otp_expires_at,
+            COALESCE(otp_attempts, 0) AS otp_attempts,
+            COALESCE(CAST(last_otp_sent_at AS CHAR), '') AS last_otp_sent_at,
+            COALESCE(terms_accept, 1) AS terms_accept,
             COALESCE(is_deleted, 0) AS is_deleted
        FROM customers
       WHERE customer_id = :id OR id = :id
