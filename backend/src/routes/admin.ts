@@ -9,13 +9,15 @@
  *   POST /Admin/GetVendorList     → list vendors (filterable by status)
  *   POST /Admin/VendorDetails     → full vendor + services for one id
  *   POST /Admin/VendorKycUpdate   → approve / reject KYC
- *   POST /Admin/VendorStatusUpdate→ active / inactive toggle
+ *   POST /Admin/VendorStatusUpdate→ vendor test status update
  *   POST /Admin/VendorDelete      → soft delete (status='deleted')
  *   POST /Admin/saveVendor        → update mutable vendor fields
  *   POST /Admin/GetReviewQueue    → list pending vendor_review_queue rows
  *
  * Auth: staff JWT (same secret/middleware ops uses). The admin panel
  * stores its token in localStorage and sends Authorization: Bearer.
+ * Temporary exception: /VendorStatusUpdate is mounted before auth for
+ * mobile/API testing and must be moved back behind auth before production.
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -24,7 +26,6 @@ import { requireAuth } from '../middleware/auth';
 import { ApiError, ok } from '../utils/http';
 
 export const adminRouter = Router();
-adminRouter.use(requireAuth(['staff', 'admin']));
 
 function send(res: any, payload: any = {}, status = 200) {
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
@@ -45,6 +46,38 @@ function boolish(v: any): boolean | null {
   if (v === undefined || v === null || v === '') return null;
   return v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true';
 }
+
+const vendorStatusUpdateValues = new Set([
+  'pending',
+  'verified',
+  'pending_approval',
+  'approved',
+  'rejected',
+]);
+
+async function handleVendorStatusUpdate(req: any, res: any, next: any) {
+  try {
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
+    const status = String(req.body?.status ?? '').trim().toLowerCase()
+    if (!id || !status) throw new ApiError(400, 'id and status required')
+    if (!vendorStatusUpdateValues.has(status)) {
+      throw new ApiError(400, 'status must be one of pending, verified, pending_approval, approved, rejected')
+    }
+    await exec(`UPDATE vendors SET status = :status WHERE vendor_id = :id`, { id, status })
+    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id })
+    send(res, { message: 'Vendor status updated', data: vendor, vendor, id, status })
+  } catch (err) { next(err) }
+}
+
+/*
+ * TEMPORARY TESTING BYPASS:
+ * The mobile/API team is registering vendors repeatedly during demo testing
+ * and needs to approve/reject them without generating admin tokens.
+ * Re-enable auth before production by moving this route below adminRouter.use().
+ */
+adminRouter.post('/VendorStatusUpdate', handleVendorStatusUpdate)
+
+adminRouter.use(requireAuth(['staff', 'admin']));
 
 /* ── Vendor list with optional filters ─────────────────────── */
 adminRouter.post('/GetVendorList', async (req, res, next) => {
@@ -180,17 +213,7 @@ adminRouter.post('/VendorKycUpdate', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-/* ── Active / inactive toggle ──────────────────────────────── */
-adminRouter.post('/VendorStatusUpdate', async (req, res, next) => {
-  try {
-    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId')
-    const status = req.body?.status
-    if (!id || !status) throw new ApiError(400, 'id and status required')
-    await exec(`UPDATE vendors SET status = :status WHERE vendor_id = :id`, { id, status })
-    const vendor = await one<any>(`SELECT * FROM vendors WHERE vendor_id = :id`, { id })
-    send(res, { message: 'Vendor status updated', data: vendor, vendor, id, status })
-  } catch (err) { next(err) }
-})
+/* /VendorStatusUpdate is temporarily mounted before auth for API testing. */
 
 /* ── Soft delete ───────────────────────────────────────────── */
 adminRouter.post('/VendorDelete', async (req, res, next) => {

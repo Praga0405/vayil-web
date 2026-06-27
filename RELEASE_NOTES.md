@@ -1,5 +1,74 @@
 # Release Notes
 
+## v4.5.58 - Temporary admin vendor-status testing bypass (2026-06-27)
+
+### Why
+
+The mobile/API team is registering new vendors frequently during demo
+testing and needs a fast way to move those vendors through status states
+without generating a staff/admin JWT for every test cycle.
+
+The affected endpoint is:
+
+- `POST /Admin/VendorStatusUpdate`
+
+Example test payload:
+
+```json
+{
+  "id": "120001",
+  "status": "approved"
+}
+```
+
+### Issue Identified
+
+`/Admin/VendorStatusUpdate` was protected by the global admin middleware:
+
+- `requireAuth(['staff', 'admin'])`
+
+That is the correct production behavior, but it slowed down the current
+mobile onboarding test loop because testers need to approve/reject many
+new vendor accounts and were repeatedly blocked by missing admin tokens.
+
+### What Changed
+
+- Mounted `POST /Admin/VendorStatusUpdate` before the admin auth
+  middleware as a temporary testing-only exception.
+- Kept every other `/Admin/*` route behind the existing staff/admin auth
+  middleware.
+- Added explicit request validation for the mobile-supported vendor
+  status values:
+  - `pending`
+  - `verified`
+  - `pending_approval`
+  - `approved`
+  - `rejected`
+- Preserved the existing response shape:
+
+```json
+{
+  "success": true,
+  "message": "Vendor status updated",
+  "data": {},
+  "vendor": {},
+  "id": "120001",
+  "status": "approved"
+}
+```
+
+### Production Readiness Note
+
+This is intentionally temporary and must be removed before production.
+
+Release readiness has been updated with a blocking checklist item:
+
+- Move `POST /Admin/VendorStatusUpdate` back behind
+  `requireAuth(['staff', 'admin'])` before any real launch.
+
+Leaving this endpoint unauthenticated in production would allow anyone
+with the endpoint URL to change a vendor account status.
+
 ## v4.5.57 - Close remaining mobile request-field parity gaps (2026-06-27)
 
 ### Why

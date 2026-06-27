@@ -4,7 +4,7 @@ This file is the single checklist for moving from dev/demo to
 production. Every flag below is a deliberate dev-mode convenience —
 **leaving any of them on in production is a bug**.
 
-Last updated: 2026-06-03 · v4.5.10.
+Last updated: 2026-06-27 · v4.5.58.
 
 ## ⚠ Critical — must be flipped
 
@@ -16,6 +16,12 @@ Last updated: 2026-06-03 · v4.5.10.
 | `NEXT_PUBLIC_OTP_BYPASS_CODE` | frontend | `123456` | *(unset)* | Code shown in the banner. Only meaningful with bypass on. |
 | `PAYMENT_VERIFY_BYPASS` | backend | `true` | `false` | When `true`, Razorpay payment-verification skips signature checks so smoke tests + the demo can run without live keys. Production must verify HMAC signatures — leaving this on lets anyone mark a payment as paid. |
 | `NEXT_PUBLIC_USE_MOCK_DATA` | frontend | `false` | `false` | When `true`, the frontend short-circuits API calls to in-memory data. Should be `false` everywhere except local UI-only work. |
+
+## Temporary code bypasses
+
+| Bypass | Where | Demo state | Production requirement | Risk |
+|---|---|---|---|---|
+| Unauthenticated vendor status update | `backend/src/routes/admin.ts` -> `POST /Admin/VendorStatusUpdate` | Route is mounted before `requireAuth(['staff', 'admin'])` so testers can update newly registered vendors without staff JWTs. | Move the route back behind admin auth before production. | Anyone with the endpoint URL could set a vendor to `pending`, `verified`, `pending_approval`, `approved`, or `rejected`. |
 
 ## Required to be set in production (currently demo-friendly defaults)
 
