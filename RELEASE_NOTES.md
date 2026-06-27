@@ -37,6 +37,29 @@ Remaining examples found in the audit:
 - `/Admin/saveVendor` did not write all mobile-parity vendor profile
   columns, so admin edits could still return nulls in mobile responses.
 
+### Issue Identified
+
+The issue was not a database outage or authentication problem. It was
+request/response contract drift between the old mobile API contract and
+the new backend implementation.
+
+The old mobile app sends `multipart/form-data` using field names from
+the Postman/OpenAPI collection. Several new backend handlers were
+reading newer canonical names instead. Because the mobile values were
+not picked up, the handler either:
+
+- saved `NULL` or default values,
+- failed validation even though the mobile request had the required
+  value under a different field name,
+- returned stale/null fields in the response after a successful update,
+  or
+- treated an endpoint as a different workflow than the collection
+  described.
+
+The same pattern that caused vendor onboarding Step 1 to drop
+`full_name`, `state`, and `profile_photo_url` was still present in other
+customer, vendor, and admin mobile routes.
+
 ### What Changed
 
 - Customer profile:
@@ -86,6 +109,89 @@ Remaining examples found in the audit:
     `service_category`, `sub_service`, `years_of_experience`,
     `short_bio`, `languages`, `area_of_service`, working hours, tools,
     certifications, and KYC mobile aliases.
+
+### Implementation Details
+
+The compatibility fix was implemented as alias support at the API
+boundary, not by asking the mobile team to change request bodies.
+
+- `backend/src/routes/legacyCustomer.ts`
+  - Added old mobile aliases before calling shared services.
+  - `saveCustomerInfo` now forwards `state` and maps
+    `profile_photo_url` into `profile_photo` / `profile_image`.
+  - `placeOrder` now reads `order_amount` / `orderAmount` when `amount`
+    is not present.
+  - `addReview` and `finalStep` now read `review_description`.
+  - `sendQuotation` now has two branches:
+    - with `quotation_id`: existing accept/reject quote behavior
+    - without `quotation_id` but with `vendor_id`: old mobile
+      quotation-request behavior, creating an enquiry-like request and
+      mirroring contact fields
+
+- `backend/src/services/customerService.ts`
+  - Added `state` to `CustomerProfileUpdate`.
+  - Updated customer profile persistence to write `customers.state`.
+
+- `backend/src/routes/legacyVendor.ts`
+  - Added parsers for optional numbers, JSON/CSV/repeated multipart
+    lists, and default bank-holder resolution.
+  - `saveServiceListing` / `updateServiceListing` now parse `tag_ids`
+    from array, JSON string, or CSV string.
+  - Added legacy plan helpers for old mobile top-level plan payloads.
+  - `createPlan` keeps the current full `milestones` flow when a
+    milestone array is sent, but supports old top-level fields when the
+    collection payload is used.
+  - `updatePlan` can resolve the order from `plan_id` and update legacy
+    plan columns.
+  - `updatePlanStatus` now supports `plan_id` + `status`.
+  - `vendorPlanDetails` now treats `id` as an order ID alias.
+  - `AskPyament` now accepts `order_id` and resolves the latest plan for
+    that order if the app does not send `plan_id`.
+  - Material routes now map `title`, `qty`, `unit_type`, and
+    `unit_cost` to the canonical material fields.
+  - `vendorPayout` now maps `payout_amount` to `amount`.
+  - Bank routes now pass `pan_number` and `swift_code` through to the
+    service and derive an `account_holder` when the old mobile request
+    omits one.
+
+- `backend/src/services/bankService.ts`
+  - Relaxed add-bank validation to require only `account_number` and
+    `ifsc_code`, matching the mobile collection.
+  - Added persistence for `pan_number` and `swift_code`.
+  - Kept `account_holder` populated using the vendor-derived fallback so
+    the existing non-null database column remains satisfied.
+
+- `backend/src/routes/adminMobile.ts`
+  - Trimmed service-tag names on add/update.
+  - Rejected blank tag names.
+  - Filtered blank service-tag rows from the admin mobile tag list.
+
+- `backend/src/routes/admin.ts`
+  - Expanded `/Admin/saveVendor` to dual-write canonical vendor columns
+    and mobile-parity columns.
+  - Admin edits now persist the same profile/KYC fields that the mobile
+    vendor profile reads back.
+
+### Per-API Behavior
+
+| API | Previous behavior | Updated behavior |
+| --- | --- | --- |
+| `POST /customer/saveCustomerInfo` | Dropped `profile_photo_url` and did not save `state`. | Saves `profile_photo_url` as profile photo and persists `state`. |
+| `POST /customer/placeOrder` | Required `amount`; rejected collection payload with only `order_amount`. | Accepts `amount`, `order_amount`, or `orderAmount`. |
+| `POST /customer/addReview` | Ignored `review_description`. | Saves `review_description` as the review comment. |
+| `POST /customer/finalStep` | Ignored `review_description` when completing an order. | Uses `review_description` as the sign-off comment fallback. |
+| `POST /customer/sendQuotation` | Required `quotation_id`; behaved only as quote accept/reject. | Also supports old request-to-vendor payloads with `vendor_id` and contact fields. |
+| `POST /saveServiceListing` / `POST /updateServiceListing` | `tag_ids` worked only if Express received a real array. | Parses array, JSON string, and CSV string. |
+| `POST /createPlan` | Required `milestones`/`plan`/`plans`; old top-level fields failed. | Accepts old top-level `title`, `completion_days`, `amount_percentage`, `amount`, and status fields. |
+| `POST /updatePlan` | Required `order_id`; top-level `plan_id` payloads failed. | Resolves `order_id` from `plan_id` and updates legacy plan columns. |
+| `POST /updatePlanStatus` | Expected `order_id` and submitted the whole plan. | Supports `plan_id` + `status` updates. |
+| `POST /vendorPlanDetails` | Required `order_id`; collection sends `id`. | Accepts `id` as an alias. |
+| `POST /AskPyament` | Required `plan_id`; collection sends `order_id`. | Accepts `order_id` and resolves the latest plan. |
+| `POST /addPlanMaterial` / `POST /editPlanMaterial` | Ignored old fields like `title`, `qty`, `unit_type`, `unit_cost`. | Maps them to material name, quantity, unit, and rate. |
+| `POST /vendorPayout` | Required `amount`; collection sends `payout_amount`. | Accepts `payout_amount` / `payoutAmount`. |
+| `POST /AddBankDetails` / `POST /EditBankDetails` | Dropped `pan_number` / `swift_code` and required `account_holder`. | Persists PAN/SWIFT and derives holder when omitted. |
+| Admin service tags | Could add/update blank tag names. | Rejects blank names and filters existing blanks. |
+| `POST /Admin/saveVendor` | Updated only canonical vendor fields. | Also writes mobile profile/KYC columns used by the app. |
 
 ### Impact
 
