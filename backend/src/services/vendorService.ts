@@ -30,16 +30,33 @@ function normalizedKycStatus(value: any): 'not_submitted' | 'pending' | 'approve
 export interface VendorProfileUpdate {
   name?: string | null;
   company_name?: string | null;
+  ph_code?: string | null;
+  phone?: string | null;
   email?: string | null;
+  full_name?: string | null;
+  state?: string | null;
   city?: string | null;
   address?: string | null;
   pincode?: string | null;
   about?: string | null;
+  short_bio?: string | null;
   owner_name?: string | null;
   profile_image?: string | null;
+  profile_photo?: string | null;
+  service_tag?: string | null;
+  service_category?: string | null;
+  sub_service?: string | null;
   gst_number?: string | null;
-  is_gst_registered?: boolean | null;
+  is_gst_registered?: number | boolean | null;
   experience_years?: number | null;
+  years_of_experience?: number | null;
+  languages?: string | null;
+  area_of_service?: string | null;
+  working_hours_from?: string | null;
+  working_hours_to?: string | null;
+  willing_to_travel?: number | boolean | null;
+  tools_available?: string | null;
+  certifications?: string | null;
   fcm_token?: string | null;
   proof_type?: string | null;
   proof_number?: string | null;
@@ -58,20 +75,41 @@ export async function getVendor(vendorId: number | string) {
 }
 
 export async function updateVendor(vendorId: number | string, b: VendorProfileUpdate) {
+  const fullName = firstString(b.full_name, b.owner_name);
+  const profilePhoto = firstString(b.profile_photo, b.profile_image);
+  const shortBio = firstString(b.short_bio, b.about);
+  const experienceYears = b.years_of_experience ?? b.experience_years ?? null;
   const params = {
     id: vendorId,
     name: b.name ?? null,
     company_name: b.company_name ?? null,
+    ph_code: b.ph_code ?? null,
+    phone: b.phone ?? null,
     email: b.email ?? null,
+    full_name: fullName,
+    state: b.state ?? null,
     city: b.city ?? null,
     address: b.address ?? null,
     pincode: b.pincode ?? null,
-    about: b.about ?? null,
-    owner_name: b.owner_name ?? null,
-    profile_image: b.profile_image ?? null,
+    about: shortBio,
+    short_bio: shortBio,
+    owner_name: fullName,
+    profile_image: profilePhoto,
+    profile_photo: profilePhoto,
+    service_tag: b.service_tag ?? null,
+    service_category: b.service_category ?? null,
+    sub_service: b.sub_service ?? null,
     gst_number: b.gst_number ?? null,
     is_gst_registered: b.is_gst_registered ?? null,
-    experience_years: b.experience_years ?? null,
+    experience_years: experienceYears,
+    years_of_experience: experienceYears,
+    languages: b.languages ?? null,
+    area_of_service: b.area_of_service ?? null,
+    working_hours_from: b.working_hours_from ?? null,
+    working_hours_to: b.working_hours_to ?? null,
+    willing_to_travel: b.willing_to_travel ?? null,
+    tools_available: b.tools_available ?? null,
+    certifications: b.certifications ?? null,
     fcm_token: b.fcm_token ?? null,
     proof_type: firstString(b.proof_type, b.kyc_id_type),
     proof_number: firstString(b.proof_number, b.kyc_id_number),
@@ -86,16 +124,34 @@ export async function updateVendor(vendorId: number | string, b: VendorProfileUp
     `UPDATE vendors SET
        name              = COALESCE(:name, name),
        company_name      = COALESCE(:company_name, company_name),
+       ph_code           = COALESCE(:ph_code, ph_code),
+       phone             = COALESCE(:phone, phone),
+       mobile            = COALESCE(:phone, mobile),
        email             = COALESCE(:email, email),
+       full_name         = COALESCE(:full_name, full_name),
+       state             = COALESCE(:state, state),
        city              = COALESCE(:city, city),
        address           = COALESCE(:address, address),
        pincode           = COALESCE(:pincode, pincode),
        about             = COALESCE(:about, about),
+       short_bio         = COALESCE(:short_bio, short_bio),
        owner_name        = COALESCE(:owner_name, owner_name),
        profile_image     = COALESCE(:profile_image, profile_image),
+       profile_photo     = COALESCE(:profile_photo, profile_photo),
+       service_tag       = COALESCE(:service_tag, service_tag),
+       service_category  = COALESCE(:service_category, service_category),
+       sub_service       = COALESCE(:sub_service, sub_service),
        gst_number        = COALESCE(:gst_number, gst_number),
        is_gst_registered = COALESCE(:is_gst_registered, is_gst_registered),
        experience_years  = COALESCE(:experience_years, experience_years),
+       years_of_experience = COALESCE(:years_of_experience, years_of_experience),
+       languages         = COALESCE(:languages, languages),
+       area_of_service   = COALESCE(:area_of_service, area_of_service),
+       working_hours_from = COALESCE(:working_hours_from, working_hours_from),
+       working_hours_to  = COALESCE(:working_hours_to, working_hours_to),
+       willing_to_travel = COALESCE(:willing_to_travel, willing_to_travel),
+       tools_available   = COALESCE(:tools_available, tools_available),
+       certifications    = COALESCE(:certifications, certifications),
        fcm_token         = COALESCE(:fcm_token, fcm_token),
        proof_type        = COALESCE(:proof_type, proof_type),
        proof_number      = COALESCE(:proof_number, proof_number),
@@ -279,6 +335,7 @@ export async function setListingStatus(vendorId: number | string, serviceId: num
 }
 
 export async function addServiceTag(name: string) {
+  if (!name) throw new ApiError(400, 'service tag name is required');
   const existing = await one<any>('SELECT * FROM service_tags WHERE name = :name', { name });
   if (existing) return existing;
   const result: any = await exec(

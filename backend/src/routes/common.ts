@@ -135,7 +135,9 @@ commonRouter.get('/service-tags', async (_req, res, next) => {
     const tags = await query(
       `SELECT id, name, COALESCE(is_active, status, 1) AS is_active
          FROM service_tags
-        WHERE COALESCE(is_deleted, 0) = 0 AND COALESCE(is_active, status, 1) = 1
+        WHERE COALESCE(is_deleted, 0) = 0
+          AND COALESCE(is_active, status, 1) = 1
+          AND TRIM(COALESCE(name, '')) <> ''
         ORDER BY name ASC`,
     );
     res.status(200).json({ success: true, tags });

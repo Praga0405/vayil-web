@@ -40,9 +40,32 @@ function pickNullable(b: any, ...keys: string[]): string | null {
   const value = pickId(b, ...keys);
   return value || null;
 }
+function pickCsv(b: any, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const value = b?.[k];
+    if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean).join(',');
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.map((v) => String(v).trim()).filter(Boolean).join(',');
+      } catch { /* plain CSV */ }
+      return trimmed;
+    }
+    return String(value);
+  }
+  return null;
+}
 function num(v: any, fb = 0): number {
   if (v === undefined || v === null || v === '') return fb;
   const n = Number(v); return Number.isFinite(n) ? n : fb;
+}
+function mobileFlag(v: any): number | null {
+  if (v === undefined || v === null || v === '') return null;
+  const s = String(v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'y' ? 1 : 0;
 }
 function activeFlag(v: any): boolean | undefined {
   if (v === undefined || v === null || v === '') return undefined;
@@ -537,25 +560,47 @@ legacyVendorRouter.use(requireApprovedVendor({
 /* ───── Onboarding step1..step4 + serviceTagStep ───── */
 async function handleStep(step: number, req: AuthRequest, res: any, next: any) {
   try {
-    const vendor = await vendorSvc.onboardingStep(req.user!.id, step, {
-      name: req.body?.name, company_name: req.body?.company_name,
-      owner_name: req.body?.owner_name, email: req.body?.email,
-      city: req.body?.city, address: req.body?.address, pincode: req.body?.pincode,
-      about: req.body?.about, profile_image: req.body?.profile_image,
-      gst_number: req.body?.gst_number,
-      is_gst_registered: req.body?.is_gst_registered === 'true' || req.body?.is_gst_registered === true,
+    await vendorSvc.onboardingStep(req.user!.id, step, {
+      name: pickNullable(req.body, 'name'),
+      company_name: pickNullable(req.body, 'company_name', 'companyName'),
+      ph_code: pickNullable(req.body, 'ph_code', 'phone_code'),
+      phone: pickNullable(req.body, 'phone', 'mobile', 'mobile_number'),
+      email: pickNullable(req.body, 'email'),
+      full_name: pickNullable(req.body, 'full_name', 'fullName', 'owner_name', 'ownerName'),
+      owner_name: pickNullable(req.body, 'owner_name', 'ownerName', 'full_name', 'fullName'),
+      state: pickNullable(req.body, 'state', 'state_id', 'stateId'),
+      city: pickNullable(req.body, 'city', 'city_id', 'cityId'),
+      address: pickNullable(req.body, 'address'),
+      pincode: pickNullable(req.body, 'pincode', 'pin_code', 'pinCode'),
+      about: pickNullable(req.body, 'about', 'short_bio', 'shortBio'),
+      short_bio: pickNullable(req.body, 'short_bio', 'shortBio', 'about'),
+      profile_image: pickNullable(req.body, 'profile_image', 'profile_photo', 'profile_photo_url', 'profilePhoto', 'profilePhotoUrl'),
+      profile_photo: pickNullable(req.body, 'profile_photo', 'profile_photo_url', 'profile_image', 'profilePhoto', 'profilePhotoUrl'),
+      service_tag: pickCsv(req.body, 'service_tag', 'service_tags', 'serviceTag', 'serviceTags', 'tag_ids', 'tagIds'),
+      service_category: pickNullable(req.body, 'service_category', 'serviceCategory', 'category_id', 'categoryId'),
+      sub_service: pickNullable(req.body, 'sub_service', 'subService', 'service_subcategory', 'subcategory_id', 'subcategoryId'),
+      gst_number: pickNullable(req.body, 'gst_number', 'gstNumber'),
+      is_gst_registered: mobileFlag(req.body?.is_gst_registered ?? req.body?.isGstRegistered),
       experience_years: req.body?.experience_years ? num(req.body.experience_years) : null,
+      years_of_experience: req.body?.years_of_experience ? num(req.body.years_of_experience) : null,
+      certifications: pickCsv(req.body, 'certifications', 'certification_urls', 'certificationUrls'),
+      languages: pickCsv(req.body, 'languages'),
+      area_of_service: pickCsv(req.body, 'area_of_service', 'areaOfService'),
+      working_hours_from: pickNullable(req.body, 'working_hours_from', 'workingHoursFrom'),
+      working_hours_to: pickNullable(req.body, 'working_hours_to', 'workingHoursTo'),
+      willing_to_travel: mobileFlag(req.body?.willing_to_travel ?? req.body?.willingToTravel),
+      tools_available: pickCsv(req.body, 'tools_available', 'toolsAvailable'),
       proof_type: pickNullable(req.body, 'proof_type', 'kyc_id_type', 'id_type'),
       proof_number: pickNullable(req.body, 'proof_number', 'kyc_id_number', 'id_number'),
-      kyc_document_url: pickNullable(req.body, 'kyc_document_url', 'kyc_id_image', 'document_url', 'documentUrl'),
+      kyc_document_url: pickNullable(req.body, 'kyc_document_url', 'kyc_id_image', 'id_image_url', 'document_url', 'documentUrl'),
       kyc_id_type: pickNullable(req.body, 'kyc_id_type', 'proof_type', 'id_type'),
       kyc_id_number: pickNullable(req.body, 'kyc_id_number', 'proof_number', 'id_number'),
-      kyc_id_image: pickNullable(req.body, 'kyc_id_image', 'kyc_document_url', 'document_url', 'documentUrl'),
+      kyc_id_image: pickNullable(req.body, 'kyc_id_image', 'id_image_url', 'kyc_document_url', 'document_url', 'documentUrl'),
       kyc_selfie: pickNullable(req.body, 'kyc_selfie', 'selfie_url', 'selfieUrl', 'selfie'),
       kyc_status: step >= 4 ? 'pending' : pickNullable(req.body, 'kyc_status'),
-      fcm_token: req.body?.fcm_token,
+      fcm_token: pickNullable(req.body, 'fcm_token', 'device_id', 'deviceId'),
     });
-    send(res, { message: `Step ${step} saved`, data: vendor });
+    send(res, { message: `Step ${step} saved`, data: await legacyVendorRowsById(req.user!.id) });
   } catch (err) { next(err); }
 }
 legacyVendorRouter.post('/step1', (req: AuthRequest, res, next) => handleStep(1, req, res, next));
@@ -565,8 +610,10 @@ legacyVendorRouter.post('/step4', (req: AuthRequest, res, next) => handleStep(4,
 
 legacyVendorRouter.post('/serviceTagStep', async (req: AuthRequest, res, next) => {
   try {
-    const tag = await vendorSvc.addServiceTag(String(req.body?.name || req.body?.tag || '').trim());
-    send(res, { message: 'Tag saved', data: tag });
+    const serviceTag = pickCsv(req.body, 'service_tag', 'service_tags', 'serviceTag', 'serviceTags', 'tag_ids', 'tagIds');
+    if (!serviceTag) throw new ApiError(400, 'service_tag is required');
+    await vendorSvc.onboardingStep(req.user!.id, 0, { service_tag: serviceTag });
+    send(res, { message: 'Tag saved', data: await legacyVendorRowsById(req.user!.id) });
   } catch (err) { next(err); }
 });
 

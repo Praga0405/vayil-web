@@ -1,5 +1,137 @@
 # Release Notes
 
+## v4.5.56 - Fix vendor onboarding step field parity (2026-06-27)
+
+### Why
+
+The mobile vendor onboarding flow reported that submitted values from
+Steps 1-4 and service-tag selection were not saved or returned correctly.
+The clearest failing Step 1 example was:
+
+```json
+{
+  "full_name": "venkat",
+  "state": "1",
+  "city": "870001",
+  "profile_photo_url": "uploaded image URL"
+}
+```
+
+The API response still returned:
+
+```json
+{
+  "full_name": null,
+  "state": null,
+  "profile_photo": null
+}
+```
+
+The uploaded file API was already returning a valid URL. The problem was
+that the Step 1 handler did not map `profile_photo_url` into the vendor
+profile columns used by the mobile response.
+
+The same pattern existed across the remaining onboarding screens:
+
+- Step 1 mobile fields such as `full_name`, `state`, and
+  `profile_photo_url` were not fully mapped.
+- Step 2 fields such as `service_category`, `sub_service`,
+  `years_of_experience`, `certifications`, and `short_bio` were not
+  dual-written to the mobile-parity columns.
+- Step 3 fields such as `area_of_service`, `working_hours_from`,
+  `working_hours_to`, `languages`, `willing_to_travel`, and
+  `tools_available` were not persisted.
+- Step 4 supported some KYC aliases, but not the mobile attachment field
+  `id_image_url`.
+- `/serviceTagStep` incorrectly behaved like a service-tag master-data
+  create endpoint. The mobile app sends selected tag IDs in
+  `service_tag`, so the selected tags should be saved to the vendor row.
+- `/service-tags` could return an invalid blank tag row, reported as
+  `id: 30001, name: ""`.
+
+### What Changed
+
+- Expanded `vendorService.updateVendor()` to dual-write canonical vendor
+  columns and mobile-parity columns together.
+- Updated `POST /step1` through `POST /step4` field mapping to accept the
+  mobile request-body names from the Postman/OpenAPI collection.
+- Updated onboarding step responses to return the same mobile-shaped
+  vendor `data` array used by `GET /vendorInfo`.
+- Reworked `POST /serviceTagStep` to save selected service tags onto the
+  authenticated vendor profile instead of creating a new service-tag row.
+- Kept `POST /VendorAddServiceTag` as the service-tag creation endpoint,
+  but now rejects empty names instead of creating blank records.
+- Filtered blank service tags from `GET /service-tags`.
+- Added migration `011_clean_blank_service_tags.sql` to soft-disable
+  blank `service_tags` rows by setting `is_deleted = 1`,
+  `is_active = 0`, and `status = 0`.
+
+### Field Mapping Covered
+
+Step 1 now saves:
+
+- `company_name`
+- `full_name`
+- `state`
+- `city`
+- `pincode`
+- `address`
+- `profile_photo_url` / `profile_photo` / `profile_image`
+
+Service tag step now saves:
+
+- `service_tag`
+- `service_tags`
+- `tag_ids`
+- JSON-stringified arrays or repeated multipart keys
+
+Step 2 now saves:
+
+- `service_category`
+- `sub_service`
+- `years_of_experience`
+- `certifications`
+- `short_bio`
+
+Step 3 now saves:
+
+- `area_of_service`
+- `working_hours_from`
+- `working_hours_to`
+- `languages`
+- `willing_to_travel`
+- `tools_available`
+
+Step 4 now saves:
+
+- `id_type` / `kyc_id_type`
+- `id_number` / `kyc_id_number`
+- `id_image_url` / `kyc_id_image`
+- `selfie_url` / `kyc_selfie`
+
+### Resulting Behavior
+
+- Submitted onboarding values are persisted to the `vendors` table and
+  returned immediately in the API response.
+- `profile_photo_url` from the upload API now appears back as
+  `profile_photo` in vendor profile responses.
+- The response shape for onboarding steps now matches the mobile profile
+  shape: `{ success, message, data: [vendor] }`.
+- Selected service tags are saved as the vendor's `service_tag` value.
+- Blank service-tag records are no longer returned to the mobile app, and
+  future empty tag creation is rejected with a `400`.
+- Step 4 still moves the vendor into the existing admin review flow by
+  setting the final submission state through `submitVendorForReview()`.
+
+### Verification
+
+```bash
+npm run build --workspace backend
+git diff --check
+```
+
+---
+
 ## v4.5.55 - Role-aware mobile login OTP demo compatibility (2026-06-27)
 
 ### Why
