@@ -8,32 +8,119 @@ The mobile team reported duplicate city options in the dropdown backed by:
 
 - `POST /customer/get_city`
 
-The endpoint was returning raw rows from the `city` master table. If the
-table had more than one active row with the same city name, every row was
-sent to the app and the same city appeared multiple times.
+The endpoint was returning raw active rows from the `city` master table.
+If the table had more than one non-deleted row with the same city name,
+each row was sent to the app and the same city appeared multiple times
+in the mobile dropdown.
+
+This was a response/data-hygiene issue, not an auth issue. The API was
+working, but it exposed master-data duplication directly to mobile.
+
+### Issue Identified
+
+The city-list handlers queried `city` with only `status` and
+`is_deleted` filters:
+
+```sql
+SELECT city_id, city_name, city_state, city_state_id, ...
+  FROM city
+ WHERE city_state_id = :sid
+   AND COALESCE(is_deleted,0)=0
+   AND status=1
+ ORDER BY city_name
+```
+
+There was no response-level uniqueness rule. So these rows would all be
+returned separately:
+
+```text
+city_id=101, city_name="Coimbatore", city_state_id=1
+city_id=205, city_name="Coimbatore", city_state_id=1
+city_id=319, city_name=" Coimbatore ", city_state_id=1
+```
+
+The mobile dropdown displays by `city_name`, so duplicate rows became
+duplicate visible options.
+
+### Endpoints Covered
+
+The fix was applied to every route that can feed the same city dropdown
+or related admin city list:
+
+| Surface | Endpoint | Response key |
+|---|---|---|
+| Customer mobile | `POST /customer/get_city` | `city`, `data` |
+| Customer mobile | `GET /customer/get_city` | `city`, `data` |
+| Vendor mobile | `POST /vendor/get_city` | `city` |
+| Bare mobile lookup | `POST /get_city` | `city` |
+| Admin mobile | `POST /Admin/get_city` | `data` |
+| Admin city creation | `POST /Admin/addCity` | prevents new duplicate active rows |
+
+Supported filters are unchanged:
+
+- `state_id`
+- `city_state_id`
+- `state_name`
+- `city_state`
+- empty body for all active cities
 
 ### What Changed
 
-- Added a shared city response normalizer:
-  - trims city display names,
-  - drops blank city names,
-  - keeps one stable row per normalized `city_name`,
-  - prefers the lowest `city_id` when duplicates exist.
-- Applied the same de-duplication to all mobile/admin city-list surfaces:
-  - `POST /customer/get_city`
-  - `GET /customer/get_city`
-  - `POST /vendor/get_city`
-  - `POST /get_city`
-  - `POST /Admin/get_city`
-- Updated `POST /Admin/addCity` to avoid inserting a new active city row
-  when an active non-deleted city with the same trimmed name and state id
-  already exists.
+Added `backend/src/utils/city.ts` with a shared `uniqueCityRows()` helper.
+
+The helper:
+
+- trims city display names,
+- collapses repeated whitespace inside city names,
+- drops blank city names,
+- compares names case-insensitively,
+- keeps one stable row per normalized `city_name`,
+- prefers the lowest `city_id` when duplicate rows exist,
+- preserves the old response fields such as `city_id`, `city_name`,
+  `city_state`, `city_state_id`, `status`, and `is_deleted`.
+
+The customer handler now returns the same de-duplicated array in both
+legacy keys:
+
+```json
+{
+  "success": true,
+  "city": [],
+  "data": []
+}
+```
+
+`POST /Admin/addCity` was also hardened so it first checks for an active,
+non-deleted city with the same trimmed name and `city_state_id`. If one
+exists, it returns that existing city instead of inserting another row.
+
+### Why Response De-duplication Was Used
+
+We did not use a broad SQL `DISTINCT` as the main fix because the mobile
+contract expects full legacy city rows, including `city_id`. A `DISTINCT`
+query over the full row would still return duplicates when only `city_id`
+differs.
+
+The response normalizer gives the mobile app a stable dropdown immediately
+while preserving the existing request and response field names.
 
 ### Impact
 
 Mobile dropdowns now receive unique city records even if duplicate rows
 still exist in the database. This fixes duplicate options immediately
 without requiring a production data write.
+
+The only visible behavior change is that, when duplicate city rows exist,
+the API returns the row with the lowest `city_id` for that city name.
+No mobile request-body change is required.
+
+### Files Changed
+
+- `backend/src/utils/city.ts`
+- `backend/src/routes/legacyCustomer.ts`
+- `backend/src/routes/legacyVendor.ts`
+- `backend/src/routes/bareMobile.ts`
+- `backend/src/routes/adminMobile.ts`
 
 ### Data Cleanup Note
 
@@ -42,6 +129,48 @@ does not contain a local `backend/.env` or DB target credentials. If the
 team still wants the underlying master table cleaned, run a guarded
 soft-delete/backfill against the production DB after confirming the
 target database and backup.
+
+Suggested cleanup approach for a later DB maintenance window:
+
+- list duplicate active city names grouped by normalized name and
+  `city_state_id`,
+- choose the lowest `city_id` as the canonical row,
+- soft-delete only the duplicate rows after checking for references,
+- keep the API de-duplication in place as a defensive guard.
+
+### Verification
+
+- Backend build passed:
+
+```bash
+npm run build --workspace backend
+```
+
+- Live Vercel read-only checks passed after deployment:
+
+```json
+{
+  "endpoint": "/customer/get_city",
+  "request": { "state_id": 1 },
+  "status": 200,
+  "total": 18,
+  "duplicateCount": 0
+}
+```
+
+```json
+{
+  "endpoint": "/customer/get_city",
+  "request": {},
+  "status": 200,
+  "total": 48,
+  "duplicateCount": 0
+}
+```
+
+### Commit
+
+- `734c400` - `De-duplicate city list responses`
 
 ## v4.5.58 - Temporary admin vendor-status testing bypass (2026-06-27)
 
@@ -54,6 +183,7 @@ without generating a staff/admin JWT for every test cycle.
 The affected endpoint is:
 
 - `POST /Admin/VendorStatusUpdate`
+- `POST /admin/VendorStatusUpdate` through the lowercase mount
 
 Example test payload:
 
@@ -66,13 +196,38 @@ Example test payload:
 
 ### Issue Identified
 
-`/Admin/VendorStatusUpdate` was protected by the global admin middleware:
+`/Admin/VendorStatusUpdate` was protected by admin middleware, which is
+the correct production behavior:
 
 - `requireAuth(['staff', 'admin'])`
 
 That is the correct production behavior, but it slowed down the current
 mobile onboarding test loop because testers need to approve/reject many
 new vendor accounts and were repeatedly blocked by missing admin tokens.
+
+There was also a router-order issue during the first implementation.
+`adminMobileRouter` is mounted before `adminRouter`:
+
+```ts
+app.use('/Admin', adminMobileRouter);
+app.use('/admin', adminMobileRouter);
+app.use('/Admin', adminRouter);
+app.use('/admin', adminRouter);
+```
+
+`adminMobileRouter` had its own router-level `requireAdmin` middleware.
+Because that router is mounted first, an unauthenticated
+`/Admin/VendorStatusUpdate` request was intercepted there and returned:
+
+```json
+{
+  "success": false,
+  "message": "Admin token required"
+}
+```
+
+That meant changing only `admin.ts` was not enough. The temporary test
+bypass had to be mounted above auth in both admin route layers.
 
 ### What Changed
 
@@ -83,6 +238,10 @@ new vendor accounts and were repeatedly blocked by missing admin tokens.
   - `backend/src/routes/admin.ts`
 - Kept every other `/Admin/*` route behind the existing staff/admin auth
   middleware.
+- Continued supporting all existing id aliases:
+  - `id`
+  - `vendor_id`
+  - `vendorId`
 - Added explicit request validation for the mobile-supported vendor
   status values:
   - `pending`
@@ -90,6 +249,8 @@ new vendor accounts and were repeatedly blocked by missing admin tokens.
   - `pending_approval`
   - `approved`
   - `rejected`
+- Normalized the incoming status by trimming and lowercasing it before
+  validation.
 - Preserved the existing response shape:
 
 ```json
@@ -103,6 +264,52 @@ new vendor accounts and were repeatedly blocked by missing admin tokens.
 }
 ```
 
+### What Did Not Change
+
+- `POST /Admin/VendorKycUpdate` remains authenticated.
+- Admin user management, settings, taxonomy, customer, service, bank,
+  proof, and dashboard APIs remain authenticated.
+- Customer and vendor auth behavior was not changed.
+- No vendor record was modified by Codex during verification.
+
+### Testing Behavior
+
+During the demo/testing window, the mobile/API team can call:
+
+```http
+POST https://vayil-web.vercel.app/Admin/VendorStatusUpdate
+Content-Type: application/json
+```
+
+```json
+{
+  "id": "120001",
+  "status": "approved"
+}
+```
+
+Expected successful response shape:
+
+```json
+{
+  "success": true,
+  "message": "Vendor status updated",
+  "data": {
+    "vendor_id": 120001,
+    "status": "approved"
+  },
+  "vendor": {
+    "vendor_id": 120001,
+    "status": "approved"
+  },
+  "id": "120001",
+  "status": "approved"
+}
+```
+
+`data` and `vendor` contain the full vendor row returned from the
+database; the snippet above only shows the important fields.
+
 ### Production Readiness Note
 
 This is intentionally temporary and must be removed before production.
@@ -114,6 +321,57 @@ Release readiness has been updated with a blocking checklist item:
 
 Leaving this endpoint unauthenticated in production would allow anyone
 with the endpoint URL to change a vendor account status.
+
+### Rollback / Production Re-enable Steps
+
+Before moving to real production:
+
+1. Remove or move the pre-auth `/VendorStatusUpdate` handler in
+   `backend/src/routes/adminMobile.ts` below `adminMobileRouter.use(requireAdmin)`.
+2. Move the pre-auth `/VendorStatusUpdate` handler in
+   `backend/src/routes/admin.ts` below `adminRouter.use(requireAuth(['staff', 'admin']))`.
+3. Re-test a no-token request and confirm it returns `401`.
+4. Re-test an admin-token request and confirm it can still update vendor
+   status.
+
+### Verification
+
+- Backend build passed:
+
+```bash
+npm run build --workspace backend
+```
+
+- Live Vercel non-mutating check passed after deployment:
+
+```http
+POST /Admin/VendorStatusUpdate
+Body: {}
+```
+
+Expected and observed result:
+
+```json
+{
+  "success": false,
+  "message": "id and status required"
+}
+```
+
+This confirmed the request reached the status-update handler without an
+admin token. Before the fix, the same request returned:
+
+```json
+{
+  "success": false,
+  "message": "Admin token required"
+}
+```
+
+### Commits
+
+- `e7f00c7` - `Temporarily allow vendor status test updates`
+- `503241d` - `Bypass mobile admin status auth for testing`
 
 ## v4.5.57 - Close remaining mobile request-field parity gaps (2026-06-27)
 
