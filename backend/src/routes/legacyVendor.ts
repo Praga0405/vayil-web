@@ -221,6 +221,7 @@ function numberOrNull(value: any): number | null {
 
 function stringOrNull(value: any): string | null {
   if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value.toISOString();
   const text = String(value);
   return text;
 }
@@ -253,7 +254,19 @@ function normalizeVendorQuotationRow(row: any) {
     'service_id',
     'estimated_days',
   ]);
-  out = normalizeMoneyFields(out, ['amount', 'final_amount', 'total', 'advance_amount', 'gst_amount', 'platform_fee']);
+  out = normalizeStringFields(out, [
+    'amount',
+    'final_amount',
+    'total',
+    'advance_amount',
+    'gst_amount',
+    'platform_fee',
+    'service_time',
+    'message',
+    'files',
+    'created_at',
+    'status_name',
+  ]);
   out.status = intOrDefault(row.status_int ?? row.status);
   if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
   return out;

@@ -1,5 +1,90 @@
 # Release Notes
 
+## v4.5.65 - Normalize vendor enquiry nested quotation fields (2026-06-27)
+
+### Why
+
+The vendor mobile app still crashed on the On Going Enquiries screen after
+a quote was added, even though the top-level enquiry `price` field was
+already fixed.
+
+Affected endpoint:
+
+- `POST /vendorEnuqiryList`
+- `POST /vendor/vendorEnuqiryList`
+
+Affected nested response path:
+
+- `request_quotation[].quotations[]`
+
+Flutter error:
+
+```text
+type 'int' is not a subtype of type 'String?'
+```
+
+### Issue Identified
+
+`v4.5.63` corrected top-level vendor enquiry display fields such as
+`price`, `minimum_fee`, `phone`, `city`, and `service_category`.
+
+However, the nested quotation normalizer still treated quote amount fields
+as numeric values. When a quotation was present, the API could return:
+
+```json
+{
+  "amount": 10000,
+  "service_time": 30
+}
+```
+
+The vendor Flutter model expects those nested quote display fields as
+`String?`, for example:
+
+```json
+{
+  "amount": "10000",
+  "service_time": "30"
+}
+```
+
+### What Changed
+
+- Updated the vendor quotation response normalizer used by
+  `vendorEnuqiryList`.
+- Kept quote identifier/status fields numeric:
+  - `id`
+  - `quotation_id`
+  - `enquiry_id`
+  - `customer_id`
+  - `vendor_id`
+  - `service_id`
+  - `estimated_days`
+  - `status`
+- Standardized nested quote display fields as string-or-null:
+  - `amount`
+  - `final_amount`
+  - `total`
+  - `advance_amount`
+  - `gst_amount`
+  - `platform_fee`
+  - `service_time`
+  - `message`
+  - `files`
+  - `created_at`
+  - `status_name`
+- Preserved ISO formatting for `Date` values when converting response
+  display fields to strings.
+
+### Impact
+
+- `request_quotation[].quotations[].amount` and
+  `request_quotation[].quotations[].service_time` no longer serialize as
+  JSON numbers.
+- The On Going Enquiries screen can parse quote-added records without the
+  Flutter `String?` type mismatch.
+- No mobile-side model change is required for this compatibility bridge.
+
 ## v4.5.64 - Expose customer enquiry details API (2026-06-27)
 
 ### Why
