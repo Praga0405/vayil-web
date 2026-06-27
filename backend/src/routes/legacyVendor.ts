@@ -219,6 +219,12 @@ function numberOrNull(value: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function stringOrNull(value: any): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value);
+  return text;
+}
+
 function normalizeNumericFields<T extends Record<string, any>>(row: T, keys: string[]): T {
   const out: Record<string, any> = { ...row };
   for (const key of keys) out[key] = intOrNull(row[key]);
@@ -228,6 +234,12 @@ function normalizeNumericFields<T extends Record<string, any>>(row: T, keys: str
 function normalizeMoneyFields<T extends Record<string, any>>(row: T, keys: string[]): T {
   const out: Record<string, any> = { ...row };
   for (const key of keys) out[key] = numberOrNull(row[key]);
+  return out as T;
+}
+
+function normalizeStringFields<T extends Record<string, any>>(row: T, keys: string[]): T {
+  const out: Record<string, any> = { ...row };
+  for (const key of keys) out[key] = stringOrNull(row[key]);
   return out as T;
 }
 
@@ -288,8 +300,21 @@ function normalizeVendorEnquiryRow(row: any) {
     'vendor_id',
     'service_id',
   ]);
-  out = normalizeMoneyFields(out, ['price', 'minimum_fee', 'budget']);
+  out = normalizeStringFields(out, [
+    'price',
+    'minimum_fee',
+    'budget',
+    'phone',
+    'pincode',
+    'state',
+    'city',
+    'service_category',
+    'sub_service',
+    'years_of_experience',
+    'willing_to_travel',
+  ]);
   out.status = intOrDefault(row.status);
+  if ('is_active' in out) out.is_active = intOrNull(row.is_active);
   out.quotations = (row.quotations ?? []).map(normalizeVendorQuotationRow);
   return out;
 }
@@ -330,8 +355,12 @@ async function legacyVendorEnquiryRows(vendorId: number | string) {
             COALESCE(e.last_name, '') AS last_name,
             COALESCE(e.email, c.email) AS email,
             COALESCE(e.phone, c.phone, c.mobile) AS phone,
+            COALESCE(CAST(c.state AS CHAR), '') AS state,
+            COALESCE(CAST(c.city AS CHAR), '') AS city,
+            COALESCE(CAST(c.pincode AS CHAR), '') AS pincode,
             COALESCE(e.message, e.description) AS message,
             e.files,
+            e.budget,
             CAST(${enquiryStatusExpr('e')} AS UNSIGNED) AS status,
             e.created_at,
             CAST(e.service_id AS UNSIGNED) AS service_id,
@@ -347,6 +376,10 @@ async function legacyVendorEnquiryRows(vendorId: number | string) {
             v.company_name,
             COALESCE(vs.service_title, vs.title) AS service_title,
             vs.price,
+            vs.minimum_fee,
+            COALESCE(vs.service_category, CAST(vs.category_id AS CHAR)) AS service_category,
+            COALESCE(vs.service_subcategory, CAST(vs.subcategory_id AS CHAR)) AS sub_service,
+            COALESCE(vs.is_active, vs.status, 1) AS is_active,
             COALESCE(vs.unit_name, vs.unit) AS unit_name,
             vs.pricing_type,
             vs.description,

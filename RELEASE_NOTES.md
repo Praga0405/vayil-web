@@ -1,5 +1,98 @@
 # Release Notes
 
+## v4.5.63 - Correct vendor enquiry display-field types (2026-06-27)
+
+### Why
+
+After `v4.5.62`, the vendor enquiry API no longer returned string
+statuses, but the vendor Flutter app still crashed on `price`:
+
+```text
+type 'int' is not a subtype of type 'String?'
+```
+
+Affected endpoint:
+
+- `POST /vendorEnuqiryList`
+- `POST /vendor/vendorEnuqiryList`
+
+Affected screens:
+
+- New Enquiries screen
+- Ongoing Enquiries screen
+
+### Issue Identified
+
+`v4.5.62` treated amount-like values as JSON numbers. That fixed the
+previous `status` mismatch, but it did not match the existing vendor
+mobile model for service display fields.
+
+The Flutter model expects `price` as `String?`, so this response caused
+parsing to fail:
+
+```json
+{
+  "price": 150
+}
+```
+
+The mobile-compatible response needs:
+
+```json
+{
+  "price": "150"
+}
+```
+
+### What Changed
+
+- Kept ID and status fields numeric:
+  - `enquiry_id`
+  - `customer_id`
+  - `vendor_id`
+  - `service_id`
+  - `status`
+  - `is_active`
+- Changed vendor enquiry display/string fields to string-or-null:
+  - `price`
+  - `minimum_fee`
+  - `budget`
+  - `phone`
+  - `pincode`
+  - `state`
+  - `city`
+  - `service_category`
+  - `sub_service`
+  - `years_of_experience`
+  - `willing_to_travel`
+- Added `state`, `city`, `pincode`, `budget`, `minimum_fee`,
+  `service_category`, `sub_service`, and `is_active` to the vendor
+  enquiry row so the response shape is explicit and consistently typed.
+- Preserved the same legacy envelope:
+
+```json
+{
+  "success": true,
+  "new_enquiry": [],
+  "ongoing": [],
+  "request_quotation": []
+}
+```
+
+### Important Compatibility Note
+
+This release supersedes the amount-field behavior from `v4.5.62` for
+top-level vendor enquiry display fields. `status` remains numeric, but
+`price`, `minimum_fee`, and `budget` are strings/null because the current
+vendor mobile model parses them as `String?`.
+
+Nested quotation/order/plan amount fields remain normalized by the
+existing `v4.5.62` logic.
+
+### Files Changed
+
+- `backend/src/routes/legacyVendor.ts`
+
 ## v4.5.62 - Normalize vendor enquiry API numeric fields (2026-06-27)
 
 ### Why
