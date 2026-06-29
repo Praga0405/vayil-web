@@ -15,6 +15,7 @@ export interface SendQuoteInput {
   amount: number;
   message?: string;
   estimated_days?: number;
+  service_time?: string;
   valid_until?: string;
   advance_amount?: number;
 }
@@ -26,13 +27,14 @@ export async function sendQuote(b: SendQuoteInput) {
   const result: any = await exec(
     `INSERT INTO quotation
        (enquiry_id, vendor_id, amount, message, estimated_days, valid_until,
-        gst_amount, platform_fee, advance_amount, status, created_at)
+        service_time, gst_amount, platform_fee, advance_amount, status, created_at)
      VALUES (:eid, :vid, :amount, :msg, :days, :valid,
-             :gst, :fee, :adv, 'sent', NOW())`,
+             :serviceTime, :gst, :fee, :adv, 'sent', NOW())`,
     {
       eid: b.enquiry_id, vid: b.vendor_id, amount: b.amount,
       msg: b.message ?? null, days: b.estimated_days ?? null,
       valid: b.valid_until ?? null,
+      serviceTime: b.service_time ?? (b.estimated_days !== undefined ? String(b.estimated_days) : null),
       gst: totalGst, fee: tax.platformFee ?? null,
       adv: b.advance_amount ?? null,
     },

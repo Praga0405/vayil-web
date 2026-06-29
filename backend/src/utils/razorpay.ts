@@ -14,13 +14,15 @@ interface CreateOrderArgs {
   currency?: string;
   receipt?: string;
   notes?: Record<string, string>;
+  keyId?: string;
+  keySecret?: string;
 }
 
 export async function createRazorpayOrder(args: CreateOrderArgs): Promise<{
   id: string; amount: number; currency: string; receipt?: string; status: string;
 }> {
-  const keyId = (config as any).razorpayKeyId || process.env.RAZORPAY_KEY_ID;
-  const keySecret = (config as any).razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET;
+  const keyId = args.keyId || (config as any).razorpayKeyId || process.env.RAZORPAY_KEY_ID;
+  const keySecret = args.keySecret || (config as any).razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET;
   const amountPaise = Math.round(args.amount * 100);
 
   if (!keyId || !keySecret) {

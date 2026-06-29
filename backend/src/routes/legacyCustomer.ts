@@ -19,9 +19,10 @@ import multer from 'multer';
 import { ApiError } from '../utils/http';
 import { requireAuth, softAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
-import { exec, one, query } from '../db';
+import { exec, one, query, transaction } from '../db';
 import { publicSettingsSafe } from './common';
 import { uniqueCityRows } from '../utils/city';
+import { createRazorpayOrder } from '../utils/razorpay';
 
 import * as authService from '../services/authService';
 import * as customerSvc from '../services/customerService';
@@ -52,6 +53,24 @@ function toNumberSafe(v: any, fallback = 0): number {
   if (v === undefined || v === null || v === '') return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+function hasBodyKey(b: any, ...keys: string[]): boolean {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(b ?? {}, key));
+}
+function pickString(b: any, ...keys: string[]): string {
+  for (const key of keys) {
+    if (hasBodyKey(b, key)) return String(b?.[key] ?? '');
+  }
+  return '';
+}
+function jsonStringOrNull(value: any): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+function legacyPlaceOrderPayload(body: any): boolean {
+  return hasBodyKey(body, 'order_amount', 'payment_type', 'platform_cost', 'tax_cost')
+    || String(body?.payment_type || '').toLowerCase() === 'place_order';
 }
 function imageUrlOrEmpty(v: any): string {
   const value = String(v ?? '').trim();
@@ -997,9 +1016,257 @@ legacyCustomerRouter.post('/updateQuotation', async (req: AuthRequest, res, next
   } catch (err) { next(err); }
 });
 
+async function createLegacyPlaceOrder(req: AuthRequest) {
+  const body = req.body ?? {};
+  const required: Array<{ name: string; keys: string[]; allowEmpty?: boolean }> = [
+    { name: 'enquiry_id', keys: ['enquiry_id', 'enquiryId'] },
+    { name: 'quote_id', keys: ['quote_id', 'quotation_id', 'quoteId', 'quotationId'] },
+    { name: 'service_id', keys: ['service_id', 'serviceId'] },
+    { name: 'vendor_id', keys: ['vendor_id', 'vendorId'] },
+    { name: 'message', keys: ['message'] },
+    { name: 'files', keys: ['files'] },
+    { name: 'currency', keys: ['currency'] },
+    { name: 'payment_id', keys: ['payment_id', 'razorpay_payment_id'], allowEmpty: true },
+    { name: 'payment_json', keys: ['payment_json'], allowEmpty: true },
+    { name: 'payment_status', keys: ['payment_status', 'paymentStatus'] },
+    { name: 'order_amount', keys: ['order_amount', 'orderAmount', 'amount'] },
+    { name: 'payment_type', keys: ['payment_type', 'paymentType'] },
+    { name: 'platform_cost', keys: ['platform_cost', 'platformCost'] },
+    { name: 'tax_cost', keys: ['tax_cost', 'taxCost'] },
+  ];
+  const missing = required
+    .filter((item) => !item.keys.some((key) => hasBodyKey(body, key))
+      || (!item.allowEmpty && !pickString(body, ...item.keys).trim()))
+    .map((item) => item.name);
+  if (missing.length) throw new ApiError(400, `Missing required fields: ${missing.join(', ')}`);
+
+  const customerId = req.user!.id;
+  const enquiryId = toNumberSafe(pickId(body, 'enquiry_id', 'enquiryId'));
+  const quoteId = toNumberSafe(pickId(body, 'quote_id', 'quotation_id', 'quoteId', 'quotationId'));
+  const serviceId = toNumberSafe(pickId(body, 'service_id', 'serviceId'));
+  const vendorId = toNumberSafe(pickId(body, 'vendor_id', 'vendorId'));
+  const amount = toNumberSafe(body?.order_amount ?? body?.orderAmount ?? body?.amount);
+  if (!enquiryId || !quoteId || !serviceId || !vendorId || !amount) {
+    throw new ApiError(400, 'enquiry_id, quote_id, service_id, vendor_id and order_amount are required');
+  }
+
+  const enquiry = await one<any>(
+    `SELECT enquiry_id, customer_id, vendor_id, service_id
+       FROM enquiries
+      WHERE enquiry_id = :enquiryId AND customer_id = :customerId
+      LIMIT 1`,
+    { enquiryId, customerId },
+  );
+  if (!enquiry) throw new ApiError(403, 'Enquiry not found');
+  if (enquiry.vendor_id && Number(enquiry.vendor_id) !== vendorId) throw new ApiError(400, 'vendor_id mismatch');
+
+  const quote = await one<any>(
+    `SELECT quotation_id, id, enquiry_id, vendor_id, amount, status
+       FROM quotation
+      WHERE enquiry_id = :enquiryId
+        AND (quotation_id = :quoteId OR id = :quoteId)
+      LIMIT 1`,
+    { enquiryId, quoteId },
+  );
+  if (!quote) throw new ApiError(404, 'Quote not found');
+
+  const currency = pickString(body, 'currency') || 'INR';
+  const paymentId = pickString(body, 'payment_id', 'razorpay_payment_id');
+  const paymentJson = jsonStringOrNull(body?.payment_json);
+  const paymentStatus = pickString(body, 'payment_status', 'paymentStatus') || 'pending';
+  const paymentType = pickString(body, 'payment_type', 'paymentType') || 'place_order';
+  const message = pickString(body, 'message');
+  const files = pickString(body, 'files');
+  const platformCost = toNumberSafe(body?.platform_cost ?? body?.platformCost);
+  const taxCost = toNumberSafe(body?.tax_cost ?? body?.taxCost);
+  const paymentKey = pickString(body, 'payment_key', 'razorpay_key', 'key_id');
+  const paymentSecret = pickString(body, 'payment_secret', 'razorpay_secret', 'key_secret');
+  const idempotencyKey = String(
+    body?.idempotency_key ||
+    req.headers['idempotency-key'] ||
+    `legacy-place-${customerId}-${enquiryId}-${quoteId}-${amount}`,
+  ).slice(0, 100);
+
+  const existingIntent = await one<any>(
+    `SELECT intent_id, razorpay_order_id
+       FROM payment_intents
+      WHERE idempotency_key = :key
+      LIMIT 1`,
+    { key: idempotencyKey },
+  ).catch(() => null);
+  const razorpayOrder = existingIntent?.razorpay_order_id
+    ? { id: existingIntent.razorpay_order_id, amount: Math.round(amount * 100), currency, status: 'created' }
+    : await createRazorpayOrder({
+        amount,
+        currency,
+        receipt: idempotencyKey.slice(0, 40),
+        notes: {
+          customer_id: String(customerId),
+          enquiry_id: String(enquiryId),
+          quote_id: String(quoteId),
+          payment_type: paymentType,
+        },
+        keyId: paymentKey || undefined,
+        keySecret: paymentSecret || undefined,
+      });
+
+  let orderId = 0;
+  let intentId = existingIntent?.intent_id ? Number(existingIntent.intent_id) : 0;
+  await transaction(async (conn) => {
+    const [existingOrders]: any = await conn.query(
+      `SELECT order_id FROM orders
+        WHERE customer_id = ?
+          AND enquiry_id = ?
+          AND (quotation_id = ? OR quote_id = ?)
+        LIMIT 1`,
+      [customerId, enquiryId, quoteId, quoteId],
+    );
+    const existingOrderId = Array.isArray(existingOrders) ? existingOrders[0]?.order_id : null;
+    if (existingOrderId) {
+      orderId = Number(existingOrderId);
+      await conn.query(
+        `UPDATE orders
+            SET vendor_id = ?, quotation_id = ?, quote_id = ?, service_id = ?,
+                message = ?, files = ?, amount = ?, order_amount = ?,
+                currency = ?, payment_id = ?, payment_json = ?, payment_status = ?,
+                status = CASE WHEN ? = 'success' THEN 'active' ELSE COALESCE(status, 'pending') END
+          WHERE order_id = ?`,
+        [
+          vendorId, quoteId, quoteId, serviceId,
+          message, files, amount, String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
+          currency, paymentId, paymentJson, paymentStatus,
+          paymentStatus.toLowerCase(), orderId,
+        ],
+      );
+    } else {
+      const [insertOrder]: any = await conn.query(
+        `INSERT INTO orders
+           (customer_id, vendor_id, enquiry_id, quotation_id, quote_id, service_id,
+            message, files, amount, order_amount, currency, payment_id,
+            payment_json, payment_status, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          customerId, vendorId, enquiryId, quoteId, quoteId, serviceId,
+          message, files, amount, String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
+          currency, paymentId, paymentJson, paymentStatus,
+          paymentStatus.toLowerCase() === 'success' ? 'active' : 'pending',
+        ],
+      );
+      orderId = Number(insertOrder.insertId);
+      await conn.query(`UPDATE orders SET id = order_id WHERE order_id = ? AND (id IS NULL OR id = 0)`, [orderId]);
+    }
+
+    await conn.query(`UPDATE quotation SET status = 'accepted' WHERE quotation_id = ? OR id = ?`, [quoteId, quoteId]);
+    await conn.query(`UPDATE enquiries SET status = 'accepted' WHERE enquiry_id = ?`, [enquiryId]);
+    const [stepRows]: any = await conn.query(
+      `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 1 LIMIT 1`,
+      [orderId],
+    );
+    if (!Array.isArray(stepRows) || stepRows.length === 0) {
+      await conn.query(
+        `INSERT INTO order_step_logs (order_id, step, step_status, performed_by, performed_by_id, remarks)
+         VALUES (?, 1, 'pending', 'CUSTOMER', ?, 'Order placed')`,
+        [orderId, customerId],
+      );
+    }
+
+    if (intentId) {
+      await conn.query(
+        `UPDATE payment_intents
+            SET order_id = ?, enquiry_id = ?, amount = ?, razorpay_order_id = ?
+          WHERE intent_id = ?`,
+        [orderId, enquiryId, amount, razorpayOrder.id, intentId],
+      );
+    } else {
+      const [insertIntent]: any = await conn.query(
+        `INSERT INTO payment_intents
+           (idempotency_key, customer_id, order_id, enquiry_id, amount, purpose, status, razorpay_order_id)
+         VALUES (?, ?, ?, ?, ?, 'quote', 'initiated', ?)`,
+        [idempotencyKey, customerId, orderId, enquiryId, amount, razorpayOrder.id],
+      );
+      intentId = Number(insertIntent.insertId);
+    }
+
+    await conn.query(
+      `INSERT INTO payment_log
+         (order_id, customer_id, vendor_id, amount, status, provider, provider_payment_id,
+          notes, currency, payment_id, payment_json, payment_status, base_amount,
+          payment_amount, payment_date, payment_data, payment_type, platform_cost, tax_cost)
+       VALUES (?, ?, ?, ?, ?, 'razorpay', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?)`,
+      [
+        orderId, customerId, vendorId, amount, paymentStatus, paymentId || null,
+        message, currency, paymentId || null, paymentJson, paymentStatus,
+        amount, amount, paymentJson, paymentType, platformCost, taxCost,
+      ],
+    );
+  });
+
+  try {
+    await notifSvc.notify({
+      recipient_type: 'vendor',
+      recipient_id: vendorId,
+      type: 'order_placed',
+      title: 'New order placed',
+      body: 'A customer has placed an order for your service.',
+      data: { order_id: orderId, enquiry_id: enquiryId, quote_id: quoteId, service_id: serviceId },
+    });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error('[customer/placeOrder] notification_failed', {
+      order_id: orderId,
+      enquiry_id: enquiryId,
+      vendor_id: vendorId,
+      message: err?.message || String(err),
+    });
+  }
+
+  return {
+    id: orderId,
+    order_id: orderId,
+    customer_id: Number(customerId),
+    vendor_id: vendorId,
+    enquiry_id: enquiryId,
+    quote_id: quoteId,
+    quotation_id: quoteId,
+    service_id: serviceId,
+    message,
+    files,
+    currency,
+    payment_id: paymentId,
+    payment_json: body?.payment_json ?? '',
+    payment_status: paymentStatus,
+    order_amount: String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
+    amount,
+    payment_type: paymentType,
+    platform_cost: String(body?.platform_cost ?? body?.platformCost),
+    tax_cost: String(body?.tax_cost ?? body?.taxCost),
+    intent_id: intentId,
+    razorpay_order_id: razorpayOrder.id,
+    razorpay_amount: razorpayOrder.amount,
+    razorpay_currency: razorpayOrder.currency,
+    payment_key: paymentKey || null,
+    razorpay_key: paymentKey || null,
+  };
+}
+
 /* ───── Payments — placeOrder + payment_update use canonical escrow ───── */
 legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => {
   try {
+    if (legacyPlaceOrderPayload(req.body)) {
+      const data = await createLegacyPlaceOrder(req);
+      return send(res, {
+        message: 'Order placed successfully',
+        data,
+        order_id: data.order_id,
+        id: data.id,
+        intent_id: data.intent_id,
+        razorpay_order_id: data.razorpay_order_id,
+        amount: data.amount,
+        payment_key: data.payment_key,
+        razorpay_key: data.razorpay_key,
+      });
+    }
+
     const enquiryId = toNumberSafe(pickId(req.body, 'enquiry_id', 'enquiryId'));
     const orderId = toNumberSafe(pickId(req.body, 'order_id', 'orderId'));
     const milestoneId = toNumberSafe(pickId(req.body, 'milestone_id', 'milestoneId', 'plan_id'));
@@ -1020,6 +1287,8 @@ legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => 
       material_ids: Array.isArray(req.body?.material_ids) ? req.body.material_ids.map(Number) : undefined,
       currency: req.body?.currency || undefined,
       idempotency_key,
+      payment_key: pickString(req.body, 'payment_key', 'razorpay_key', 'key_id') || undefined,
+      payment_secret: pickString(req.body, 'payment_secret', 'razorpay_secret', 'key_secret') || undefined,
     });
     send(res, {
       message: 'Order created',

@@ -226,6 +226,17 @@ function stringOrNull(value: any): string | null {
   return text;
 }
 
+function deriveServiceTime(...values: any[]): string | null {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const text = String(value).trim();
+    if (!text || text.toLowerCase() === 'null' || text.toLowerCase() === 'undefined') continue;
+    const duration = text.match(/\b(\d+(?:\.\d+)?)\s*(?:day|days|hr|hrs|hour|hours|week|weeks|month|months)\b/i);
+    return duration?.[1] || text;
+  }
+  return '';
+}
+
 function normalizeNumericFields<T extends Record<string, any>>(row: T, keys: string[]): T {
   const out: Record<string, any> = { ...row };
   for (const key of keys) out[key] = intOrNull(row[key]);
@@ -267,6 +278,7 @@ function normalizeVendorQuotationRow(row: any) {
     'created_at',
     'status_name',
   ]);
+  out.service_time = deriveServiceTime(row.service_time, row.estimated_days, row.message);
   out.status = intOrDefault(row.status_int ?? row.status);
   if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
   return out;
@@ -325,10 +337,15 @@ function normalizeVendorEnquiryRow(row: any) {
     'sub_service',
     'years_of_experience',
     'willing_to_travel',
+    'service_time',
   ]);
   out.status = intOrDefault(row.status);
   if ('is_active' in out) out.is_active = intOrNull(row.is_active);
   out.quotations = (row.quotations ?? []).map(normalizeVendorQuotationRow);
+  out.service_time = deriveServiceTime(
+    out.service_time,
+    ...out.quotations.map((quotation: any) => quotation?.service_time),
+  );
   return out;
 }
 
@@ -989,6 +1006,7 @@ legacyVendorRouter.post('/sendQuotationToCustomer', async (req: AuthRequest, res
       amount: num(req.body?.amount),
       message: req.body?.message,
       estimated_days: req.body?.estimated_days ? num(req.body.estimated_days) : undefined,
+      service_time: req.body?.service_time ?? req.body?.serviceTime ?? req.body?.estimated_days ?? undefined,
       valid_until: req.body?.valid_until,
       advance_amount: req.body?.advance_amount ? num(req.body.advance_amount) : undefined,
     });

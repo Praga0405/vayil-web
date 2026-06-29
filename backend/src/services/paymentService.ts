@@ -33,6 +33,8 @@ export interface CreateIntentInput {
   material_ids?: number[];
   currency?: string;
   idempotency_key: string;
+  payment_key?: string;
+  payment_secret?: string;
 }
 
 function amountMatches(a: number, b: number) { return Math.abs(Math.round(a) - Math.round(b)) <= 1; }
@@ -137,6 +139,8 @@ export async function createPaymentIntent(b: CreateIntentInput) {
     amount: expected, currency: b.currency ?? 'INR',
     receipt: b.idempotency_key.slice(0, 40),
     notes: { customer_id: String(b.customerId), purpose: b.purpose },
+    keyId: b.payment_key,
+    keySecret: b.payment_secret,
   });
   const result: any = await exec(
     `INSERT INTO payment_intents

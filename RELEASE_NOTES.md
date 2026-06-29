@@ -1,5 +1,104 @@
 # Release Notes
 
+## v4.5.66 - Restore legacy place order flow and service time bridge (2026-06-29)
+
+### Why
+
+The mobile team reported two production parity gaps:
+
+- `POST /vendorEnuqiryList` returned quote-added enquiries without a usable
+  `service_time`, so the vendor enquiry details screen could not show the
+  service duration.
+- `POST /customer/placeOrder` did not follow the old `app.vayil.in`
+  `Customer.ts` style flow. The mobile app sends the full legacy order
+  payload, and the current API only created a canonical payment intent.
+
+Affected sample:
+
+```json
+{
+  "enquiry_id": 90001,
+  "service_id": 150001,
+  "vendor_id": 420001
+}
+```
+
+### Issue Identified
+
+For `vendorEnuqiryList`, the previous fix normalized nested quotation field
+types, but the value itself could still be missing. Existing records can
+have `quotation.service_time = null` and `estimated_days = null`, while the
+duration was only present in the quote message.
+
+For `customer/placeOrder`, the route expected a modern payment-intent body.
+It did not fully consume the legacy mobile fields:
+
+- `quote_id`
+- `service_id`
+- `vendor_id`
+- `message`
+- `files`
+- `currency`
+- `payment_id`
+- `payment_json`
+- `payment_status`
+- `order_amount`
+- `payment_type`
+- `platform_cost`
+- `tax_cost`
+
+It also did not create the step-1 order log used by
+`vendorEnuqiryList` to move a placed order into the `new_enquiry` bucket.
+
+### What Changed
+
+- Added a vendor enquiry `service_time` compatibility bridge:
+  - `quotations[].service_time` is now derived from explicit
+    `service_time`, then `estimated_days`, then conservative duration text
+    in the quote message such as `30 days`.
+  - Top-level enquiry rows now also expose `service_time`, derived from
+    the nested quote when available.
+- Updated `sendQuotationToCustomer` and `quoteService.sendQuote` to persist
+  `service_time` when the vendor app sends `service_time`, `serviceTime`,
+  or `estimated_days`.
+- Added a legacy `customer/placeOrder` branch for the old mobile payload.
+  It now:
+  - validates the required legacy fields,
+  - verifies the enquiry belongs to the logged-in customer,
+  - verifies the quote belongs to that enquiry,
+  - creates or updates the `orders` row with legacy order/payment fields,
+  - marks the quote and enquiry as accepted,
+  - creates the `order_step_logs` step `1` row so the vendor app sees the
+    order in the correct enquiry bucket,
+  - creates a matching `payment_intents` row and Razorpay order,
+  - writes a `payment_log` row with `platform_cost` and `tax_cost`,
+  - triggers the vendor notification after order creation.
+- Added explicit notification failure logging for `customer/placeOrder`.
+  Notification errors are logged with order/enquiry/vendor ids but do not
+  fail the order creation response.
+- Allowed `payment_key` / `payment_secret` request-body overrides for the
+  Razorpay order creation path used during testing.
+
+### Security / Readiness Note
+
+- The test payment secret is not hardcoded in the repository.
+- `payment_secret` is accepted only as a request input or environment value
+  for the Razorpay SDK call.
+- Notification error logs intentionally do not include payment credentials
+  or bearer tokens.
+- Before production launch, use server-side Razorpay environment variables
+  instead of client-supplied test credentials.
+
+### Impact
+
+- Vendor enquiry rows now include a parseable `service_time` string where
+  a duration can be derived.
+- Future quotations store `service_time` instead of dropping it.
+- The mobile place-order payload can complete the same order/payment/logging
+  side effects expected from the old app flow.
+- Vendor notification issues can now be diagnosed from backend logs without
+  blocking the customer order response.
+
 ## v4.5.65 - Normalize vendor enquiry nested quotation fields (2026-06-27)
 
 ### Why
