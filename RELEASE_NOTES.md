@@ -1,5 +1,66 @@
 # Release Notes
 
+## v4.5.67 - Allow empty place order message and files (2026-06-29)
+
+### Why
+
+The mobile app reported `POST /customer/placeOrder` failing after a
+successful Razorpay payment with:
+
+```json
+{
+  "success": false,
+  "message": "Missing required fields: message, files"
+}
+```
+
+The request did include both fields, but as empty strings:
+
+```json
+{
+  "message": "",
+  "files": ""
+}
+```
+
+This is valid for the customer flow because the user may place an order
+without adding a message or uploading files.
+
+### Issue Identified
+
+The legacy place-order bridge checked both field presence and non-empty
+content for `message` and `files`. That made optional empty-string values
+fail validation even though the mobile payload shape was correct.
+
+Also, the legacy place-order bridge treated all requests as pre-payment
+orders. When the mobile app sent `payment_status: "success"` with a
+Razorpay `payment_id`, the order should be recorded as paid/escrow-held
+instead of creating a fresh Razorpay order and leaving the payment intent
+as `initiated`.
+
+### What Changed
+
+- `message` and `files` are now optional content fields:
+  - key must be accepted when present,
+  - empty string and `null` no longer fail validation.
+- `payment_json` object payloads are parsed so nested
+  `razorpay_payment_id` and `razorpay_order_id` can be reused.
+- When `payment_status` is `success`, `paid`, or `completed` and a payment
+  id is present:
+  - the API does not create a new Razorpay order,
+  - the payment intent is recorded as `escrow_held`,
+  - `razorpay_payment_id` is stored,
+  - an escrow `hold` ledger row is created idempotently.
+
+### Impact
+
+- Customers can place paid orders without a message or file attachment.
+- The order remains compatible with the final-step escrow release flow.
+- The API still validates the real required identifiers and payment fields:
+  `enquiry_id`, `quote_id`, `service_id`, `vendor_id`, `currency`,
+  `payment_status`, `order_amount`, `payment_type`, `platform_cost`, and
+  `tax_cost`.
+
 ## v4.5.66 - Restore legacy place order flow and service time bridge (2026-06-29)
 
 ### Why

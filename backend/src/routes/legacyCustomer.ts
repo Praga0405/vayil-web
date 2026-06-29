@@ -68,6 +68,19 @@ function jsonStringOrNull(value: any): string | null {
   if (typeof value === 'string') return value;
   try { return JSON.stringify(value); } catch { return String(value); }
 }
+function objectFromJsonish(value: any): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
 function legacyPlaceOrderPayload(body: any): boolean {
   return hasBodyKey(body, 'order_amount', 'payment_type', 'platform_cost', 'tax_cost')
     || String(body?.payment_type || '').toLowerCase() === 'place_order';
@@ -1023,8 +1036,8 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
     { name: 'quote_id', keys: ['quote_id', 'quotation_id', 'quoteId', 'quotationId'] },
     { name: 'service_id', keys: ['service_id', 'serviceId'] },
     { name: 'vendor_id', keys: ['vendor_id', 'vendorId'] },
-    { name: 'message', keys: ['message'] },
-    { name: 'files', keys: ['files'] },
+    { name: 'message', keys: ['message'], allowEmpty: true },
+    { name: 'files', keys: ['files'], allowEmpty: true },
     { name: 'currency', keys: ['currency'] },
     { name: 'payment_id', keys: ['payment_id', 'razorpay_payment_id'], allowEmpty: true },
     { name: 'payment_json', keys: ['payment_json'], allowEmpty: true },
@@ -1071,9 +1084,13 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
   if (!quote) throw new ApiError(404, 'Quote not found');
 
   const currency = pickString(body, 'currency') || 'INR';
-  const paymentId = pickString(body, 'payment_id', 'razorpay_payment_id');
+  const paymentJsonBody = objectFromJsonish(body?.payment_json);
+  const paymentId = pickString(body, 'payment_id', 'razorpay_payment_id')
+    || String(paymentJsonBody.razorpay_payment_id || '');
   const paymentJson = jsonStringOrNull(body?.payment_json);
   const paymentStatus = pickString(body, 'payment_status', 'paymentStatus') || 'pending';
+  const paymentStatusLower = paymentStatus.toLowerCase();
+  const isPaid = ['success', 'paid', 'completed'].includes(paymentStatusLower) && !!paymentId;
   const paymentType = pickString(body, 'payment_type', 'paymentType') || 'place_order';
   const message = pickString(body, 'message');
   const files = pickString(body, 'files');
@@ -1094,8 +1111,18 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
       LIMIT 1`,
     { key: idempotencyKey },
   ).catch(() => null);
+  const existingRazorpayOrderId = String(
+    body?.razorpay_order_id || paymentJsonBody.razorpay_order_id || '',
+  ).trim();
   const razorpayOrder = existingIntent?.razorpay_order_id
     ? { id: existingIntent.razorpay_order_id, amount: Math.round(amount * 100), currency, status: 'created' }
+    : isPaid
+      ? {
+          id: existingRazorpayOrderId || `paid_${paymentId}`.slice(0, 120),
+          amount: Math.round(amount * 100),
+          currency,
+          status: 'paid',
+        }
     : await createRazorpayOrder({
         amount,
         currency,
@@ -1135,7 +1162,7 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
           vendorId, quoteId, quoteId, serviceId,
           message, files, amount, String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
           currency, paymentId, paymentJson, paymentStatus,
-          paymentStatus.toLowerCase(), orderId,
+          paymentStatusLower, orderId,
         ],
       );
     } else {
@@ -1149,7 +1176,7 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
           customerId, vendorId, enquiryId, quoteId, quoteId, serviceId,
           message, files, amount, String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
           currency, paymentId, paymentJson, paymentStatus,
-          paymentStatus.toLowerCase() === 'success' ? 'active' : 'pending',
+          paymentStatusLower === 'success' ? 'active' : 'pending',
         ],
       );
       orderId = Number(insertOrder.insertId);
@@ -1173,18 +1200,34 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
     if (intentId) {
       await conn.query(
         `UPDATE payment_intents
-            SET order_id = ?, enquiry_id = ?, amount = ?, razorpay_order_id = ?
+            SET order_id = ?, enquiry_id = ?, amount = ?, status = ?,
+                razorpay_order_id = ?, razorpay_payment_id = COALESCE(?, razorpay_payment_id)
           WHERE intent_id = ?`,
-        [orderId, enquiryId, amount, razorpayOrder.id, intentId],
+        [orderId, enquiryId, amount, isPaid ? 'escrow_held' : 'initiated', razorpayOrder.id, paymentId || null, intentId],
       );
     } else {
       const [insertIntent]: any = await conn.query(
         `INSERT INTO payment_intents
-           (idempotency_key, customer_id, order_id, enquiry_id, amount, purpose, status, razorpay_order_id)
-         VALUES (?, ?, ?, ?, ?, 'quote', 'initiated', ?)`,
-        [idempotencyKey, customerId, orderId, enquiryId, amount, razorpayOrder.id],
+           (idempotency_key, customer_id, order_id, enquiry_id, amount, purpose, status,
+            razorpay_order_id, razorpay_payment_id)
+         VALUES (?, ?, ?, ?, ?, 'quote', ?, ?, ?)`,
+        [idempotencyKey, customerId, orderId, enquiryId, amount, isPaid ? 'escrow_held' : 'initiated', razorpayOrder.id, paymentId || null],
       );
       intentId = Number(insertIntent.insertId);
+    }
+
+    if (isPaid && intentId) {
+      const [existingHoldRows]: any = await conn.query(
+        `SELECT entry_id FROM escrow_ledger WHERE intent_id = ? AND direction = 'hold' LIMIT 1`,
+        [intentId],
+      );
+      if (!Array.isArray(existingHoldRows) || existingHoldRows.length === 0) {
+        await conn.query(
+          `INSERT INTO escrow_ledger (intent_id, order_id, vendor_id, amount, direction, reason)
+           VALUES (?, ?, ?, ?, 'hold', ?)`,
+          [intentId, orderId, vendorId, amount, paymentType],
+        );
+      }
     }
 
     await conn.query(
