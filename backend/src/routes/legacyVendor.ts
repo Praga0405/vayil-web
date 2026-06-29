@@ -313,6 +313,13 @@ function normalizeVendorStepLogRow(row: any) {
   return normalizeNumericFields(row, ['id', 'order_id', 'step', 'performed_by_id']);
 }
 
+function normalizeVendorLegacyOrderStepRow(row: any) {
+  const out: any = { ...row };
+  const current = stringOrNull(out.step_status);
+  out.step_status = current && /^\d+$/.test(current) ? current : String(out.step ?? current ?? '');
+  return out;
+}
+
 function normalizeVendorPlanRow(row: any) {
   let out = normalizeNumericFields(row, [
     'id',
@@ -974,6 +981,7 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
       for (const order of enquiryOrders) {
         const orderKeys = [order.id, order.order_id].filter((value) => value !== undefined && value !== null);
         const orderStepLogs = stepLogs.filter((s: any) => orderKeys.some((key) => Number(s.order_id) === Number(key)));
+        const ordersteps = orderStepLogs.map(normalizeVendorLegacyOrderStepRow);
         const orderPlans = plans.filter((p: any) => orderKeys.some((key) => Number(p.order_id) === Number(key)));
         const stepLog = orderStepLogs[0];
         const item = {
@@ -981,7 +989,7 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
           orders: [{
             ...order,
             plans:           orderPlans,
-            ordersteps:      orderStepLogs,
+            ordersteps,
             order_step_logs: orderStepLogs,
           }],
         };

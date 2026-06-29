@@ -44,6 +44,8 @@ missed even when they existed.
 
 - Added `orders[].ordersteps` back to every enquiry-list order object.
 - Kept `orders[].order_step_logs` as an alias for newer consumers.
+- Normalized legacy `orders[].ordersteps[].step_status` to the numeric
+  step string expected by the Flutter model, for example `"1"`.
 - Ensured `orders[].id` is always populated from `orders.id` or
   `orders.order_id`.
 - Matched order steps and plans using both order identifiers:
