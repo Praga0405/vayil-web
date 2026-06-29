@@ -219,6 +219,22 @@ function numberOrNull(value: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function decimalString(value: any, fallback = '0.00'): string {
+  if (value === undefined || value === null || value === '') return fallback;
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === 'null' || text.toLowerCase() === 'undefined') return fallback;
+  const n = Number(text);
+  return Number.isFinite(n) ? n.toFixed(2) : fallback;
+}
+
+function integerString(value: any, fallback = '0'): string {
+  if (value === undefined || value === null || value === '') return fallback;
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === 'null' || text.toLowerCase() === 'undefined') return fallback;
+  const n = Number(text);
+  return Number.isFinite(n) ? String(Math.trunc(n)) : fallback;
+}
+
 function stringOrNull(value: any): string | null {
   if (value === undefined || value === null) return null;
   if (value instanceof Date) return value.toISOString();
@@ -321,16 +337,34 @@ function normalizeVendorLegacyOrderStepRow(row: any) {
 }
 
 function normalizeVendorPlanRow(row: any) {
-  let out = normalizeNumericFields(row, [
+  const out = normalizeNumericFields(row, [
     'id',
     'plan_id',
     'order_id',
     'customer_id',
     'vendor_id',
-    'completion_days',
     'status',
   ]);
-  out = normalizeMoneyFields(out, ['amount', 'amount_percentage', 'balance_cost']);
+  out.amount = decimalString(row.amount);
+  out.percentage = decimalString(row.percentage ?? row.amount_percentage);
+  out.amount_percentage = decimalString(row.amount_percentage ?? row.percentage);
+  out.balance_cost = decimalString(row.balance_cost);
+  out.completion_days = integerString(row.completion_days ?? row.days);
+  out.days = integerString(row.days ?? row.completion_days);
+  return out;
+}
+
+function normalizeVendorMaterialRow(row: any) {
+  const out = normalizeNumericFields(row, ['id', 'material_id', 'order_id', 'plan_id']);
+  out.quantity = decimalString(row.quantity ?? row.qty);
+  out.qty = decimalString(row.qty ?? row.quantity);
+  out.rate = decimalString(row.rate ?? row.unit_cost);
+  out.unit_cost = decimalString(row.unit_cost ?? row.rate);
+  out.total = decimalString(row.total ?? row.total_cost);
+  out.total_cost = decimalString(row.total_cost ?? row.total);
+  out.balance_cost = decimalString(row.balance_cost);
+  out.m_final_amount = decimalString(row.m_final_amount ?? row.total_cost ?? row.total);
+  out.amount = decimalString(row.amount ?? row.total ?? row.total_cost);
   return out;
 }
 
@@ -1236,12 +1270,13 @@ legacyVendorRouter.post('/vendorgetPlan', async (req: AuthRequest, res, next) =>
     // Mobile reads: summary, total_base_amount, used_percentage,
     //               used_amount, balance_percentage, plans.
     const project: any = (data as any)?.project ?? {};
-    const plans:   any[] = (data as any)?.plan   ?? [];
+    const plans:   any[] = ((data as any)?.plan ?? []).map(normalizeVendorPlanRow);
+    const responseData = { ...(data as any), plan: plans };
     const baseAmount = Number(project?.amount ?? 0);
     const usedAmount = plans.reduce((s: number, p: any) => s + Number(p?.amount ?? 0), 0);
     const usedPct = baseAmount > 0 ? Math.round((usedAmount / baseAmount) * 100) : 0;
     send(res, {
-      data,
+      data: responseData,
       summary:             project,
       total_base_amount:   baseAmount,
       used_percentage:     usedPct,
@@ -1258,7 +1293,7 @@ legacyVendorRouter.post('/vendorPlanDetails', async (req: AuthRequest, res, next
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const data = await projectSvc.getProject(orderId);
-    send(res, { data });
+    send(res, { data: { ...(data as any), plan: ((data as any)?.plan ?? []).map(normalizeVendorPlanRow) } });
   } catch (err) { next(err); }
 });
 
@@ -1311,7 +1346,7 @@ legacyVendorRouter.post('/vendorgetMaterial', async (req: AuthRequest, res, next
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = await materialSvc.listMaterials(orderId);
+    const data = (await materialSvc.listMaterials(orderId)).map(normalizeVendorMaterialRow);
     send(res, { data });
   } catch (err) { next(err); }
 });
@@ -1328,7 +1363,7 @@ legacyVendorRouter.post('/vendorMaterialDetails', async (req: AuthRequest, res, 
       { id: materialId },
     );
     if (!owner || Number(owner.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Material not found');
-    send(res, { data });
+    send(res, { data: normalizeVendorMaterialRow(data) });
   } catch (err) { next(err); }
 });
 

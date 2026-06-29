@@ -1,5 +1,66 @@
 # Release Notes
 
+## v4.5.69 - Default vendor plan and material numeric fields (2026-06-29)
+
+### Why
+
+The vendor mobile app crashed on the Plan List screen after successful
+`HTTP 200` responses from:
+
+- `POST /vendorgetPlan`
+- `POST /vendorgetMaterial`
+
+Flutter error:
+
+```text
+FormatException: Invalid double
+null
+```
+
+The app parses plan/material numeric fields with `double.parse(...)`. Some
+rows returned `null` for fields such as `amount`, `percentage`,
+`balance_cost`, `completion_days`, and `days`.
+
+### Issue Identified
+
+`vendorgetPlan` returned raw `order_plan` rows from the database, so any
+nullable database value was serialized as JSON `null`.
+
+`vendorgetMaterial` returned raw `materials` rows, which could also contain
+missing numeric aliases expected by the mobile model.
+
+### What Changed
+
+- Added mobile response normalizers for vendor plan and material rows.
+- `vendorgetPlan` now returns normalized plan rows in:
+  - `data.plan`
+  - top-level `plans`
+- `vendorPlanDetails` now returns normalized `data.plan` rows.
+- `vendorgetMaterial` and `vendorMaterialDetails` now return normalized
+  material rows.
+- Plan fields now default as:
+  - `amount`: `"0.00"`
+  - `percentage`: `"0.00"`
+  - `amount_percentage`: `"0.00"`
+  - `balance_cost`: `"0.00"`
+  - `completion_days`: `"0"`
+  - `days`: `"0"`
+- Material fields now default as:
+  - `quantity` / `qty`: `"0.00"`
+  - `rate` / `unit_cost`: `"0.00"`
+  - `total` / `total_cost`: `"0.00"`
+  - `balance_cost`: `"0.00"`
+  - `m_final_amount`: `"0.00"`
+  - `amount`: `"0.00"`
+
+### Impact
+
+- Flutter no longer receives `null` for numeric plan/material fields.
+- Existing identifiers such as `id`, `plan_id`, `order_id`, and
+  `material_id` remain numeric.
+- Response shape is preserved while making numeric display fields safe for
+  `double.parse(...)`.
+
 ## v4.5.68 - Restore enquiry ordersteps compatibility (2026-06-29)
 
 ### Why
