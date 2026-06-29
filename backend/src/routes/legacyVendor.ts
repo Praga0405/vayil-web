@@ -226,6 +226,11 @@ function stringOrNull(value: any): string | null {
   return text;
 }
 
+function stringOrEmpty(value: any): string {
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+
 function deriveServiceTime(...values: any[]): string | null {
   for (const value of values) {
     if (value === undefined || value === null || value === '') continue;
@@ -294,7 +299,11 @@ function normalizeVendorOrderRow(row: any) {
     'quotation_id',
     'service_id',
   ]);
+  out.id = intOrNull(row.id) ?? intOrNull(row.order_id);
   out = normalizeMoneyFields(out, ['amount', 'total', 'paid_amount', 'balance_amount']);
+  out.files = stringOrEmpty(row.files);
+  out.message = stringOrEmpty(row.message);
+  out.payment_status = stringOrNull(row.payment_status);
   out.status = intOrDefault(row.status_int ?? row.status);
   if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
   return out;
@@ -937,12 +946,18 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
     const enquiryIds = enquiries.map((e) => e.enquiry_id).filter(Boolean);
     const [orderRows, stepLogRows, planRows] = await Promise.all([
       query<any>(`SELECT * FROM orders WHERE enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
-      query<any>(`SELECT * FROM order_step_logs WHERE order_id IN (
-                    SELECT id FROM orders WHERE enquiry_id IN (:ids)
-                  )`, { ids: enquiryIds }).catch(() => []),
-      query<any>(`SELECT * FROM order_plan WHERE order_id IN (
-                    SELECT id FROM orders WHERE enquiry_id IN (:ids)
-                  )`, { ids: enquiryIds }).catch(() => []),
+      query<any>(`SELECT osl.*
+                    FROM order_step_logs osl
+                    JOIN orders o
+                      ON osl.order_id = COALESCE(o.id, o.order_id)
+                      OR osl.order_id = o.order_id
+                   WHERE o.enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
+      query<any>(`SELECT op.*
+                    FROM order_plan op
+                    JOIN orders o
+                      ON op.order_id = COALESCE(o.id, o.order_id)
+                      OR op.order_id = o.order_id
+                   WHERE o.enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
     ]);
     const orders = orderRows.map(normalizeVendorOrderRow);
     const stepLogs = stepLogRows.map(normalizeVendorStepLogRow);
@@ -957,14 +972,17 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
         continue;
       }
       for (const order of enquiryOrders) {
-        const orderKey = order.id ?? order.order_id;
-        const stepLog = stepLogs.find((s: any) => Number(s.order_id) === Number(orderKey));
+        const orderKeys = [order.id, order.order_id].filter((value) => value !== undefined && value !== null);
+        const orderStepLogs = stepLogs.filter((s: any) => orderKeys.some((key) => Number(s.order_id) === Number(key)));
+        const orderPlans = plans.filter((p: any) => orderKeys.some((key) => Number(p.order_id) === Number(key)));
+        const stepLog = orderStepLogs[0];
         const item = {
           ...enquiry,
           orders: [{
             ...order,
-            plans:           plans.filter((p: any)    => Number(p.order_id) === Number(orderKey)),
-            order_step_logs: stepLogs.filter((s: any) => Number(s.order_id) === Number(orderKey)),
+            plans:           orderPlans,
+            ordersteps:      orderStepLogs,
+            order_step_logs: orderStepLogs,
           }],
         };
         if (Number(stepLog?.step) === 1)      new_enquiry.push(item);

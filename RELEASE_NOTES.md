@@ -1,5 +1,66 @@
 # Release Notes
 
+## v4.5.68 - Restore enquiry ordersteps compatibility (2026-06-29)
+
+### Why
+
+The mobile team reported that the enquiry-list response changed after order
+creation. The order object no longer matched the legacy response expected
+by Flutter:
+
+```json
+{
+  "orders": [
+    {
+      "id": 136,
+      "enquiry_id": 105,
+      "payment_status": "pending",
+      "ordersteps": [
+        {
+          "id": 270,
+          "step": 1,
+          "step_status": "1"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The current response kept newer fields such as `order_id`, but missed the
+legacy `ordersteps` array. That prevented the app from displaying order
+progress.
+
+### Issue Identified
+
+`vendorEnuqiryList` attached step logs under the newer
+`order_step_logs` key only. The legacy app reads `orders[].ordersteps`.
+
+The step-log query also matched only against `orders.id`. Newly-created
+orders can be addressed through `order_id`, so some step logs could be
+missed even when they existed.
+
+### What Changed
+
+- Added `orders[].ordersteps` back to every enquiry-list order object.
+- Kept `orders[].order_step_logs` as an alias for newer consumers.
+- Ensured `orders[].id` is always populated from `orders.id` or
+  `orders.order_id`.
+- Matched order steps and plans using both order identifiers:
+  - `id`
+  - `order_id`
+- Normalized empty order attachment fields:
+  - `orders[].files` now returns `""` when no files are available.
+  - `orders[].message` now returns `""` when no message is available.
+
+### Impact
+
+- Flutter can again read `orders[].ordersteps` for order progress.
+- Existing newer fields remain in the response, so web/admin consumers are
+  not broken.
+- Empty file attachments are consistently represented as an empty string in
+  the vendor enquiry-list order object.
+
 ## v4.5.67 - Allow empty place order message and files (2026-06-29)
 
 ### Why
