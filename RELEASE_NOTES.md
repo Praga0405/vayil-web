@@ -1,5 +1,163 @@
 # Release Notes
 
+## v4.5.74 - Mobile API response audit status and remaining scope (2026-06-30)
+
+### Why
+
+The mobile team asked whether the latest work covered every API and every
+response field, or whether any compatibility gaps may still be left.
+
+This release note is an explicit audit status record. It documents:
+
+- what was checked,
+- what was fixed,
+- what was live-verified,
+- what should still be treated as pending before declaring full 1:1 API
+  response parity across the entire customer and vendor mobile apps.
+
+### Audit Method Used
+
+- Used the Flutter source as the response contract reference:
+  - `Blazingcodersteam/Vayil-customer-App`
+  - `Blazingcodersteam/Vayil-vendor-App`
+- Flutter repositories were used read-only.
+- No Flutter code was modified.
+- Focused on the response mismatch patterns that were causing active
+  mobile crashes:
+  - Flutter model expects `List<T>` but backend returns an object.
+  - Flutter model expects `String?` but backend returns `number` or
+    `null`.
+  - Flutter model expects `int?` but backend returns a string.
+  - Flutter screen passes `id`, but backend only returns `*_id`.
+  - Flutter screen reads legacy aliases such as `title`, `unit_type`,
+    `qty`, `unit_cost`, `total_cost`, `balance_cost`, and
+    `m_final_amount`, but backend returns only canonical DB column names.
+
+### APIs Covered and Changed in This Audit Pass
+
+The following APIs were checked against the Flutter model/call-site
+expectations and changed where gaps were found:
+
+| API | Area Covered | Compatibility Fix |
+|---|---|---|
+| `POST /vendorgetPlan` | Vendor Plan List | Restored integer `amount_percentage`, `days`, `status`, `mandatory`; kept amount/date display fields as strings. |
+| `POST /vendorPlanDetails` | Vendor plan edit | Accepts `id` as `plan_id`; resolves parent `order_id`; returns `data` as a list. |
+| `POST /vendorgetMaterial` | Vendor material list | Added mobile aliases `id`, `title`, `unit_type`, `qty`, `unit_cost`, `total_cost`, `balance_cost`, `m_final_amount`. |
+| `POST /vendorMaterialDetails` | Vendor material edit | Returns `data` as a list; includes `id`, `title`, and `unit_type`. |
+| `POST /vendorOrderDetails` | Vendor ongoing enquiry details | Returns `data`, `steps`, `ordersMain`, `order_plan`, and `ordermaterials` as list-shaped mobile keys. |
+| `POST /customer/getPlan` | Customer project details | Returns list-shaped `data`, `steps`, `ordermaterials`, `ordersMain`, `order_plan`, and `review`. |
+| `POST /customer/orderDetails` | Customer order/project details | Same list-shaped project detail response as `getPlan`. |
+| `POST /customer/NeedPaymentSummary` | Customer payment plan/material summary | Normalizes plan/material field aliases and string/int types expected by Flutter. |
+
+### Live Verification Completed
+
+Production Vercel was checked after deployment using live credentials and
+existing production test data:
+
+- Vendor:
+  - phone: `3333333333`
+  - vendor id: `420001`
+  - order id: `30001`
+- Customer:
+  - phone: `9876543210`
+  - customer id: `1`
+  - order id: `30001`
+
+Verified responses:
+
+- `POST /vendorgetPlan`
+  - `amount_percentage` is an integer.
+  - `completion_days`, `amount`, `balance_cost` are strings.
+- `POST /vendorPlanDetails`
+  - `id: "30002"` resolves as a plan id.
+  - `data` is a list.
+- `POST /vendorgetMaterial`
+  - `id`, `title`, `unit_type`, `qty`, `unit_cost`, `total_cost`, and
+    `balance_cost` are present.
+- `POST /vendorMaterialDetails`
+  - `data` is a list.
+- `POST /vendorOrderDetails`
+  - `data`, `steps`, `ordermaterials`, `ordersMain`, and `order_plan`
+    are list-shaped.
+- `POST /customer/getPlan`
+  - `data`, `steps`, `ordermaterials`, `ordersMain`, `order_plan`, and
+    `review` are list-shaped.
+- `POST /customer/orderDetails`
+  - same customer project-detail shape as `getPlan`.
+- `POST /customer/NeedPaymentSummary`
+  - `plan`, `planoverall`, `materials`, and `materialsoverall` are
+    list-shaped.
+  - material aliases are populated.
+
+### Coverage Status
+
+This audit pass should be considered complete for the known high-risk
+Plan / Material / Project Detail response-shape issues that were actively
+breaking the Flutter app.
+
+It should not yet be described as a formal 100% all-API/all-field parity
+audit. The work covered the APIs and fields implicated by the current
+mobile crashes and the repeated response-shape pattern found in the
+Flutter models.
+
+### Still Pending for a Full 1:1 Mobile API Contract Audit
+
+The following groups still need a formal endpoint-by-endpoint contract
+matrix before we can say every API and every response field has been
+checked:
+
+- Payment summary row fields:
+  - `POST /vendorPaymentSummary`
+  - `POST /customer/getPaymentDetails`
+- Bank and payout APIs:
+  - `POST /GetBankDetails`
+  - `POST /vendorBalance`
+  - `POST /vendorTransactionHistory`
+  - `POST /vendorTransHistoryCurMon`
+  - `POST /vendorPayout`
+- Notification APIs:
+  - `POST /vendorNotificationList`
+  - `POST /customer/customerNotificationList`
+- Profile and account APIs:
+  - `GET /vendorInfo`
+  - `GET /customer/getCustomerInfo`
+  - onboarding save/update responses after `step1`, `step2`, `step3`,
+    `step4`, and `serviceTagStep`
+- Service and vendor profile details:
+  - `POST /customer/ServiceInfo`
+  - `POST /customer/vendorInfo`
+  - `POST /ServiceDetails`
+  - `GET /getVendorServiceList`
+- Add/update APIs where Flutter immediately reads the response:
+  - cart add/remove/clear/get flows
+  - enquiry submit and quote submit flows
+  - plan/material create/update/status flows
+  - review and signoff flows
+
+### Recommended Next Step
+
+Build a final mobile contract matrix from both Flutter repositories:
+
+- endpoint
+- method
+- auth requirement
+- request payload used by Flutter
+- response model file
+- top-level response keys
+- nested list/object keys
+- expected field type for each parsed field
+- current backend route
+- live response sample
+- gap status
+
+Then smoke-test each endpoint with both:
+
+- normal populated data,
+- empty/null data cases.
+
+That final pass is the right point to declare "all APIs and all fields are
+1:1 compatible."
+
 ## v4.5.73 - Normalize mobile project detail response lists (2026-06-30)
 
 ### Why
