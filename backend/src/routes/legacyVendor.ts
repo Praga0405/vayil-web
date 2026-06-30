@@ -1295,11 +1295,30 @@ legacyVendorRouter.post('/vendorgetPlan', async (req: AuthRequest, res, next) =>
 
 legacyVendorRouter.post('/vendorPlanDetails', async (req: AuthRequest, res, next) => {
   try {
-    const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
+    const explicitOrderId = pickId(req.body, 'order_id', 'orderId');
+    const idInput = pickId(req.body, 'id');
+    let planId = pickId(req.body, 'plan_id', 'planId');
+    let orderId = explicitOrderId;
+    if (!orderId && idInput) {
+      const owner = await one<any>(
+        `SELECT order_id FROM order_plan WHERE plan_id = :id OR id = :id LIMIT 1`,
+        { id: idInput },
+      );
+      if (owner?.order_id) {
+        orderId = String(owner.order_id);
+        planId = idInput;
+      } else {
+        orderId = idInput;
+      }
+    }
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const data = await projectSvc.getProject(orderId);
-    send(res, { data: { ...(data as any), plan: ((data as any)?.plan ?? []).map(normalizeVendorPlanRow) } });
+    const plans = ((data as any)?.plan ?? []).map(normalizeVendorPlanRow);
+    const rows = planId
+      ? plans.filter((plan: any) => String(plan?.plan_id ?? plan?.id) === String(planId) || String(plan?.id) === String(planId))
+      : plans;
+    send(res, { data: rows });
   } catch (err) { next(err); }
 });
 
@@ -1369,7 +1388,7 @@ legacyVendorRouter.post('/vendorMaterialDetails', async (req: AuthRequest, res, 
       { id: materialId },
     );
     if (!owner || Number(owner.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Material not found');
-    send(res, { data: normalizeVendorMaterialRow(data) });
+    send(res, { data: [normalizeVendorMaterialRow(data)] });
   } catch (err) { next(err); }
 });
 

@@ -1,5 +1,64 @@
 # Release Notes
 
+## v4.5.72 - Return vendor detail rows as mobile lists (2026-06-30)
+
+### Why
+
+The Flutter vendor detail models parse both plan and material detail
+responses as lists:
+
+- `PlanDetailsModel.data` is `List<Data>?`
+- `MaterialDetailsModel.data` is `List<Data>?`
+
+The backend still returned object-shaped `data` for
+`vendorMaterialDetails`, and `vendorPlanDetails` returned a project object
+with a nested `plan` array. That could break edit mode parsing even though
+the list endpoints were already compatible.
+
+The Flutter Plan edit screen also calls:
+
+```json
+{
+  "id": "<plan_id>"
+}
+```
+
+So treating `id` only as an `order_id` made second/subsequent plan edits
+fail when `plan_id` no longer matched the parent `order_id`.
+
+### What Changed
+
+- `vendorPlanDetails` now:
+  - accepts `id` as a plan id when `order_id` is not supplied,
+  - resolves the parent `order_id` from `order_plan`,
+  - filters the response to the requested plan when a plan id is supplied,
+  - returns `data` as an array of normalized plan rows.
+- `vendorMaterialDetails` now returns:
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": [
+    {
+      "id": 30001,
+      "material_id": 30001
+    }
+  ]
+}
+```
+
+instead of object-shaped `data`.
+
+### Impact
+
+- Vendor plan edit mode can load any plan row by `plan_id`, not only the
+  first plan whose id happens to match the order id.
+- Vendor material edit mode parses through the existing
+  `MaterialDetailsModel` without a response-shape mismatch.
+- List endpoints remain unchanged except for the v4.5.70/v4.5.71 field
+  type and alias compatibility fixes.
+
 ## v4.5.71 - Restore vendor material mobile aliases (2026-06-30)
 
 ### Why
