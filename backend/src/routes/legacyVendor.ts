@@ -344,13 +344,16 @@ function normalizeVendorPlanRow(row: any) {
     'customer_id',
     'vendor_id',
     'status',
+    'mandatory',
   ]);
   out.amount = decimalString(row.amount);
   out.percentage = decimalString(row.percentage ?? row.amount_percentage);
-  out.amount_percentage = decimalString(row.amount_percentage ?? row.percentage);
+  out.amount_percentage = intOrDefault(row.amount_percentage ?? row.percentage, 0);
   out.balance_cost = decimalString(row.balance_cost);
   out.completion_days = integerString(row.completion_days ?? row.days);
-  out.days = integerString(row.days ?? row.completion_days);
+  out.days = intOrDefault(row.days ?? row.completion_days, 0);
+  out.status = intOrDefault(row.status, 0);
+  out.mandatory = intOrDefault(row.mandatory, 0);
   return out;
 }
 

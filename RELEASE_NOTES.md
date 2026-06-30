@@ -1,5 +1,68 @@
 # Release Notes
 
+## v4.5.70 - Restore vendor plan mobile field types (2026-06-30)
+
+### Why
+
+After v4.5.69, the vendor Plan List APIs no longer returned `null`
+numeric display values, but one field was over-normalized to a string.
+The Flutter vendor app model expects:
+
+- `amount`, `balance_cost`, and `completion_days` as strings.
+- `amount_percentage`, `status`, and ids as integers.
+
+The API returned:
+
+```json
+{
+  "amount_percentage": "0.00",
+  "days": "18"
+}
+```
+
+That caused the vendor app to fail parsing with:
+
+```text
+type 'String' is not a subtype of type 'int?'
+```
+
+### Issue Identified
+
+The previous null-safety bridge treated every plan numeric-like field as a
+display decimal string. That was correct for money fields used with
+`double.parse(...)`, but not correct for integer fields in the Dart
+`CreatePlanListModel`.
+
+The Flutter source in `Blazingcodersteam/Vayil-vendor-App` was used as the
+response contract reference. No Flutter code was modified.
+
+### What Changed
+
+- `vendorgetPlan` / `vendorPlanDetails` plan rows now return:
+  - `amount`: `"0.00"` style string
+  - `percentage`: `"0.00"` style string
+  - `balance_cost`: `"0.00"` style string
+  - `completion_days`: `"0"` style string
+  - `amount_percentage`: integer, for example `0`
+  - `days`: integer, for example `18`
+  - `mandatory`: integer default `0`
+  - `status`: integer default `0`
+- Existing id fields remain integers:
+  - `id`
+  - `plan_id`
+  - `order_id`
+  - `customer_id`
+  - `vendor_id`
+
+### Impact
+
+- Fixes the Plan List crash caused by `amount_percentage` being returned
+  as a string.
+- Keeps the earlier v4.5.69 null protection for amount and balance fields,
+  so `double.parse(...)` does not receive `null`.
+- Preserves the string fields that the Flutter app assigns directly to
+  `String?` variables.
+
 ## v4.5.69 - Default vendor plan and material numeric fields (2026-06-29)
 
 ### Why
