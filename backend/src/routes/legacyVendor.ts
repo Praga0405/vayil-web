@@ -359,6 +359,9 @@ function normalizeVendorPlanRow(row: any) {
 
 function normalizeVendorMaterialRow(row: any) {
   const out = normalizeNumericFields(row, ['id', 'material_id', 'order_id', 'plan_id']);
+  out.id = intOrNull(row.id) ?? intOrNull(row.material_id);
+  out.title = stringOrEmpty(row.title ?? row.name);
+  out.unit_type = stringOrEmpty(row.unit_type ?? row.unit);
   out.quantity = decimalString(row.quantity ?? row.qty);
   out.qty = decimalString(row.qty ?? row.quantity);
   out.rate = decimalString(row.rate ?? row.unit_cost);

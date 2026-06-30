@@ -1,5 +1,45 @@
 # Release Notes
 
+## v4.5.71 - Restore vendor material mobile aliases (2026-06-30)
+
+### Why
+
+After checking the `Blazingcodersteam/Vayil-vendor-App` material screens,
+the Material List response still had a shape mismatch:
+
+- Flutter passes `item.id` into `vendorMaterialDetails` for edit mode.
+- The API returned `material_id`, but `id` was `null`.
+- Flutter displays `title` and `unit_type`.
+- The API returned `name` and `unit` only for some material rows.
+
+This did not always throw a parser exception, but it made material edit
+mode skip the existing record and could show blank material names / `N/A`
+unit types.
+
+### What Changed
+
+- `vendorgetMaterial` and `vendorMaterialDetails` now normalize material
+  rows with mobile aliases:
+  - `id`: populated from `id` or `material_id`
+  - `title`: populated from `title` or `name`
+  - `unit_type`: populated from `unit_type` or `unit`
+- Existing canonical fields remain present:
+  - `material_id`
+  - `name`
+  - `unit`
+  - `quantity`
+  - `rate`
+  - `total`
+
+### Impact
+
+- Vendor material edit mode can pass a valid `material_id` back to
+  `vendorMaterialDetails`.
+- Material names and units display correctly in the Flutter Plan List and
+  Ongoing Enquiries screens.
+- Amount fields remain string defaults from v4.5.69 so the app does not
+  receive `null` for values parsed with `double.parse(...)`.
+
 ## v4.5.70 - Restore vendor plan mobile field types (2026-06-30)
 
 ### Why
