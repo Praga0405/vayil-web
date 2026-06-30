@@ -374,6 +374,55 @@ function normalizeVendorMaterialRow(row: any) {
   return out;
 }
 
+async function legacyVendorProjectDetailPayload(orderId: number | string) {
+  const data = await projectSvc.getProject(orderId);
+  const plans = ((data as any)?.plan ?? []).map(normalizeVendorPlanRow);
+  const project = (data as any)?.project ?? {};
+  const [steps, materials, orderMain] = await Promise.all([
+    query<any>(
+      `SELECT id, order_id, step, step_status, performed_by, performed_by_id, remarks, created_at, updated_at
+         FROM order_step_logs
+        WHERE order_id = :id
+        ORDER BY step ASC, id ASC`,
+      { id: orderId },
+    ).catch(() => []),
+    materialSvc.listMaterials(orderId).then((rows) => rows.map(normalizeVendorMaterialRow)).catch(() => []),
+    one<any>(
+      `SELECT COALESCE(o.id, o.order_id) AS id,
+              o.order_id,
+              CAST(o.vendor_id AS UNSIGNED) AS vendor_id,
+              CAST(o.service_id AS UNSIGNED) AS service_id,
+              CAST(o.customer_id AS UNSIGNED) AS customer_id,
+              c.name AS customer_name,
+              COALESCE(c.phone, c.mobile) AS customer_phone,
+              COALESCE(c.ph_code, '+91') AS customer_ph_code,
+              v.company_name,
+              COALESCE(vs.service_title, vs.title) AS service_title,
+              vs.price,
+              COALESCE(vs.unit_name, vs.unit) AS unit_name,
+              vs.pricing_type,
+              vs.description,
+              COALESCE(vs.service_image, vs.thumbnail, '') AS service_image,
+              vs.minimum_fee
+         FROM orders o
+         LEFT JOIN customers c ON c.customer_id = o.customer_id OR c.id = o.customer_id
+         LEFT JOIN vendors v ON v.vendor_id = o.vendor_id OR v.id = o.vendor_id
+         LEFT JOIN vendor_services vs ON vs.vendor_service_id = o.service_id OR vs.id = o.service_id
+        WHERE o.order_id = :id
+        LIMIT 1`,
+      { id: orderId },
+    ).catch(() => null),
+  ]);
+  return {
+    data: plans,
+    project,
+    steps: steps.map(normalizeVendorStepLogRow),
+    ordermaterials: materials,
+    ordersMain: orderMain ? [orderMain] : [],
+    order_plan: plans,
+  };
+}
+
 function normalizeVendorEnquiryRow(row: any) {
   let out = normalizeNumericFields(row, [
     'enquiry_id',
@@ -1397,17 +1446,7 @@ legacyVendorRouter.post('/vendorOrderDetails', async (req: AuthRequest, res, nex
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = await projectSvc.getProject(orderId);
-    // v4.5.35 — mobile bridge: workflow timeline reads `steps`,
-    // order summary reads `ordersMain`, plan reads `order_plan`.
-    const project = (data as any)?.project ?? {};
-    const plan    = (data as any)?.plan    ?? [];
-    send(res, {
-      data,
-      steps:       plan,        // mobile renders each plan row as a workflow step
-      ordersMain:  project,     // order header card
-      order_plan:  plan,        // explicit alias
-    });
+    send(res, await legacyVendorProjectDetailPayload(orderId));
   } catch (err) { next(err); }
 });
 

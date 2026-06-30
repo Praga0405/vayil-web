@@ -1,5 +1,81 @@
 # Release Notes
 
+## v4.5.73 - Normalize mobile project detail response lists (2026-06-30)
+
+### Why
+
+After auditing the Flutter source as the response contract, the same
+object-vs-list issue fixed for `vendorPlanDetails` and
+`vendorMaterialDetails` also existed in the project detail APIs.
+
+The Flutter models parse these keys with `.forEach(...)` and therefore
+expect arrays:
+
+- Customer `OngoingProjectDetailsModel`
+  - `data`
+  - `steps`
+  - `ordermaterials`
+  - `ordersMain`
+  - `review`
+- Vendor `VendorOrderDetailsModel`
+  - `data`
+  - `steps`
+  - `ordersMain`
+  - `order_plan`
+
+The backend previously returned object-shaped `data` and `ordersMain` for
+some routes, and used plan rows as `steps`. That could crash parsing or
+leave project-detail sections empty.
+
+### Issue Identified
+
+- `POST /vendorOrderDetails` returned:
+  - `data`: project object with nested `plan`
+  - `steps`: plan rows, not order timeline rows
+  - `ordersMain`: object, not array
+- `POST /customer/orderDetails` had the same object/list mismatch.
+- `POST /customer/getPlan` returned:
+  - `data`: project object
+  - `steps`: plan rows
+  - `ordersMain`: object
+  - `ordermaterials`: queried `order_materials`, while current material
+    records are in `materials`
+- `POST /customer/NeedPaymentSummary` returned raw plan/material rows, so
+  material aliases such as `id`, `title`, `unit_type`, `qty`, and
+  `unit_cost` could be missing.
+
+### What Changed
+
+- Added mobile project-detail response builders for customer and vendor
+  legacy routes.
+- `vendorOrderDetails` now returns:
+  - `data`: normalized plan rows array
+  - `steps`: `order_step_logs` array
+  - `ordersMain`: one-item order/service/customer summary array
+  - `order_plan`: normalized plan rows array
+  - `ordermaterials`: normalized material rows array for compatibility
+- `customer/orderDetails` and `customer/getPlan` now return:
+  - `data`: normalized plan rows array
+  - `steps`: `order_step_logs` array
+  - `ordermaterials`: normalized material rows array
+  - `ordersMain`: one-item order/service summary array
+  - `order_plan`: normalized plan rows array
+  - `review`: normalized review rows array
+- `NeedPaymentSummary` now normalizes plan/material rows using the same
+  mobile field aliases and type rules.
+
+### Impact
+
+- Customer project detail and payment-plan screens receive list-shaped
+  keys matching the Flutter models.
+- Vendor ongoing enquiry detail receives timeline rows under `steps` and
+  plan rows under `data` / `order_plan`.
+- Material rows now expose the mobile aliases used across both apps:
+  `id`, `title`, `unit_type`, `qty`, `unit_cost`, `total_cost`,
+  `balance_cost`, and `m_final_amount`.
+- Existing `project` is still included as a non-breaking extra key for any
+  newer web/admin consumer.
+
 ## v4.5.72 - Return vendor detail rows as mobile lists (2026-06-30)
 
 ### Why

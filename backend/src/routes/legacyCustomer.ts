@@ -96,6 +96,169 @@ function send(res: any, payload: { message?: string; data?: any; result?: any; t
   return res.status(status).json({ success: true, message: payload.message ?? 'Success', ...payload });
 }
 
+function intOrNull(value: any): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+function intOrDefault(value: any, fallback = 1): number {
+  return intOrNull(value) ?? fallback;
+}
+function decimalString(value: any, fallback = '0.00'): string {
+  if (value === undefined || value === null || value === '') return fallback;
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === 'null' || text.toLowerCase() === 'undefined') return fallback;
+  const n = Number(text);
+  return Number.isFinite(n) ? n.toFixed(2) : fallback;
+}
+function integerString(value: any, fallback = '0'): string {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? String(Math.trunc(n)) : fallback;
+}
+function stringOrEmpty(value: any): string {
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+function normalizeNumericFields<T extends Record<string, any>>(row: T, keys: string[]): T {
+  const out: Record<string, any> = { ...row };
+  for (const key of keys) out[key] = intOrNull(row[key]);
+  return out as T;
+}
+function normalizeCustomerPlanRow(row: any) {
+  const out = normalizeNumericFields(row, ['id', 'plan_id', 'order_id', 'customer_id', 'vendor_id', 'mandatory']);
+  out.id = intOrNull(row.id) ?? intOrNull(row.plan_id);
+  out.amount = decimalString(row.amount);
+  out.percentage = decimalString(row.percentage ?? row.amount_percentage);
+  out.amount_percentage = intOrDefault(row.amount_percentage ?? row.percentage, 0);
+  out.balance_cost = decimalString(row.balance_cost);
+  out.completion_days = integerString(row.completion_days ?? row.days);
+  out.days = intOrDefault(row.days ?? row.completion_days, 0);
+  out.status = intOrDefault(row.status, 0);
+  out.mandatory = intOrDefault(row.mandatory, 0);
+  return out;
+}
+function normalizeCustomerMaterialRow(row: any) {
+  const out = normalizeNumericFields(row, ['id', 'material_id', 'order_id']);
+  out.id = intOrNull(row.id) ?? intOrNull(row.material_id);
+  out.plan_id = row.plan_id === undefined || row.plan_id === null ? null : String(row.plan_id);
+  out.title = stringOrEmpty(row.title ?? row.name);
+  out.unit_type = stringOrEmpty(row.unit_type ?? row.unit);
+  out.quantity = decimalString(row.quantity ?? row.qty);
+  out.qty = decimalString(row.qty ?? row.quantity);
+  out.rate = decimalString(row.rate ?? row.unit_cost);
+  out.unit_cost = decimalString(row.unit_cost ?? row.rate);
+  out.total = decimalString(row.total ?? row.total_cost);
+  out.total_cost = decimalString(row.total_cost ?? row.total);
+  out.balance_cost = decimalString(row.balance_cost);
+  out.m_tax = decimalString(row.m_tax);
+  out.m_tax_cost = decimalString(row.m_tax_cost);
+  out.m_platform_cost = decimalString(row.m_platform_cost);
+  out.m_convenience_cost = decimalString(row.m_convenience_cost);
+  out.m_final_amount = decimalString(row.m_final_amount ?? row.total_cost ?? row.total);
+  out.payment_status = stringOrEmpty(row.payment_status ?? row.status);
+  out.status = stringOrEmpty(row.status ?? row.payment_status);
+  return out;
+}
+function normalizeCustomerStepLogRow(row: any) {
+  return normalizeNumericFields(row, ['id', 'order_id', 'step', 'performed_by_id']);
+}
+async function legacyCustomerMaterialRows(orderId: number | string) {
+  const primary = await query<any>(
+    `SELECT * FROM order_plan_materials WHERE order_id = :id ORDER BY id ASC`,
+    { id: orderId },
+  ).catch(() => []);
+  const fallback = await query<any>(
+    `SELECT * FROM materials WHERE order_id = :id ORDER BY material_id ASC`,
+    { id: orderId },
+  ).catch(() => []);
+  return (primary.length ? primary : fallback).map(normalizeCustomerMaterialRow);
+}
+async function legacyCustomerReviewRows(orderId: number | string) {
+  const fromPlural = await query<any>(
+    `SELECT COALESCE(cr.review_id, cr.id) AS id,
+            cr.order_id,
+            cr.customer_id,
+            cr.vendor_id,
+            cr.service_id,
+            cr.rating,
+            COALESCE(cr.review_description, cr.comment) AS review_description,
+            COALESCE(cr.status, 1) AS status,
+            cr.created_at,
+            cr.updated_at,
+            c.name AS customer_name
+       FROM customer_reviews cr
+       LEFT JOIN customers c ON c.customer_id = cr.customer_id OR c.id = cr.customer_id
+      WHERE cr.order_id = :id
+      ORDER BY COALESCE(cr.review_id, cr.id) ASC`,
+    { id: orderId },
+  ).catch(() => []);
+  if (fromPlural.length) return fromPlural.map((row) => normalizeNumericFields(row, ['id', 'order_id', 'customer_id', 'vendor_id', 'service_id', 'rating', 'status']));
+  return query<any>(
+    `SELECT COALESCE(cr.review_id, cr.id) AS id,
+            cr.order_id,
+            cr.customer_id,
+            cr.vendor_id,
+            cr.service_id,
+            cr.rating,
+            cr.review_description,
+            COALESCE(cr.status, 1) AS status,
+            cr.created_at,
+            cr.updated_at,
+            c.name AS customer_name
+       FROM customer_review cr
+       LEFT JOIN customers c ON c.customer_id = cr.customer_id OR c.id = cr.customer_id
+      WHERE cr.order_id = :id
+      ORDER BY COALESCE(cr.review_id, cr.id) ASC`,
+    { id: orderId },
+  ).then((rows) => rows.map((row) => normalizeNumericFields(row, ['id', 'order_id', 'customer_id', 'vendor_id', 'service_id', 'rating', 'status']))).catch(() => []);
+}
+async function legacyCustomerProjectDetailPayload(orderId: number | string) {
+  const out: any = await projectSvc.getProject(orderId);
+  const plans = (out?.plan ?? []).map(normalizeCustomerPlanRow);
+  const project = out?.project ?? {};
+  const [steps, materials, orderMain, reviews] = await Promise.all([
+    query<any>(
+      `SELECT id, order_id, step, step_status, performed_by, performed_by_id, remarks, created_at, updated_at
+         FROM order_step_logs
+        WHERE order_id = :id
+        ORDER BY step ASC, id ASC`,
+      { id: orderId },
+    ).then((rows) => rows.map(normalizeCustomerStepLogRow)).catch(() => []),
+    legacyCustomerMaterialRows(orderId),
+    one<any>(
+      `SELECT COALESCE(o.id, o.order_id) AS id,
+              CAST(o.service_id AS UNSIGNED) AS service_id,
+              CAST(o.vendor_id AS UNSIGNED) AS vendor_id,
+              CAST(o.customer_id AS UNSIGNED) AS customer_id,
+              v.company_name,
+              COALESCE(vs.service_title, vs.title) AS service_title,
+              vs.price,
+              COALESCE(vs.unit_name, vs.unit) AS unit_name,
+              vs.pricing_type,
+              vs.description,
+              COALESCE(vs.service_image, vs.thumbnail, '') AS service_image,
+              vs.minimum_fee
+         FROM orders o
+         LEFT JOIN vendors v ON v.vendor_id = o.vendor_id OR v.id = o.vendor_id
+         LEFT JOIN vendor_services vs ON vs.vendor_service_id = o.service_id OR vs.id = o.service_id
+        WHERE o.order_id = :id
+        LIMIT 1`,
+      { id: orderId },
+    ).catch(() => null),
+    legacyCustomerReviewRows(orderId),
+  ]);
+  return {
+    data: plans,
+    project,
+    steps,
+    ordermaterials: materials,
+    ordersMain: orderMain ? [orderMain] : [],
+    order_plan: plans,
+    review: reviews,
+  };
+}
+
 async function fetchLegacyCustomerServiceList(body: any): Promise<any[] | null> {
   const endpoint = process.env.LEGACY_CUSTOMER_SERVICE_LIST_URL || 'https://app.vayil.in/customer/ServiceList';
   const controller = new AbortController();
@@ -306,23 +469,6 @@ function enquiryStatusExpr(alias: string) {
       WHEN ${alias}.status = 'completed' THEN 8
       ELSE CAST(${alias}.status AS UNSIGNED)
     END)`;
-}
-
-function intOrNull(value: any): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.trunc(n);
-}
-
-function intOrDefault(value: any, fallback = 1): number {
-  return intOrNull(value) ?? fallback;
-}
-
-function normalizeNumericFields<T extends Record<string, any>>(row: T, keys: string[]): T {
-  const out: Record<string, any> = { ...row };
-  for (const key of keys) out[key] = intOrNull(row[key]);
-  return out as T;
 }
 
 function normalizeQuotationRow(row: any) {
@@ -1366,17 +1512,7 @@ legacyCustomerRouter.post('/orderDetails', async (req: AuthRequest, res, next) =
     const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const out: any = await projectSvc.getProject(orderId);
-    // v4.5.35 — mobile bridge (same as vendorOrderDetails):
-    // workflow timeline reads `steps`, header reads `ordersMain`, plan reads `order_plan`.
-    const project = out?.project ?? {};
-    const plan    = out?.plan    ?? [];
-    send(res, {
-      data:       out,
-      steps:      plan,
-      ordersMain: project,
-      order_plan: plan,
-    });
+    send(res, await legacyCustomerProjectDetailPayload(orderId));
   } catch (err) { next(err); }
 });
 
@@ -1413,11 +1549,11 @@ legacyCustomerRouter.post('/NeedPaymentSummary', async (req: AuthRequest, res, n
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const [plan, materials] = await Promise.all([
+    const [rawPlan, materials] = await Promise.all([
       query<any>(`SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC`, { id: orderId }).catch(() => []),
-      query<any>(`SELECT * FROM order_plan_materials WHERE order_id = :id ORDER BY id ASC`, { id: orderId })
-        .catch(() => query<any>(`SELECT * FROM materials WHERE order_id = :id ORDER BY material_id ASC`, { id: orderId }).catch(() => [])),
+      legacyCustomerMaterialRows(orderId),
     ]);
+    const plan = rawPlan.map(normalizeCustomerPlanRow);
     const planTotal = plan.reduce((sum: number, row: any) => sum + Number(row.amount ?? 0), 0);
     const planBalance = plan.reduce((sum: number, row: any) => sum + Number(row.balance_cost ?? row.balance ?? 0), 0);
     const materialsTotal = materials.reduce((sum: number, row: any) => sum + Number(row.total_cost ?? row.total ?? 0), 0);
@@ -1589,26 +1725,7 @@ legacyCustomerRouter.post('/getPlan', async (req: AuthRequest, res, next) => {
     const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const out: any = await projectSvc.getProject(orderId);
-    // v4.5.35 — mobile bridge: Customer_Get_Plan_Model reads
-    // steps, ordermaterials, ordersMain, review at top level.
-    const project = out?.project ?? {};
-    const plan    = out?.plan    ?? [];
-    const materials = await query<any>(
-      `SELECT * FROM order_materials WHERE order_id = :id ORDER BY material_id ASC`,
-      { id: orderId },
-    ).catch(() => []);
-    const reviews = await query<any>(
-      `SELECT * FROM customer_reviews WHERE order_id = :id ORDER BY review_id ASC`,
-      { id: orderId },
-    ).catch(() => []);
-    send(res, {
-      data:           out,
-      steps:          plan,
-      ordermaterials: materials,
-      ordersMain:     project,
-      review:         reviews,
-    });
+    send(res, await legacyCustomerProjectDetailPayload(orderId));
   } catch (err) { next(err); }
 });
 
