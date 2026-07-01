@@ -102,13 +102,42 @@ shape.
 
 - Backend TypeScript build passed:
   - `npm run build --workspace backend`
-- Live Vercel validation should be performed after deployment for:
+- Pushed to GitHub:
+  - Code commit: `8070294` (`Restore vendor project mobile API shapes`)
+  - Deployment trigger commit: `8c9d3ca` (`Trigger Vercel deployment`)
+- Vercel production deployment completed successfully for `8c9d3ca`.
+- Live Vercel validation completed for non-mutating/read endpoints:
   - `POST /vendorgetPlan`
+    - returns `message: "Plan Details"`,
+    - does not return `data.project` or `data.plan`,
+    - returns `summary.total_base_amount`, `summary.used_percentage`,
+      `summary.used_amount`, `summary.balance_percentage`,
+      `summary.balance_amount`,
+    - returns actual plan rows in top-level `plans`.
+  - `POST /vendorgetMaterial`
+    - returns `message: "Materials Details"`,
+    - returns `data` as a list from `order_plan_materials`,
+    - includes `title`, `unit_type`, `qty`, `unit_cost`, `total_cost`,
+      `balance_cost`, `m_final_amount`, `payment_status`, and `status`.
+  - `POST /vendorMaterialDetails`
+    - returns `message: "Materials Details"`,
+    - returns `data` as a list and resolves `material_id` against the
+      old mobile `order_plan_materials.id`.
+  - `POST /customer/vendorInfo`
+    - returns top-level `data`, `category`, `service`, and `review`
+      arrays,
+    - returns vendor rows directly in `data[]`,
+    - returns service rows with `company_name`, `rating`,
+      `review_count`, `booking_text`, `booking_count`, and
+      `category_name`.
+- Production write endpoints were not live-called from this audit session
+  to avoid creating duplicate order steps or extra material rows in the
+  shared demo data:
   - `POST /createAcceptPlan`
   - `POST /addPlanMaterial`
-  - `POST /vendorgetMaterial`
-  - `POST /vendorMaterialDetails`
-  - `POST /customer/vendorInfo`
+  - `POST /editPlanMaterial`
+  These were verified by TypeScript build plus comparison with the April
+  Node.js implementation and Flutter request payloads.
 
 ### Notes for Mobile Team
 
