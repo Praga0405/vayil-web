@@ -369,9 +369,75 @@ function normalizeVendorMaterialRow(row: any) {
   out.total = decimalString(row.total ?? row.total_cost);
   out.total_cost = decimalString(row.total_cost ?? row.total);
   out.balance_cost = decimalString(row.balance_cost);
+  out.m_tax = decimalString(row.m_tax);
+  out.m_tax_cost = decimalString(row.m_tax_cost);
+  out.m_platform_cost = decimalString(row.m_platform_cost);
+  out.m_convenience_cost = decimalString(row.m_convenience_cost);
   out.m_final_amount = decimalString(row.m_final_amount ?? row.total_cost ?? row.total);
   out.amount = decimalString(row.amount ?? row.total ?? row.total_cost);
+  out.payment_status = stringOrEmpty(row.payment_status ?? row.status);
+  out.status = stringOrEmpty(row.status ?? row.payment_status);
+  out.created_at = stringOrNull(row.created_at);
+  out.updated_at = stringOrNull(row.updated_at);
   return out;
+}
+
+async function legacyVendorMaterialRows(orderId: number | string) {
+  const primary = await query<any>(
+    `SELECT * FROM order_plan_materials WHERE order_id = :id ORDER BY id ASC`,
+    { id: orderId },
+  ).catch(() => []);
+  const fallback = await materialSvc.listMaterials(orderId).catch(() => []);
+  return (primary.length ? primary : fallback).map(normalizeVendorMaterialRow);
+}
+
+async function legacyVendorMaterialDetailRows(orderId: number | string | null, materialId: number | string) {
+  const primary = await query<any>(
+    orderId
+      ? `SELECT * FROM order_plan_materials WHERE order_id = :orderId AND id = :materialId ORDER BY id ASC`
+      : `SELECT * FROM order_plan_materials WHERE id = :materialId ORDER BY id ASC`,
+    { orderId, materialId },
+  ).catch(() => []);
+  if (primary.length) return primary.map(normalizeVendorMaterialRow);
+  const fallback = await query<any>(
+    orderId
+      ? `SELECT * FROM materials WHERE order_id = :orderId AND material_id = :materialId ORDER BY material_id ASC`
+      : `SELECT * FROM materials WHERE material_id = :materialId ORDER BY material_id ASC`,
+    { orderId, materialId },
+  ).catch(() => []);
+  return fallback.map(normalizeVendorMaterialRow);
+}
+
+async function legacyMaterialCharges(totalCost: number) {
+  const settings = await one<any>(
+    `SELECT convenience_fee_percentage, platform_fee, tax_option FROM settings LIMIT 1`,
+  ).catch(() => null);
+  const platformPct = Number(settings?.platform_fee ?? 0);
+  const conveniencePct = Number(settings?.convenience_fee_percentage ?? 0);
+  const m_platform_cost = (totalCost * platformPct) / 100;
+  const m_convenience_cost = (totalCost * conveniencePct) / 100;
+  let m_tax = 0;
+  if (settings?.tax_option) {
+    try {
+      const parsed = typeof settings.tax_option === 'string' ? JSON.parse(settings.tax_option) : settings.tax_option;
+      const taxOptions = Array.isArray(parsed?.tax_options) ? parsed.tax_options : [];
+      m_tax = taxOptions.reduce((sum: number, t: any) => {
+        const name = String(t?.tax_name ?? '').toUpperCase();
+        return name === 'SGST' || name === 'CGST' ? sum + Number(t?.tax_percentage ?? 0) : sum;
+      }, 0);
+    } catch {
+      m_tax = 0;
+    }
+  }
+  const taxableAmount = totalCost + m_platform_cost + m_convenience_cost;
+  const m_tax_cost = (taxableAmount * m_tax) / 100;
+  return {
+    m_tax,
+    m_tax_cost,
+    m_platform_cost,
+    m_convenience_cost,
+    m_final_amount: taxableAmount + m_tax_cost,
+  };
 }
 
 async function legacyVendorProjectDetailPayload(orderId: number | string) {
@@ -386,7 +452,7 @@ async function legacyVendorProjectDetailPayload(orderId: number | string) {
         ORDER BY step ASC, id ASC`,
       { id: orderId },
     ).catch(() => []),
-    materialSvc.listMaterials(orderId).then((rows) => rows.map(normalizeVendorMaterialRow)).catch(() => []),
+    legacyVendorMaterialRows(orderId),
     one<any>(
       `SELECT COALESCE(o.id, o.order_id) AS id,
               o.order_id,
@@ -1320,23 +1386,63 @@ legacyVendorRouter.post('/vendorgetPlan', async (req: AuthRequest, res, next) =>
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = await projectSvc.getProject(orderId);
-    // v4.5.35 — mobile bridge for the plan progress widget.
-    // Mobile reads: summary, total_base_amount, used_percentage,
-    //               used_amount, balance_percentage, plans.
-    const project: any = (data as any)?.project ?? {};
-    const plans:   any[] = ((data as any)?.plan ?? []).map(normalizeVendorPlanRow);
-    const responseData = { ...(data as any), plan: plans };
-    const baseAmount = Number(project?.amount ?? 0);
-    const usedAmount = plans.reduce((s: number, p: any) => s + Number(p?.amount ?? 0), 0);
-    const usedPct = baseAmount > 0 ? Math.round((usedAmount / baseAmount) * 100) : 0;
+    const [data, paymentLog, orderTotal] = await Promise.all([
+      projectSvc.getProject(orderId),
+      one<any>(
+        `SELECT COALESCE(SUM(base_amount), 0) AS total_base_amount,
+                COALESCE(SUM(payment_amount), 0) AS total_payment_amount
+           FROM payment_log
+          WHERE order_id = :id`,
+        { id: orderId },
+      ).catch(() => null),
+      one<any>(
+        `SELECT COALESCE(q.amount, o.order_amount, o.amount, 0) AS total_main
+           FROM orders o
+           LEFT JOIN quotation q
+             ON q.quotation_id = o.quotation_id OR q.id = o.quotation_id
+             OR q.quotation_id = o.quote_id OR q.id = o.quote_id
+          WHERE o.order_id = :id OR o.id = :id
+          LIMIT 1`,
+        { id: orderId },
+      ).catch(() => null),
+    ]);
+    // v4.5.76 — keep the old Node.js contract exactly: no `data.project`,
+    // no duplicate top-level totals, only `summary` and `plans`.
+    const totalMain = Number(orderTotal?.total_main ?? (data as any)?.project?.amount ?? 0);
+    const paidBaseAmount = Number(paymentLog?.total_base_amount ?? 0);
+    const plans: any[] = ((data as any)?.plan ?? []).map(normalizeVendorPlanRow);
+    let summary: any;
+    if (totalMain > 0 && paidBaseAmount >= totalMain) {
+      summary = {
+        total_base_amount: 0,
+        used_percentage: 0,
+        used_amount: 0,
+        balance_percentage: 0,
+        balance_amount: 0,
+      };
+    } else if (!plans.length) {
+      summary = {
+        total_base_amount: totalMain,
+        used_percentage: 0,
+        used_amount: 0,
+        balance_percentage: 100,
+        balance_amount: Math.max(0, totalMain - paidBaseAmount),
+      };
+    } else {
+      const usedPercentage = plans.reduce((sum: number, plan: any) => sum + Number(plan?.amount_percentage ?? plan?.percentage ?? 0), 0);
+      const usedAmount = plans.reduce((sum: number, plan: any) => sum + Number(plan?.amount ?? 0), 0);
+      const pendingBaseAmount = Math.max(0, totalMain - paidBaseAmount);
+      summary = {
+        total_base_amount: totalMain,
+        used_percentage: usedPercentage,
+        used_amount: usedAmount,
+        balance_percentage: Math.max(0, 100 - usedPercentage),
+        balance_amount: Math.max(0, pendingBaseAmount - usedAmount),
+      };
+    }
     send(res, {
-      data: responseData,
-      summary:             project,
-      total_base_amount:   baseAmount,
-      used_percentage:     usedPct,
-      used_amount:         usedAmount,
-      balance_percentage:  Math.max(0, 100 - usedPct),
+      message: 'Plan Details',
+      summary,
       plans,
     });
   } catch (err) { next(err); }
@@ -1377,9 +1483,51 @@ legacyVendorRouter.post('/createAcceptPlan', async (req: AuthRequest, res, next)
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    await projectSvc.createPlan(orderId, parseMilestones(req.body));
-    const out = await projectSvc.submitPlan(orderId);
-    send(res, { message: 'Plan created and submitted', data: out }, 201);
+    const order = await one<any>(
+      `SELECT enquiry_id, customer_id, vendor_id, service_id FROM orders WHERE order_id = :id OR id = :id LIMIT 1`,
+      { id: orderId },
+    );
+    for (const step of [
+      { step: 2, step_status: '1' },
+      { step: 3, step_status: '1' },
+      { step: 4, step_status: '0' },
+    ]) {
+      await exec(
+        `INSERT INTO order_step_logs
+           (order_id, step, step_status, performed_by, performed_by_id, remarks)
+         VALUES (:orderId, :step, :stepStatus, 'VENDOR', :vendorId, NULL)`,
+        { orderId, step: step.step, stepStatus: step.step_status, vendorId: req.user!.id },
+      );
+    }
+    if (order?.enquiry_id) {
+      await exec(
+        `UPDATE enquiries
+            SET status = 'accepted', status_int = 9, updated_at = NOW()
+          WHERE enquiry_id = :id OR id = :id`,
+        { id: order.enquiry_id },
+      ).catch(() => undefined);
+      await exec(
+        `UPDATE quotation
+            SET status = 'accepted', status_int = 9, updated_at = NOW()
+          WHERE enquiry_id = :id`,
+        { id: order.enquiry_id },
+      ).catch(() => undefined);
+    }
+    if (order?.customer_id) {
+      await notifSvc.notify({
+        recipient_type: 'customer',
+        recipient_id: order.customer_id,
+        type: 'plan_sent',
+        title: 'Plan Sent',
+        body: 'Plan send from vendor',
+        data: {
+          order_id: String(orderId),
+          vendor_id: order.vendor_id,
+          service_id: order.service_id,
+        },
+      }).catch(() => undefined);
+    }
+    send(res, { message: 'Create and accept plan successfully updated' });
   } catch (err) { next(err); }
 });
 
@@ -1389,13 +1537,36 @@ legacyVendorRouter.post('/addPlanMaterial', async (req: AuthRequest, res, next) 
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const m = await materialSvc.addMaterial(orderId, {
-      name: req.body?.name || req.body?.material_name || req.body?.title || '',
-      quantity: req.body?.quantity || req.body?.qty ? num(req.body.quantity ?? req.body.qty) : 1,
-      unit: req.body?.unit || req.body?.unit_type || req.body?.unitType,
-      rate: req.body?.rate || req.body?.unit_cost ? num(req.body.rate ?? req.body.unit_cost) : 0,
-    });
-    send(res, { message: 'Material added', data: m, material_id: m?.material_id }, 201);
+    const title = req.body?.title || req.body?.name || req.body?.material_name || '';
+    const unitType = req.body?.unit_type ?? req.body?.unit ?? req.body?.unitType ?? '';
+    const qty = String(req.body?.qty ?? req.body?.quantity ?? '1');
+    const unitCost = String(req.body?.unit_cost ?? req.body?.rate ?? '0');
+    const totalCost = num(req.body?.total_cost ?? Number(qty) * Number(unitCost));
+    const charges = await legacyMaterialCharges(totalCost);
+    await exec(
+      `INSERT INTO order_plan_materials
+         (plan_id, order_id, title, unit_type, qty, unit_cost, total_cost, balance_cost,
+          m_tax, m_tax_cost, m_platform_cost, m_convenience_cost, m_final_amount,
+          payment_status, status, created_at, updated_at)
+       VALUES
+         (NULL, :orderId, :title, :unitType, :qty, :unitCost, :totalCost, :totalCost,
+          :mTax, :mTaxCost, :mPlatformCost, :mConvenienceCost, :mFinalAmount,
+          'UNPAID', 'UNPAID', NOW(), NOW())`,
+      {
+        orderId, title, unitType, qty, unitCost, totalCost,
+        mTax: charges.m_tax,
+        mTaxCost: charges.m_tax_cost,
+        mPlatformCost: charges.m_platform_cost,
+        mConvenienceCost: charges.m_convenience_cost,
+        mFinalAmount: charges.m_final_amount,
+      },
+    );
+    await exec(
+      `INSERT INTO materials (order_id, name, quantity, unit, rate, total, status)
+       VALUES (:orderId, :title, :qty, :unitType, :unitCost, :totalCost, 'UNPAID')`,
+      { orderId, title, qty: Number(qty), unitType: unitType || 'pc', unitCost: Number(unitCost), totalCost },
+    ).catch(() => undefined);
+    send(res, { message: 'Material added successfully' });
   } catch (err) { next(err); }
 });
 
@@ -1405,13 +1576,45 @@ legacyVendorRouter.post('/editPlanMaterial', async (req: AuthRequest, res, next)
     const materialId = pickId(req.body, 'material_id', 'materialId');
     if (!orderId || !materialId) throw new ApiError(400, 'order_id and material_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const m = await materialSvc.updateMaterial(orderId, materialId, {
-      name: req.body?.name || req.body?.material_name || req.body?.title,
-      quantity: req.body?.quantity || req.body?.qty ? num(req.body.quantity ?? req.body.qty) : undefined,
-      unit: req.body?.unit || req.body?.unit_type || req.body?.unitType,
-      rate: req.body?.rate || req.body?.unit_cost ? num(req.body.rate ?? req.body.unit_cost) : undefined,
-    });
-    send(res, { message: 'Material updated', data: m });
+    const title = req.body?.title || req.body?.name || req.body?.material_name || '';
+    const unitType = req.body?.unit_type ?? req.body?.unit ?? req.body?.unitType ?? '';
+    const qty = String(req.body?.qty ?? req.body?.quantity ?? '1');
+    const unitCost = String(req.body?.unit_cost ?? req.body?.rate ?? '0');
+    const totalCost = num(req.body?.total_cost ?? Number(qty) * Number(unitCost));
+    const balanceCost = num(req.body?.balance_cost ?? totalCost);
+    const charges = await legacyMaterialCharges(totalCost);
+    await exec(
+      `UPDATE order_plan_materials
+          SET title = :title,
+              unit_type = :unitType,
+              qty = :qty,
+              unit_cost = :unitCost,
+              total_cost = :totalCost,
+              balance_cost = :balanceCost,
+              m_tax = :mTax,
+              m_tax_cost = :mTaxCost,
+              m_platform_cost = :mPlatformCost,
+              m_convenience_cost = :mConvenienceCost,
+              m_final_amount = :mFinalAmount,
+              updated_at = NOW()
+        WHERE id = :materialId AND order_id = :orderId`,
+      {
+        materialId, orderId, title, unitType, qty, unitCost, totalCost, balanceCost,
+        mTax: charges.m_tax,
+        mTaxCost: charges.m_tax_cost,
+        mPlatformCost: charges.m_platform_cost,
+        mConvenienceCost: charges.m_convenience_cost,
+        mFinalAmount: charges.m_final_amount,
+      },
+    );
+    await exec(
+      `UPDATE materials
+          SET name = :title, quantity = :qty, unit = :unitType,
+              rate = :unitCost, total = :totalCost, updated_at = NOW()
+        WHERE material_id = :materialId AND order_id = :orderId`,
+      { materialId, orderId, title, qty: Number(qty), unitType: unitType || 'pc', unitCost: Number(unitCost), totalCost },
+    ).catch(() => undefined);
+    send(res, { message: 'Material updated successfully' });
   } catch (err) { next(err); }
 });
 
@@ -1420,24 +1623,29 @@ legacyVendorRouter.post('/vendorgetMaterial', async (req: AuthRequest, res, next
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = (await materialSvc.listMaterials(orderId)).map(normalizeVendorMaterialRow);
-    send(res, { data });
+    const data = await legacyVendorMaterialRows(orderId);
+    send(res, { message: 'Materials Details', data });
   } catch (err) { next(err); }
 });
 
 legacyVendorRouter.post('/vendorMaterialDetails', async (req: AuthRequest, res, next) => {
   try {
+    const orderId = pickId(req.body, 'order_id', 'orderId');
     const materialId = pickId(req.body, 'material_id', 'materialId');
     if (!materialId) throw new ApiError(400, 'material_id required');
-    const data = await materialSvc.getMaterial(materialId);
     // Verify vendor ownership via the parent order.
     const owner = await one<any>(
-      `SELECT o.vendor_id FROM materials m JOIN orders o ON o.order_id = m.order_id
-        WHERE m.material_id = :id LIMIT 1`,
-      { id: materialId },
+      orderId
+        ? `SELECT vendor_id FROM orders WHERE order_id = :orderId LIMIT 1`
+        : `SELECT o.vendor_id
+             FROM order_plan_materials m JOIN orders o ON o.order_id = m.order_id
+            WHERE m.id = :materialId
+            LIMIT 1`,
+      { orderId, materialId },
     );
     if (!owner || Number(owner.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Material not found');
-    send(res, { data: [normalizeVendorMaterialRow(data)] });
+    const data = await legacyVendorMaterialDetailRows(orderId || null, materialId);
+    send(res, { message: 'Materials Details', data });
   } catch (err) { next(err); }
 });
 

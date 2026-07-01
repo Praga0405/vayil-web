@@ -864,14 +864,115 @@ legacyCustomerRouter.post('/vendorInfo', async (req, res, next) => {
 
     const vendorId = pickId(req.body, 'vendor_id', 'vendorId', 'id');
     if (!vendorId) throw new ApiError(400, 'vendor_id required');
-    const out: any = await customerSvc.getVendorWithListings(vendorId);
-    // v4.5.35 — mobile bridge: customer's vendor-profile page reads
-    // category, service, review at top level (NOT inside data).
-    send(res, {
-      data:     out,
-      category: out?.categories ?? out?.category ?? [],
-      service:  out?.services   ?? out?.listings ?? out?.service ?? [],
-      review:   out?.reviews    ?? out?.review   ?? [],
+    const vendorRows = await query<any>(
+      `SELECT
+          COALESCE(id, vendor_id) AS id,
+          name,
+          COALESCE(ph_code, '+91') AS ph_code,
+          COALESCE(phone, mobile, '') AS phone,
+          email,
+          company_name,
+          COALESCE(full_name, owner_name, name) AS full_name,
+          COALESCE(CAST(state AS CHAR), '') AS state,
+          COALESCE(CAST(city AS CHAR), '') AS city,
+          COALESCE(CAST(pincode AS CHAR), '') AS pincode,
+          COALESCE(address, '') AS address,
+          COALESCE(profile_photo, profile_image, '') AS profile_photo,
+          COALESCE(CAST(service_tag AS CHAR), '') AS service_tag,
+          COALESCE(CAST(service_category AS CHAR), '') AS service_category,
+          COALESCE(CAST(sub_service AS CHAR), '') AS sub_service,
+          COALESCE(years_of_experience, experience_years, 0) AS years_of_experience,
+          COALESCE(short_bio, about, '') AS short_bio,
+          COALESCE(languages, '') AS languages,
+          COALESCE(area_of_service, '') AS area_of_service,
+          COALESCE(working_hours_from, '') AS working_hours_from,
+          COALESCE(working_hours_to, '') AS working_hours_to,
+          COALESCE(willing_to_travel, 0) AS willing_to_travel,
+          COALESCE(tools_available, '') AS tools_available,
+          CAST(IFNULL((SELECT ROUND(AVG(cr.rating), 1)
+                         FROM customer_reviews cr
+                        WHERE cr.vendor_id = vendors.vendor_id AND COALESCE(cr.status, 1) = 1), 0) AS CHAR) AS rating,
+          (SELECT COUNT(*)
+             FROM customer_reviews cr
+            WHERE cr.vendor_id = vendors.vendor_id AND COALESCE(cr.status, 1) = 1) AS review_count
+        FROM vendors
+       WHERE (vendor_id = :id OR id = :id)
+         AND COALESCE(is_deleted, 0) = 0
+       LIMIT 1`,
+      { id: vendorId },
+    );
+    if (!vendorRows.length) {
+      return res.status(200).json({ success: false, message: 'Vendor not found' });
+    }
+
+    const where = [
+      `COALESCE(vs.is_active, vs.status, 1) = 1`,
+      `COALESCE(vs.is_deleted, 0) = 0`,
+      `COALESCE(v.is_deleted, 0) = 0`,
+      `vs.vendor_id = :vendorId`,
+    ];
+    const params: Record<string, any> = { vendorId };
+    const categoryId = pickId(req.body, 'category_id', 'categoryId');
+    if (categoryId) {
+      where.push(`COALESCE(vs.service_category, vs.category_id) = :categoryId`);
+      params.categoryId = categoryId;
+    }
+    const serviceRows = await query<any>(
+      `${legacyServiceSelect}
+        WHERE ${where.join(' AND ')}
+        ORDER BY COALESCE(vs.id, vs.vendor_service_id) DESC`,
+      params,
+    ).catch(() => []);
+    const service = serviceRows.map((row: any) => {
+      const item = normalizeLegacyService(row, true);
+      item.booking_count = Number(row?.booking_count ?? 0);
+      return item;
+    });
+    const category = await query<any>(
+      `SELECT
+          CAST(sc.category_id AS UNSIGNED) AS category_id,
+          sc.name AS category_name,
+          sc.icon_url,
+          COUNT(vs.vendor_service_id) AS service_count
+        FROM vendor_services vs
+        INNER JOIN service_categories sc
+          ON sc.category_id = CAST(COALESCE(vs.service_category, vs.category_id) AS UNSIGNED)
+       WHERE vs.vendor_id = :vendorId
+         AND COALESCE(vs.is_active, vs.status, 1) = 1
+         AND COALESCE(vs.is_deleted, 0) = 0
+       GROUP BY sc.category_id, sc.name, sc.icon_url
+       ORDER BY sc.name ASC`,
+      { vendorId },
+    ).catch(() => []);
+    const showReviews = service.some((row: any) => String(row?.show_review ?? '1') === '1');
+    const review = showReviews
+      ? await query<any>(
+          `SELECT
+              CAST(COALESCE(cr.id, cr.review_id) AS UNSIGNED) AS id,
+              CAST(cr.customer_id AS UNSIGNED) AS customer_id,
+              CAST(cr.vendor_id AS UNSIGNED) AS vendor_id,
+              CAST(cr.service_id AS UNSIGNED) AS service_id,
+              CAST(cr.rating AS UNSIGNED) AS rating,
+              cr.review_description,
+              CAST(COALESCE(cr.status, 1) AS UNSIGNED) AS status,
+              cr.created_at,
+              cr.updated_at,
+              c.name AS customer_name
+             FROM customer_reviews cr
+             LEFT JOIN customers c ON c.customer_id = cr.customer_id OR c.id = cr.customer_id
+            WHERE cr.vendor_id = :vendorId
+              AND COALESCE(cr.status, 1) = 1
+            ORDER BY COALESCE(cr.id, cr.review_id) DESC`,
+          { vendorId },
+        ).catch(() => [])
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      data: vendorRows,
+      category,
+      service,
+      review,
     });
   } catch (err) { next(err); }
 });

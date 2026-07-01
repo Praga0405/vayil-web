@@ -1,5 +1,121 @@
 # Release Notes
 
+## v4.5.75 - Vendor plan/material and customer vendor-profile mobile parity (2026-07-01)
+
+### Why
+
+The mobile team reported the next set of vendor project-flow gaps after the
+previous plan/material audit:
+
+- `POST /vendorgetPlan` returned the newer backend wrapper shape
+  (`data.project`, `data.plan`, duplicated top-level totals) instead of the
+  Flutter model shape (`summary` + `plans`).
+- `POST /createAcceptPlan` rejected the old mobile request
+  `{ "order_id": ... }` with `milestones required`.
+- `POST /addPlanMaterial` returned the newer response message/shape and did
+  not preserve the old `order_plan_materials` fee/tax row contract.
+- `POST /customer/vendorInfo` returned `data` as an object with nested
+  `vendor/listings`, while the customer Flutter model parses top-level
+  arrays: `data`, `category`, `service`, and `review`.
+
+The root cause was not missing routes. The routes existed, but some of them
+had been wired to the newer canonical project/material services. Those
+services are useful for the web app, but their response bodies do not match
+the old Node.js API contracts that the Flutter apps still parse directly.
+
+### Old Backend Comparison Used
+
+Compared the Vercel implementation with the April Node.js backend archive:
+
+- `src/Controllers/VendorController.ts`
+  - `vendorgetPlan`
+  - `createAcceptPlan`
+  - `addPlanMaterial`
+  - `editPlanMaterial`
+  - `vendorgetMaterial`
+  - `vendorMaterialDetails`
+- `src/Controllers/Customer.ts`
+  - `vendorInfomation` (`POST /customer/vendorInfo`)
+
+Also cross-checked the active Flutter models/call sites from the read-only
+mobile repositories:
+
+- Customer app:
+  - `Models/Orgaization_Details_Model.dart`
+- Vendor app:
+  - `Models/Create_Plan_List_Model.dart`
+  - `Models/Material_list_Model.dart`
+  - `Models/Material_Details_Model.dart`
+  - `View/Details module/Plan_List_Page.dart`
+  - `View/Details module/On_Going_Enquiries_Details_Page.dart`
+
+No Flutter code was changed.
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /vendorgetPlan` | Returned `data.project`, `data.plan`, duplicated top-level totals, and did not match `CreatePlanListModel`. | Restored old response envelope: `{ success, message: "Plan Details", summary, plans }`. Removed the `data` wrapper and duplicate top-level totals. Added `summary.balance_amount`. Kept plan rows normalized for Flutter: `completion_days`, `amount`, `balance_cost` as strings; `amount_percentage`, `status`, ids as integers. |
+| `POST /createAcceptPlan` | Called `projectSvc.createPlan(...)`, so an old request with only `order_id` failed with `milestones required`. | Reimplemented the old mobile shortcut: inserts order step logs for steps 2, 3, and 4; updates related enquiry/quotation status to accepted/status `9`; sends a best-effort customer notification; returns exactly `Create and accept plan successfully updated`. No milestone payload is required. |
+| `POST /addPlanMaterial` | Response and storage path were based on the newer material service instead of the old mobile `order_plan_materials` table. | Accepts the old request fields (`title`, `unit_type`, `qty`, `unit_cost`, `total_cost`), computes platform/convenience/tax/final amount from `settings`, writes `order_plan_materials`, best-effort dual-writes `materials`, and returns exactly `Material added successfully`. |
+| `POST /editPlanMaterial` | Same material-table mismatch as add material, and response message differed from old API. | Updates `order_plan_materials` by `id/order_id`, recomputes fee/tax/final amount, best-effort updates `materials`, and returns `Material updated successfully`. |
+| `POST /vendorgetMaterial` | Read from the newer `materials` table first, while the old mobile API reads `order_plan_materials`. | Now prefers `order_plan_materials`, falls back to `materials` only if needed, returns `message: "Materials Details"` and mobile fields (`id`, `order_id`, `plan_id`, `title`, `unit_type`, `qty`, `unit_cost`, `total_cost`, `balance_cost`, `payment_status`, `status`). |
+| `POST /vendorMaterialDetails` | Detail lookup used the newer `materials.material_id` path and returned a different shape. | Now accepts the old `material_id` + optional `order_id`, verifies vendor ownership through the order, prefers `order_plan_materials.id`, and returns a list-shaped `data` array with `message: "Materials Details"`. |
+| `POST /vendorOrderDetails` | Upcoming flow risk: the project detail payload reused material rows from the newer table. | Updated the shared vendor project-detail helper so `ordermaterials` also prefers `order_plan_materials`, matching the list/detail material APIs. |
+| `POST /customer/vendorInfo` | Returned `data` as `{ vendor, listings }`, but Flutter iterates `json['data']` as a list and separately iterates `category`, `service`, `review`. | Restored old top-level array contract: `data: [vendor]`, `category: [...]`, `service: [...]`, `review: [...]`. Service rows include mobile fields such as `company_name`, `rating`, `review_count`, `booking_text`, `booking_count`, and `category_name`. |
+
+### Functional Impact Prevented
+
+- Vendor Plan List screen no longer receives an unexpected `data.project`
+  object and can parse `summary`/`plans` directly.
+- The create/accept plan button no longer fails before any plan rows are
+  submitted; the old order-only flow is accepted again.
+- Material add/edit dialogs no longer refresh into a list with missing old
+  fields such as `title`, `unit_type`, `qty`, `unit_cost`, `total_cost`, and
+  `balance_cost`.
+- Vendor ongoing enquiry/project detail screens now see the same material
+  list shape as the material screen itself.
+- Customer organization/vendor profile screen no longer crashes/empties
+  because `data` is an object instead of an array.
+
+### Similar Issues Checked in This Pass
+
+Checked the adjacent vendor project flow, not only the four reported APIs:
+
+- `vendorgetPlan`
+- `vendorPlanDetails`
+- `createAcceptPlan`
+- `addPlanMaterial`
+- `editPlanMaterial`
+- `vendorgetMaterial`
+- `vendorMaterialDetails`
+- `vendorOrderDetails`
+- `customer/vendorInfo`
+
+The repeated pattern was the same: Flutter expects the April Node.js mobile
+contract, while some Vercel routes had drifted toward canonical web-service
+responses. This release keeps the canonical services available for web, but
+the legacy mobile routes now explicitly bridge back to the old response
+shape.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+- Live Vercel validation should be performed after deployment for:
+  - `POST /vendorgetPlan`
+  - `POST /createAcceptPlan`
+  - `POST /addPlanMaterial`
+  - `POST /vendorgetMaterial`
+  - `POST /vendorMaterialDetails`
+  - `POST /customer/vendorInfo`
+
+### Notes for Mobile Team
+
+No Flutter-side parser change is required for these endpoints. The backend
+now preserves the old mobile request/response contract while keeping the
+newer canonical web services separate.
+
 ## v4.5.74 - Mobile API response audit status and remaining scope (2026-06-30)
 
 ### Why
