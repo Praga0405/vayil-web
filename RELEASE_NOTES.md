@@ -50,6 +50,15 @@ The legacy mobile API expects direct verification against the vendor row:
 
 - Backend TypeScript build passed:
   - `npm run build --workspace backend`
+- Pushed implementation commit:
+  - `50a99c2` (`Restore legacy vendor OTP verification`)
+- Vercel production validation passed for safe non-mutating cases:
+  - Missing payload returns
+    `{ "success": false, "message": "Vendor ID and OTP are required" }`.
+  - Invalid non-existent vendor/OTP returns
+    `{ "success": false, "message": "Invalid or expired OTP" }`.
+- A valid OTP was not live-tested from this session because success clears
+  `otp` and `otp_expires_at` and may update vendor status.
 
 ## v4.5.77 - Customer enquiry list ordersteps compatibility (2026-07-03)
 
