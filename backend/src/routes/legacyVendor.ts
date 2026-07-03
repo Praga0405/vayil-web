@@ -381,6 +381,54 @@ function normalizeVendorPlanRow(row: any) {
   return out;
 }
 
+function normalizeVendorGetPlanRow(row: any) {
+  return {
+    id: intOrNull(row.id) ?? intOrNull(row.plan_id),
+    order_id: intOrNull(row.order_id),
+    title: stringOrEmpty(row.title),
+    completion_days: integerString(row.completion_days ?? row.days),
+    amount_percentage: intOrDefault(row.amount_percentage ?? row.percentage, 0),
+    amount: decimalString(row.amount),
+    balance_cost: decimalString(row.balance_cost),
+    updated_at: stringOrNull(row.updated_at),
+    update_photo: stringOrEmpty(row.update_photo),
+    update_comments: stringOrEmpty(row.update_comments),
+    status: intOrDefault(row.status, 0),
+    created_at: stringOrNull(row.created_at),
+  };
+}
+
+function vendorGetPlanSummary(plans: any[]) {
+  const activePlans = plans.filter((plan: any) => {
+    const status = intOrDefault(plan.status, 0);
+    const amount = moneyNumber(plan.amount);
+    const balance = moneyNumber(plan.balance_cost ?? plan.amount);
+    return status !== 10 && (amount > 0 || balance > 0);
+  });
+  if (!activePlans.length) {
+    return {
+      total_base_amount: 0,
+      used_percentage: 0,
+      used_amount: 0,
+      balance_percentage: 0,
+      balance_amount: 0,
+    };
+  }
+  const totalBaseAmount = activePlans.reduce((sum: number, plan: any) => sum + moneyNumber(plan.amount), 0);
+  const usedPercentage = activePlans.reduce((sum: number, plan: any) => sum + intOrDefault(plan.amount_percentage ?? plan.percentage, 0), 0);
+  const balanceAmount = activePlans.reduce((sum: number, plan: any) => {
+    const balance = moneyNumber(plan.balance_cost);
+    return sum + (balance > 0 ? balance : moneyNumber(plan.amount));
+  }, 0);
+  return {
+    total_base_amount: totalBaseAmount,
+    used_percentage: usedPercentage,
+    used_amount: totalBaseAmount,
+    balance_percentage: Math.max(0, 100 - usedPercentage),
+    balance_amount: balanceAmount,
+  };
+}
+
 function normalizeVendorMaterialRow(row: any) {
   const out = normalizeNumericFields(row, ['id', 'material_id', 'order_id', 'plan_id']);
   out.id = intOrNull(row.id) ?? intOrNull(row.material_id);
@@ -1703,63 +1751,12 @@ legacyVendorRouter.post('/vendorgetPlan', async (req: AuthRequest, res, next) =>
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const [data, paymentLog, orderTotal] = await Promise.all([
-      projectSvc.getProject(orderId),
-      one<any>(
-        `SELECT COALESCE(SUM(base_amount), 0) AS total_base_amount,
-                COALESCE(SUM(payment_amount), 0) AS total_payment_amount
-           FROM payment_log
-          WHERE order_id = :id`,
-        { id: orderId },
-      ).catch(() => null),
-      one<any>(
-        `SELECT COALESCE(q.amount, o.order_amount, o.amount, 0) AS total_main
-           FROM orders o
-           LEFT JOIN quotation q
-             ON q.quotation_id = o.quotation_id OR q.id = o.quotation_id
-             OR q.quotation_id = o.quote_id OR q.id = o.quote_id
-          WHERE o.order_id = :id OR o.id = :id
-          LIMIT 1`,
-        { id: orderId },
-      ).catch(() => null),
-    ]);
-    // v4.5.76 — keep the old Node.js contract exactly: no `data.project`,
-    // no duplicate top-level totals, only `summary` and `plans`.
-    const totalMain = Number(orderTotal?.total_main ?? (data as any)?.project?.amount ?? 0);
-    const paidBaseAmount = Number(paymentLog?.total_base_amount ?? 0);
-    const plans: any[] = ((data as any)?.plan ?? []).map(normalizeVendorPlanRow);
-    let summary: any;
-    if (totalMain > 0 && paidBaseAmount >= totalMain) {
-      summary = {
-        total_base_amount: 0,
-        used_percentage: 0,
-        used_amount: 0,
-        balance_percentage: 0,
-        balance_amount: 0,
-      };
-    } else if (!plans.length) {
-      summary = {
-        total_base_amount: totalMain,
-        used_percentage: 0,
-        used_amount: 0,
-        balance_percentage: 100,
-        balance_amount: Math.max(0, totalMain - paidBaseAmount),
-      };
-    } else {
-      const usedPercentage = plans.reduce((sum: number, plan: any) => sum + Number(plan?.amount_percentage ?? plan?.percentage ?? 0), 0);
-      const usedAmount = plans.reduce((sum: number, plan: any) => sum + Number(plan?.amount ?? 0), 0);
-      const pendingBaseAmount = Math.max(0, totalMain - paidBaseAmount);
-      summary = {
-        total_base_amount: totalMain,
-        used_percentage: usedPercentage,
-        used_amount: usedAmount,
-        balance_percentage: Math.max(0, 100 - usedPercentage),
-        balance_amount: Math.max(0, pendingBaseAmount - usedAmount),
-      };
-    }
-    send(res, {
+    const data = await projectSvc.getProject(orderId);
+    const plans: any[] = ((data as any)?.plan ?? []).map(normalizeVendorGetPlanRow);
+    return res.status(200).json({
+      success: true,
       message: 'Plan Details',
-      summary,
+      summary: vendorGetPlanSummary(plans),
       plans,
     });
   } catch (err) { next(err); }

@@ -1,5 +1,80 @@
 # Release Notes
 
+## v4.5.82 - Vendor plan status and plan-list parity (2026-07-03)
+
+### Why
+
+The mobile team re-shared the old Node.js contracts for:
+
+- `POST /updatePlanStatus`
+- `POST /vendorgetPlan`
+
+The required plan status response is:
+
+```json
+{
+  "success": true,
+  "message": "Plan updated successfully"
+}
+```
+
+The required plan list response is:
+
+- top-level `success`
+- top-level `message: "Plan Details"`
+- top-level `summary`
+- top-level `plans`
+- no `data.project`, no `data.plan`, and no duplicate top-level summary keys
+
+### RCA
+
+`updatePlanStatus` was already restored in an earlier plan/material parity
+release and still matches the pasted `plan_id` + `status` contract.
+
+`vendorgetPlan` already had the correct top-level structure, but the summary
+logic still depended on a payment-log shortcut. That could make the summary
+look like a copied all-zero object for orders whose historical
+`payment_log.base_amount` rows were inflated by older payment writes.
+
+The plan rows also came from the shared normalizer, which retained internal
+fields such as `plan_id`, `days`, `percentage`, `mandatory`, and other
+canonical metadata. The old Node.js response used a narrower mobile-visible
+plan row.
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /updatePlanStatus` | Mobile expects `{ success: true, message: "Plan updated successfully" }` for `{ plan_id, status }`. | Reverified the existing handler: it validates vendor ownership, updates `order_plan.status`, runs completion propagation, and returns the exact response. No response-shape change was needed. |
+| `POST /vendorgetPlan` | Summary could be zeroed by payment-log history instead of being calculated from the visible plan state. | Replaced the payment-log shortcut with a legacy summary helper that calculates from non-completed/payable plan rows. Completed orders like the sample return all zeroes; active plans return actual `total_base_amount`, `used_percentage`, `used_amount`, `balance_percentage`, and `balance_amount`. |
+| `POST /vendorgetPlan` | Plan rows included internal/canonical fields outside the old Node.js response. | Added a dedicated mobile plan-list formatter returning only `id`, `order_id`, `title`, `completion_days`, `amount_percentage`, `amount`, `balance_cost`, `updated_at`, `update_photo`, `update_comments`, `status`, and `created_at`. |
+
+### Compatibility Notes
+
+For completed plans where every visible row is status `10`, summary returns:
+
+```json
+{
+  "total_base_amount": 0,
+  "used_percentage": 0,
+  "used_amount": 0,
+  "balance_percentage": 0,
+  "balance_amount": 0
+}
+```
+
+For active/non-completed plans, the same fields are calculated from the plan
+rows instead of being hardcoded.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+- Full Vercel build command completed and the Next.js production build passed:
+  - `npm run vercel-build`
+  - local migration/seed pre-steps emitted sandbox-only `tsx` IPC `EPERM`
+    warnings and were skipped by the script's existing `|| true` guard
+
 ## v4.5.81 - Vendor payment and enquiry legacy parity (2026-07-03)
 
 ### Why
