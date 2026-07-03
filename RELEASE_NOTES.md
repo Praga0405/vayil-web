@@ -1,5 +1,50 @@
 # Release Notes
 
+## v4.5.77 - Customer enquiry list ordersteps compatibility (2026-07-03)
+
+### Why
+
+The mobile team shared **"Enquire list Issue.pdf"** showing that
+`POST /customer/enquiryList` no longer matched the old `app.vayil.in`
+response used by Flutter.
+
+The old response nested each order like this:
+
+- `orders[].id`
+- `orders[].enquiry_id`
+- `orders[].payment_status`
+- `orders[].ordersteps[]`
+
+The current Vercel response still included many valid order fields and already
+included `id`, but it did not attach `ordersteps[]`. Flutter uses
+`ordersteps[]` to determine current order progress, so the tracking UI could
+not render correctly.
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /customer/enquiryList` | Nested `orders[]` were loaded directly from `orders` without joining `order_step_logs`, so `orders[].ordersteps` was missing. | Added a customer enquiry-list order bridge that loads `order_step_logs` for each nested order and returns them as `orders[].ordersteps[]`, ordered by `order_id`, `step`, and log id. |
+| `POST /customer/enquiryList` | Flutter expects `orders[].id` even if the DB row is keyed by `order_id`. | Normalization now explicitly sets `orders[].id = id || order_id`, while keeping `order_id` and other additional fields as non-breaking extras. |
+| `POST /customer/enquiryDetails` | It reuses the same enquiry-row builder as `enquiryList`, so it had the same potential nested order-step gap. | Because the shared `legacyCustomerEnquiryRows(...)` helper was fixed, `enquiryDetails` now also receives the same `orders[].ordersteps[]` structure. |
+
+### Functional Impact Prevented
+
+- Customer Bucket/Enquiry screens can again read `orders[].ordersteps` to
+  display the order progress timeline.
+- Flutter does not need a model change from `id` to `order_id`; both keys are
+  available, with `id` restored as the old mobile alias.
+- Additional fields such as `customer_id`, `vendor_id`, `quotation_id`,
+  `amount`, `status`, `quote_id`, `service_id`, `message`, `files`,
+  `order_amount`, `currency`, `payment_id`, `payment_json`, `updated_at`, and
+  `status_int` are left in place because the PDF confirms they are
+  non-breaking.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+
 ## v4.5.76 - Place order, payment update, and plan creation PDF parity (2026-07-03)
 
 ### Why

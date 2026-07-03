@@ -513,8 +513,10 @@ function normalizeOrderRow(row: any) {
     'quotation_id',
     'service_id',
   ]);
+  out.id = intOrNull(row.id) ?? intOrNull(row.order_id);
   out.status = intOrDefault(row.status_int ?? row.status);
   if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
+  out.ordersteps = (row.ordersteps ?? []).map(normalizeCustomerStepLogRow);
   return out;
 }
 
@@ -556,6 +558,38 @@ async function legacyQuotationRows(enquiryId: number | string) {
     { id: enquiryId },
   ).catch(() => []);
   return rows.map(normalizeQuotationRow);
+}
+
+async function legacyCustomerOrderRows(enquiryId: number | string) {
+  const orders = await query<any>(
+    `SELECT * FROM orders WHERE enquiry_id = :id ORDER BY order_id DESC`,
+    { id: enquiryId },
+  ).catch(() => []);
+  if (!orders.length) return [];
+
+  const orderIds = orders
+    .map((order: any) => intOrNull(order.order_id) ?? intOrNull(order.id))
+    .filter((id: number | null): id is number => id !== null);
+  const steps = orderIds.length
+    ? await query<any>(
+        `SELECT id, order_id, step, step_status, performed_by, performed_by_id,
+                remarks, created_at, updated_at
+           FROM order_step_logs
+          WHERE order_id IN (:ids)
+          ORDER BY order_id ASC, step ASC, id ASC`,
+        { ids: orderIds },
+      ).catch(() => [])
+    : [];
+
+  return orders.map((order: any) => {
+    const id = intOrNull(order.id) ?? intOrNull(order.order_id);
+    const orderId = intOrNull(order.order_id) ?? id;
+    return {
+      ...order,
+      id,
+      ordersteps: steps.filter((step: any) => Number(step.order_id) === Number(orderId)),
+    };
+  });
 }
 
 async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?: string) {
@@ -601,14 +635,10 @@ async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?
     { customerId, enquiryId },
   );
   return Promise.all(rows.map(async (row: any) => {
-    const orders = await query<any>(
-      `SELECT * FROM orders WHERE enquiry_id = :id ORDER BY order_id DESC`,
-      { id: row.enquiry_id },
-    ).catch(() => []);
     return normalizeEnquiryRow({
       ...row,
       quotations: await legacyQuotationRows(row.enquiry_id),
-      orders,
+      orders: await legacyCustomerOrderRows(row.enquiry_id),
     });
   }));
 }
