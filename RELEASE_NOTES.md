@@ -1,5 +1,130 @@
 # Release Notes
 
+## v4.5.76 - Place order, payment update, and plan creation PDF parity (2026-07-03)
+
+### Why
+
+The mobile team shared the PDF **"Vayil - Placeorder and Plan creation
+Issues"** with the next set of production blockers in the customer payment
+and vendor project flows.
+
+The recurring issue was API contract drift:
+
+- The Flutter apps still send and parse the old `app.vayil.in` mobile API
+  contract.
+- Some Vercel routes had been moved toward the newer canonical web-service
+  shape.
+- The biggest blocker was `POST /customer/payment_update`: the mobile app
+  sends the old `payment_data`/`payment_amount` payload, but the Vercel route
+  required `razorpay_order_id`, `razorpay_payment_id`, and
+  `razorpay_signature`, so valid old mobile material/plan payments were
+  rejected before the backend could update balances.
+
+### PDF Endpoints Reviewed
+
+Reviewed the full PDF list against the current Vercel code and the old mobile
+Node.js backend contract:
+
+- `POST /customer/placeOrder`
+- `POST /customer/payment_update`
+- `POST /createPlan`
+- `POST /updatePlan`
+- `POST /updatePlanStatus`
+- `POST /vendorgetPlan`
+- `POST /vendorPlanDetails`
+- `POST /addPlanMaterial`
+- `POST /vendorgetMaterial`
+- `POST /vendorMaterialDetails`
+- `POST /editPlanMaterial`
+- `POST /createAcceptPlan`
+- `POST /vendorOrderDetails`
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /customer/placeOrder` | The old mobile response message is `Place Order Successfully`; the Vercel bridge returned `Order placed successfully`. Also, first payment logs wrote `base_amount` as the full order amount, which can distort later plan-balance calculations when the mobile app sends convenience/platform/tax costs separately. | Restored the old success message. `message` and `files` remain accepted as empty strings for the Flutter flow. Payment logs now store `base_amount` from `base_amount` when provided, otherwise calculate it from `order_amount - convenience_fee_cost - platform_cost - tax_cost`. The first order step now stores `step_status: "1"` like the old API. Notification send errors remain best-effort and are logged with order/enquiry/vendor context. |
+| `POST /customer/payment_update` | The route only supported the newer signed Razorpay verification payload. The PDF/mobile payload uses `order_id`, `payment_data`, `payment_amount`, `base_amount`, `payment_type`, and `payment_json`, often with blank Razorpay order/signature fields. This caused `400` errors and prevented material/plan balance updates. | Added a legacy-compatible branch for old mobile `payment_update` payloads. It verifies the order belongs to the customer, inserts a `payment_log` row with old fields, stores normalized `payment_data`, decrements `order_plan_materials.balance_cost` for `payment_type: "material"`, decrements `order_plan.balance_cost` for `payment_type: "plan"`, marks fully paid materials as `PAID`, marks fully paid plans as status `10`, logs notification failures, and returns `Place Order Successfully`. The newer signed Razorpay verification path is still available when the old mobile fields are not sent. |
+| `POST /createPlan` | The route returned the newer response with `data`, `total_base_amount`, `used_percentage`, `current_plan_amount`, and HTTP `201`. The old mobile API expects only `{ success: true, message: "Plan created" }`. The amount calculation also used the request amount directly instead of calculating the plan amount from the unpaid base amount and `amount_percentage`. | Restored old response message/shape. Plan amount and `balance_cost` now calculate from `(quotation/order amount - payment_log.base_amount total) * amount_percentage / 100`. Existing plan percentages are checked so the API returns the old `Only X% remaining` failure when a new plan exceeds remaining percentage. Default new plan status is `1`, matching the old flow. |
+| `POST /updatePlan` | The route returned `Plan updated` plus `data`, while the old mobile API expects `Plan updated successfully`. Amount edits also did not recalculate from unpaid base amount when `amount_percentage` changed. | Restored `Plan updated successfully` response. When a plan percentage is provided, the backend recalculates `amount` and `balance_cost` from the unpaid base amount, then updates title, completion days, photo/comments, and status fields. It also runs the old completion propagation check after each updated plan. |
+| `POST /updatePlanStatus` | Single plan status update returned `Plan status updated` plus a plan list; the PDF expects `{ success: true, message: "Plan updated successfully" }`. | Restored the old single-plan response. The API updates status by `plan_id`/`id`, then checks whether all plans are complete and, if so, propagates completion to the related order, enquiry, and quotation. Also supports old multi-plan payloads with `plans[]` and returns `Plans updated successfully`. |
+| `POST /vendorPlanDetails` | Response data was correct but message defaulted to `Success`; PDF expects `Plan Details`. | Response now returns `message: "Plan Details"` with the same list-shaped `data` array. |
+| `POST /vendorOrderDetails` | PDF expected `message: "Steps and Plan Details"` and plan rows containing nested `order_plan_material`. The Vercel bridge had top-level `ordermaterials` but plan rows did not include the nested old key. | Response now returns `message: "Steps and Plan Details"`. Each plan in `data[]` now includes `order_plan_material: [...]` filtered by that plan id, while existing top-level `ordermaterials`, `ordersMain`, and `order_plan` compatibility keys remain available for older screens. |
+
+### Endpoints Already Covered by v4.5.75 and Rechecked
+
+The PDF also listed APIs that were already fixed in the previous vendor
+plan/material parity release. They were reviewed again in this pass:
+
+- `POST /vendorgetPlan`
+  - Already returns the old top-level shape:
+    `{ success, message: "Plan Details", summary, plans }`.
+  - Numeric nullable fields are normalized so Flutter does not parse `null`
+    as a double.
+- `POST /addPlanMaterial`
+  - Already writes `order_plan_materials` and returns
+    `Material added successfully`.
+- `POST /vendorgetMaterial`
+  - Already returns `message: "Materials Details"` and list-shaped `data`.
+- `POST /vendorMaterialDetails`
+  - Already resolves old `order_plan_materials.id` via `material_id` and
+    returns `message: "Materials Details"`.
+- `POST /editPlanMaterial`
+  - Already updates `order_plan_materials` and returns
+    `Material updated successfully`.
+- `POST /createAcceptPlan`
+  - Already accepts `{ order_id }` and returns
+    `Create and accept plan successfully updated`.
+
+### Functional Impact Prevented
+
+- Customer payment completion no longer fails when the Flutter app sends the
+  old `payment_update` body without Razorpay signature fields.
+- Material payments now reduce material balance and can mark material rows as
+  paid, so the Plan/Material screens do not keep showing already-paid
+  balances.
+- Plan payments now reduce plan balance and can mark completed plan rows with
+  status `10`, matching the old order-progress behavior.
+- Plan creation now uses the old business rule: percentage-based plans are
+  calculated against the unpaid service amount, not directly from a raw
+  request amount.
+- Vendor plan screens no longer receive newer response wrappers for create,
+  update, or status APIs.
+- Vendor order detail screens can read nested `order_plan_material` under
+  each plan while retaining the previously added top-level material list.
+
+### Compatibility Notes
+
+- No Flutter code was changed.
+- The signed Razorpay verification path remains in `POST /customer/payment_update`
+  for newer callers. The old mobile branch is selected only when legacy
+  fields such as `payment_data`, `payment_amount`, `base_amount`,
+  `convenience_fee_cost`, or `payment_type: "material" | "plan"` are present.
+- The backend still preserves the safer escrow-oriented canonical services for
+  newer web flows. This release restores the old mobile-facing contract in the
+  legacy route layer without removing the newer services.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+- The following are write/mutation APIs and should be smoke-tested carefully
+  by the mobile team using known demo orders after deployment:
+  - `POST /customer/placeOrder`
+  - `POST /customer/payment_update`
+  - `POST /createPlan`
+  - `POST /updatePlan`
+  - `POST /updatePlanStatus`
+  - `POST /addPlanMaterial`
+  - `POST /editPlanMaterial`
+  - `POST /createAcceptPlan`
+- Read endpoints can be live-checked without creating rows:
+  - `POST /vendorgetPlan`
+  - `POST /vendorPlanDetails`
+  - `POST /vendorgetMaterial`
+  - `POST /vendorMaterialDetails`
+  - `POST /vendorOrderDetails`
+
 ## v4.5.75 - Vendor plan/material and customer vendor-profile mobile parity (2026-07-01)
 
 ### Why

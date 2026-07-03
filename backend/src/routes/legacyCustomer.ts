@@ -81,9 +81,26 @@ function objectFromJsonish(value: any): Record<string, any> {
   }
   return {};
 }
+function arrayFromJsonish(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 function legacyPlaceOrderPayload(body: any): boolean {
   return hasBodyKey(body, 'order_amount', 'payment_type', 'platform_cost', 'tax_cost')
     || String(body?.payment_type || '').toLowerCase() === 'place_order';
+}
+function legacyPaymentUpdatePayload(body: any): boolean {
+  return hasBodyKey(body, 'payment_data', 'payment_amount', 'base_amount', 'convenience_fee_cost')
+    || ['material', 'plan'].includes(String(body?.payment_type || '').toLowerCase());
 }
 function imageUrlOrEmpty(v: any): string {
   const value = String(v ?? '').trim();
@@ -1343,6 +1360,11 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
   const files = pickString(body, 'files');
   const platformCost = toNumberSafe(body?.platform_cost ?? body?.platformCost);
   const taxCost = toNumberSafe(body?.tax_cost ?? body?.taxCost);
+  const convenienceFeeCost = toNumberSafe(body?.convenience_fee_cost ?? body?.convenienceFeeCost);
+  const baseAmount = toNumberSafe(
+    body?.base_amount ?? body?.baseAmount,
+    Math.max(0, amount - platformCost - taxCost - convenienceFeeCost) || amount,
+  );
   const paymentKey = pickString(body, 'payment_key', 'razorpay_key', 'key_id');
   const paymentSecret = pickString(body, 'payment_secret', 'razorpay_secret', 'key_secret');
   const idempotencyKey = String(
@@ -1439,7 +1461,7 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
     if (!Array.isArray(stepRows) || stepRows.length === 0) {
       await conn.query(
         `INSERT INTO order_step_logs (order_id, step, step_status, performed_by, performed_by_id, remarks)
-         VALUES (?, 1, 'pending', 'CUSTOMER', ?, 'Order placed')`,
+         VALUES (?, 1, '1', 'CUSTOMER', ?, 'Order placed')`,
         [orderId, customerId],
       );
     }
@@ -1481,12 +1503,13 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
       `INSERT INTO payment_log
          (order_id, customer_id, vendor_id, amount, status, provider, provider_payment_id,
           notes, currency, payment_id, payment_json, payment_status, base_amount,
-          payment_amount, payment_date, payment_data, payment_type, platform_cost, tax_cost)
-       VALUES (?, ?, ?, ?, ?, 'razorpay', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?)`,
+          payment_amount, payment_date, payment_data, payment_type, convenience_fee_cost,
+          platform_cost, tax_cost)
+       VALUES (?, ?, ?, ?, ?, 'razorpay', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)`,
       [
         orderId, customerId, vendorId, amount, paymentStatus, paymentId || null,
         message, currency, paymentId || null, paymentJson, paymentStatus,
-        amount, amount, paymentJson, paymentType, platformCost, taxCost,
+        baseAmount, amount, paymentJson, paymentType, convenienceFeeCost, platformCost, taxCost,
       ],
     );
   });
@@ -1526,8 +1549,10 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
     payment_json: body?.payment_json ?? '',
     payment_status: paymentStatus,
     order_amount: String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
+    base_amount: baseAmount,
     amount,
     payment_type: paymentType,
+    convenience_fee_cost: String(body?.convenience_fee_cost ?? body?.convenienceFeeCost ?? ''),
     platform_cost: String(body?.platform_cost ?? body?.platformCost),
     tax_cost: String(body?.tax_cost ?? body?.taxCost),
     intent_id: intentId,
@@ -1539,13 +1564,158 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
   };
 }
 
+async function applyLegacyPaymentBalanceUpdate(conn: any, paymentType: string, orderId: number, paymentData: any[], availableAmount: number) {
+  const type = String(paymentType || '').toLowerCase();
+  const table = type === 'material'
+    ? 'order_plan_materials'
+    : type === 'plan'
+      ? 'order_plan'
+      : '';
+  if (!table || !paymentData.length || availableAmount <= 0) return paymentData;
+
+  let remaining = availableAmount;
+  const updatedRows: any[] = [];
+  for (const item of paymentData) {
+    const id = toNumberSafe(item?.id ?? item?.plan_id ?? item?.material_id);
+    if (!id) {
+      updatedRows.push(item);
+      continue;
+    }
+    const [rows]: any = await conn.query(
+      table === 'order_plan_materials'
+        ? `SELECT id, balance_cost, total_cost FROM order_plan_materials WHERE id = ? AND order_id = ? LIMIT 1`
+        : `SELECT COALESCE(plan_id, id) AS id, balance_cost, amount FROM order_plan
+            WHERE (plan_id = ? OR id = ?) AND order_id = ? LIMIT 1`,
+      table === 'order_plan_materials' ? [id, orderId] : [id, id, orderId],
+    );
+    const dbRow = Array.isArray(rows) ? rows[0] : null;
+    const currentBalance = toNumberSafe(
+      dbRow?.balance_cost ?? item?.balance_cost ?? item?.total_cost ?? item?.amount,
+      0,
+    );
+    const applyAmount = Math.min(remaining, currentBalance || remaining);
+    const nextBalance = Math.max(0, currentBalance - applyAmount);
+    remaining = Math.max(0, remaining - applyAmount);
+    if (table === 'order_plan_materials') {
+      await conn.query(
+        `UPDATE order_plan_materials
+            SET balance_cost = ?,
+                payment_status = CASE WHEN ? = 0 THEN 'PAID' ELSE COALESCE(payment_status, 'UNPAID') END,
+                status = CASE WHEN ? = 0 THEN 'PAID' ELSE COALESCE(status, 'UNPAID') END,
+                updated_at = NOW()
+          WHERE id = ? AND order_id = ?`,
+        [nextBalance, nextBalance, nextBalance, id, orderId],
+      );
+    } else {
+      await conn.query(
+        `UPDATE order_plan
+            SET balance_cost = ?,
+                status = CASE WHEN ? = 0 THEN 10 ELSE COALESCE(status, 1) END,
+                updated_at = NOW()
+          WHERE (plan_id = ? OR id = ?) AND order_id = ?`,
+        [nextBalance, nextBalance, id, id, orderId],
+      );
+    }
+    updatedRows.push({ ...item, balance_cost: nextBalance.toFixed(2) });
+    if (remaining <= 0) {
+      updatedRows.push(...paymentData.slice(updatedRows.length));
+      break;
+    }
+  }
+  return updatedRows;
+}
+
+async function handleLegacyPaymentUpdate(req: AuthRequest) {
+  const body = req.body ?? {};
+  const orderId = toNumberSafe(pickId(body, 'order_id', 'orderId'));
+  if (!orderId) throw new ApiError(400, 'order_id required');
+  const customerId = req.user!.id;
+  const order = await one<any>(
+    `SELECT order_id, customer_id, vendor_id
+       FROM orders
+      WHERE (order_id = :orderId OR id = :orderId)
+        AND customer_id = :customerId
+      LIMIT 1`,
+    { orderId, customerId },
+  );
+  if (!order) throw new ApiError(404, 'Order not found');
+
+  const paymentStatus = pickString(body, 'payment_status', 'paymentStatus') || 'success';
+  if (paymentStatus.toLowerCase() === 'failed') {
+    return { message: 'Payment failed' };
+  }
+
+  const paymentJsonBody = objectFromJsonish(body?.payment_json);
+  const paymentData = arrayFromJsonish(body?.payment_data);
+  const paymentId = pickString(body, 'payment_id', 'razorpay_payment_id')
+    || String(paymentJsonBody.razorpay_payment_id || '');
+  const paymentType = pickString(body, 'payment_type', 'paymentType') || 'material';
+  const paymentAmount = toNumberSafe(body?.payment_amount ?? body?.paymentAmount ?? body?.amount);
+  const convenienceFeeCost = toNumberSafe(body?.convenience_fee_cost ?? body?.convenienceFeeCost);
+  const platformCost = toNumberSafe(body?.platform_cost ?? body?.platformCost);
+  const taxCost = toNumberSafe(body?.tax_cost ?? body?.taxCost);
+  const baseAmount = toNumberSafe(
+    body?.base_amount ?? body?.baseAmount,
+    Math.max(0, paymentAmount - convenienceFeeCost - platformCost - taxCost),
+  );
+  const balanceApplyAmount = Math.max(0, paymentAmount - convenienceFeeCost - platformCost - taxCost) || baseAmount || paymentAmount;
+  const currency = pickString(body, 'currency') || 'INR';
+  const notes = pickString(body, 'notes') || `${paymentType} payment`;
+  const paymentJson = jsonStringOrNull(body?.payment_json);
+
+  await transaction(async (conn) => {
+    const updatedPaymentData = await applyLegacyPaymentBalanceUpdate(
+      conn,
+      paymentType,
+      orderId,
+      paymentData,
+      balanceApplyAmount,
+    );
+    const paymentDataJson = updatedPaymentData.length ? JSON.stringify(updatedPaymentData) : jsonStringOrNull(body?.payment_data);
+    await conn.query(
+      `INSERT INTO payment_log
+         (order_id, customer_id, vendor_id, amount, status, provider, provider_payment_id,
+          notes, currency, payment_id, payment_json, payment_status, convenience_fee_cost,
+          base_amount, payment_amount, payment_date, payment_data, payment_type,
+          platform_cost, tax_cost)
+       VALUES (?, ?, ?, ?, ?, 'razorpay', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?)`,
+      [
+        orderId, customerId, Number(order.vendor_id), paymentAmount, paymentStatus,
+        paymentId || null, notes, currency, paymentId || null, paymentJson,
+        paymentStatus, convenienceFeeCost, baseAmount, paymentAmount,
+        paymentDataJson, paymentType, platformCost, taxCost,
+      ],
+    );
+  });
+
+  try {
+    await notifSvc.notify({
+      recipient_type: 'vendor',
+      recipient_id: Number(order.vendor_id),
+      type: 'payment_update',
+      title: 'Payment received',
+      body: 'A customer payment was updated for your order.',
+      data: { order_id: orderId, payment_type: paymentType, payment_id: paymentId },
+    });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error('[customer/payment_update] notification_failed', {
+      order_id: orderId,
+      vendor_id: Number(order.vendor_id),
+      message: err?.message || String(err),
+    });
+  }
+
+  return { message: 'Place Order Successfully' };
+}
+
 /* ───── Payments — placeOrder + payment_update use canonical escrow ───── */
 legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => {
   try {
     if (legacyPlaceOrderPayload(req.body)) {
       const data = await createLegacyPlaceOrder(req);
       return send(res, {
-        message: 'Order placed successfully',
+        message: 'Place Order Successfully',
         data,
         order_id: data.order_id,
         id: data.id,
@@ -1592,6 +1762,10 @@ legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => 
 
 legacyCustomerRouter.post('/payment_update', async (req: AuthRequest, res, next) => {
   try {
+    if (legacyPaymentUpdatePayload(req.body)) {
+      const out = await handleLegacyPaymentUpdate(req);
+      return send(res, { message: out.message });
+    }
     const rzOrder = String(req.body?.razorpay_order_id || req.body?.order_id || '');
     const rzPayment = String(req.body?.razorpay_payment_id || req.body?.payment_id || '');
     const rzSig = String(req.body?.razorpay_signature || req.body?.signature || '');

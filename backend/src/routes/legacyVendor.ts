@@ -479,8 +479,19 @@ async function legacyVendorProjectDetailPayload(orderId: number | string) {
       { id: orderId },
     ).catch(() => null),
   ]);
+  const plansWithMaterials = plans.map((plan: any) => {
+    const planKeys = [plan.id, plan.plan_id].filter((value) => value !== undefined && value !== null);
+    return {
+      ...plan,
+      order_plan_material: materials.filter((material: any) => (
+        material.plan_id === null
+          ? false
+          : planKeys.some((key) => Number(material.plan_id) === Number(key))
+      )),
+    };
+  });
   return {
-    data: plans,
+    data: plansWithMaterials,
     project,
     steps: steps.map(normalizeVendorStepLogRow),
     ordermaterials: materials,
@@ -1241,9 +1252,110 @@ async function resolveOrderIdFromPlanBody(body: any): Promise<string> {
   return row?.order_id ? String(row.order_id) : '';
 }
 
+async function legacyOrderPlanFinancials(orderId: number | string, excludePlanId?: number | string | null) {
+  const [paymentLog, orderTotal, planUsage] = await Promise.all([
+    one<any>(
+      `SELECT COALESCE(SUM(base_amount), 0) AS total_base_amount
+         FROM payment_log
+        WHERE order_id = :id`,
+      { id: orderId },
+    ).catch(() => null),
+    one<any>(
+      `SELECT COALESCE(q.amount, o.order_amount, o.amount, 0) AS total_main
+         FROM orders o
+         LEFT JOIN quotation q
+           ON q.quotation_id = o.quotation_id OR q.id = o.quotation_id
+           OR q.quotation_id = o.quote_id OR q.id = o.quote_id
+        WHERE o.order_id = :id OR o.id = :id
+        LIMIT 1`,
+      { id: orderId },
+    ).catch(() => null),
+    one<any>(
+      `SELECT COALESCE(SUM(COALESCE(amount_percentage, percentage, 0)), 0) AS used_percentage
+         FROM order_plan
+        WHERE order_id = :orderId
+          AND (:excludePlanId IS NULL OR COALESCE(plan_id, id) <> :excludePlanId)`,
+      { orderId, excludePlanId: excludePlanId ?? null },
+    ).catch(() => null),
+  ]);
+  const totalMain = Number(orderTotal?.total_main ?? 0);
+  const paidBaseAmount = Number(paymentLog?.total_base_amount ?? 0);
+  const usedPercentage = Number(planUsage?.used_percentage ?? 0);
+  return {
+    totalMain,
+    paidBaseAmount,
+    remainingBaseAmount: Math.max(0, totalMain - paidBaseAmount),
+    usedPercentage,
+    balancePercentage: Math.max(0, 100 - usedPercentage),
+  };
+}
+
+function calculatedPlanAmount(row: any, financials: Awaited<ReturnType<typeof legacyOrderPlanFinancials>>) {
+  if (row.percentage !== undefined) return (financials.remainingBaseAmount * Number(row.percentage)) / 100;
+  return row.amount ?? undefined;
+}
+
+async function legacyCheckAndUpdateOrderStatus(planId: number | string) {
+  const plan = await one<any>(
+    `SELECT order_id FROM order_plan WHERE plan_id = :id OR id = :id LIMIT 1`,
+    { id: planId },
+  ).catch(() => null);
+  if (!plan?.order_id) return;
+  const pending = await one<any>(
+    `SELECT COUNT(*) AS pending_count
+       FROM order_plan
+      WHERE order_id = :orderId
+        AND COALESCE(status, 0) <> 10`,
+    { orderId: plan.order_id },
+  ).catch(() => null);
+  if (Number(pending?.pending_count ?? 0) > 0) return;
+  const order = await one<any>(
+    `SELECT enquiry_id, quotation_id, quote_id FROM orders WHERE order_id = :orderId OR id = :orderId LIMIT 1`,
+    { orderId: plan.order_id },
+  ).catch(() => null);
+  await exec(
+    `UPDATE orders
+        SET status = 'completed',
+            status_int = 10,
+            updated_at = NOW()
+      WHERE order_id = :orderId OR id = :orderId`,
+    { orderId: plan.order_id },
+  ).catch(() => undefined);
+  if (order?.enquiry_id) {
+    await exec(
+      `UPDATE enquiries
+          SET status = 'completed',
+              status_int = 10,
+              updated_at = NOW()
+        WHERE enquiry_id = :id OR id = :id`,
+      { id: order.enquiry_id },
+    ).catch(() => undefined);
+  }
+  const quoteId = order?.quotation_id ?? order?.quote_id;
+  if (quoteId) {
+    await exec(
+      `UPDATE quotation
+          SET status = 'completed',
+              status_int = 10,
+              updated_at = NOW()
+        WHERE quotation_id = :id OR id = :id`,
+      { id: quoteId },
+    ).catch(() => undefined);
+  }
+}
+
 async function createLegacyPlanRows(orderId: number | string, rows: any[]) {
+  const financials = await legacyOrderPlanFinancials(orderId);
+  const requestedPercentage = rows.reduce((sum, row) => sum + Number(row?.percentage ?? 0), 0);
+  if (requestedPercentage > financials.balancePercentage) {
+    return {
+      error: `Only ${financials.balancePercentage}% remaining`,
+      rows: [],
+    };
+  }
   for (const row of rows) {
     if (!row.title && row.amount === undefined && row.percentage === undefined) continue;
+    const amount = calculatedPlanAmount(row, financials) ?? 0;
     const result: any = await exec(
       `INSERT INTO order_plan
          (order_id, title, description, amount, days, percentage, mandatory,
@@ -1257,25 +1369,30 @@ async function createLegacyPlanRows(orderId: number | string, rows: any[]) {
         orderId,
         title: row.title || 'Plan',
         description: row.description,
-        amount: row.amount ?? 0,
+        amount,
         days: row.days ?? 0,
         percentage: row.percentage ?? 0,
         completionDays: row.days === undefined ? null : String(row.days),
         amountPercentage: row.percentage ?? null,
-        balanceCost: row.amount ?? 0,
+        balanceCost: amount,
         updatePhoto: row.update_photo,
         updateComments: row.update_comments,
-        status: row.status ?? null,
+        status: row.status ?? 1,
       },
     );
     await exec(`UPDATE order_plan SET id = plan_id WHERE plan_id = :id AND (id IS NULL OR id = 0)`, { id: result.insertId }).catch(() => undefined);
   }
-  return query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: orderId });
+  return {
+    error: '',
+    rows: await query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: orderId }),
+  };
 }
 
 async function updateLegacyPlanRows(orderId: number | string, rows: any[]) {
   for (const row of rows) {
     if (!row.plan_id) continue;
+    const financials = await legacyOrderPlanFinancials(orderId, row.plan_id);
+    const amount = calculatedPlanAmount(row, financials);
     await exec(
       `UPDATE order_plan SET
           title = COALESCE(:title, title),
@@ -1296,17 +1413,18 @@ async function updateLegacyPlanRows(orderId: number | string, rows: any[]) {
         planId: row.plan_id,
         title: row.title || null,
         description: row.description ?? null,
-        amount: row.amount ?? null,
+        amount: amount ?? null,
         days: row.days ?? null,
         percentage: row.percentage ?? null,
         completionDays: row.days === undefined ? null : String(row.days),
         amountPercentage: row.percentage ?? null,
-        balanceCost: row.amount ?? null,
+        balanceCost: amount ?? null,
         updatePhoto: row.update_photo ?? null,
         updateComments: row.update_comments ?? null,
         status: row.status ?? null,
       },
     );
+    await legacyCheckAndUpdateOrderStatus(row.plan_id);
   }
   return query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: orderId });
 }
@@ -1318,25 +1436,13 @@ legacyVendorRouter.post('/createPlan', async (req: AuthRequest, res, next) => {
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
     const milestones = parseMilestones(req.body);
     const legacyRows = legacyPlanRowsFromBody(req.body);
-    const data = milestones.length
+    const result = milestones.length
       ? await projectSvc.createPlan(orderId, milestones)
       : await createLegacyPlanRows(orderId, legacyRows);
-    // v4.5.35 — mobile bridge: Create_Plan_List_Model.dart reads
-    // total_base_amount, used_percentage, current_plan_amount, remaining_percentage
-    // at top level. Compute from the order + new plan.
-    const project = await one<any>('SELECT amount FROM orders WHERE order_id = :id', { id: orderId });
-    const planRows: any[] = Array.isArray(data) ? data : ((data as any)?.plan ?? []);
-    const baseAmount = Number(project?.amount ?? 0);
-    const usedAmount = planRows.reduce((s: number, p: any) => s + Number(p?.amount ?? 0), 0);
-    const pct = baseAmount > 0 ? Math.round((usedAmount / baseAmount) * 100) : 0;
-    send(res, {
-      message: 'Plan created',
-      data,
-      total_base_amount:     baseAmount,
-      used_percentage:       pct,
-      current_plan_amount:   usedAmount,
-      remaining_percentage:  Math.max(0, 100 - pct),
-    }, 201);
+    if (!milestones.length && (result as any)?.error) {
+      return res.status(200).json({ success: false, message: (result as any).error });
+    }
+    send(res, { message: 'Plan created' });
   } catch (err) { next(err); }
 });
 
@@ -1345,13 +1451,21 @@ legacyVendorRouter.post('/updatePlan', async (req: AuthRequest, res, next) => {
     const orderId = await resolveOrderIdFromPlanBody(req.body);
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const data = await updateLegacyPlanRows(orderId, legacyPlanRowsFromBody(req.body));
-    send(res, { message: 'Plan updated', data });
+    await updateLegacyPlanRows(orderId, legacyPlanRowsFromBody(req.body));
+    send(res, { message: 'Plan updated successfully' });
   } catch (err) { next(err); }
 });
 
 legacyVendorRouter.post('/updatePlanStatus', async (req: AuthRequest, res, next) => {
   try {
+    const planRows = legacyPlanRowsFromBody(req.body).filter((row) => row.plan_id);
+    if (!pickId(req.body, 'plan_id', 'planId', 'id') && planRows.length) {
+      const orderId = await resolveOrderIdFromPlanBody(req.body);
+      if (!orderId) throw new ApiError(400, 'order_id required');
+      await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
+      await updateLegacyPlanRows(orderId, planRows);
+      return send(res, { message: 'Plans updated successfully' });
+    }
     const planId = pickId(req.body, 'plan_id', 'planId', 'id');
     if (planId) {
       const owner = await one<any>(
@@ -1368,10 +1482,8 @@ legacyVendorRouter.post('/updatePlanStatus', async (req: AuthRequest, res, next)
           WHERE plan_id = :id OR id = :id`,
         { id: planId, status: status ?? null },
       );
-      return send(res, {
-        message: 'Plan status updated',
-        data: await query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: owner.order_id }),
-      });
+      await legacyCheckAndUpdateOrderStatus(planId);
+      return send(res, { message: 'Plan updated successfully' });
     }
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
@@ -1473,7 +1585,7 @@ legacyVendorRouter.post('/vendorPlanDetails', async (req: AuthRequest, res, next
     const rows = planId
       ? plans.filter((plan: any) => String(plan?.plan_id ?? plan?.id) === String(planId) || String(plan?.id) === String(planId))
       : plans;
-    send(res, { data: rows });
+    send(res, { message: 'Plan Details', data: rows });
   } catch (err) { next(err); }
 });
 
@@ -1654,7 +1766,7 @@ legacyVendorRouter.post('/vendorOrderDetails', async (req: AuthRequest, res, nex
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    send(res, await legacyVendorProjectDetailPayload(orderId));
+    send(res, { message: 'Steps and Plan Details', ...await legacyVendorProjectDetailPayload(orderId) });
   } catch (err) { next(err); }
 });
 
