@@ -1,5 +1,56 @@
 # Release Notes
 
+## v4.5.78 - Vendor OTP legacy verification parity (2026-07-03)
+
+### Why
+
+The mobile team asked that `POST /verifyVendorOTP` use the same legacy
+verification logic as `app.vayil.in`, without changing the vendor login
+conditions.
+
+The Vercel implementation had drifted to the shared auth service:
+
+- It verified OTP through `otp_codes`.
+- It issued the newer token payload `{ id, userType }`.
+- It used the configured JWT expiry instead of the legacy 365-day vendor
+  token.
+- It did not preserve the old `vendorId == 52` special branch.
+
+The legacy mobile API expects direct verification against the vendor row:
+
+- `vendors.id` / `vendors.vendor_id`
+- `vendors.otp`
+- `vendors.otp_expires_at`
+- `vendors.status`
+- `vendors.is_deleted`
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /verifyVendorOTP` | Route called `authService.verifyOtpAndIssueToken(...)`, which is the newer shared OTP flow. | Replaced this endpoint only with a local legacy verifier that follows the pasted mobile logic and keeps the change isolated from customer auth and canonical auth routes. |
+| `POST /verifyVendorOTP` | Missing `vendorId`/`otp` errors could go through shared error handling. | Now returns old mobile response: `{ success: false, message: "Vendor ID and OTP are required" }` with HTTP 200. |
+| `POST /verifyVendorOTP` | Invalid OTP behavior differed from the old API. | Now checks the vendor row against OTP + expiry and returns `{ success: false, message: "Invalid or expired OTP" }` with HTTP 200 when not found. |
+| `POST /verifyVendorOTP` | Old app has a special `vendorId == 52` branch that ignores OTP value and only checks pending + expiry before deciding whether to mark verified. | Restored the vendor `52` branch. It clears OTP metadata when pending/active expiry criteria do not match; otherwise it sets `status = "verified"` and clears OTP metadata. |
+| `POST /verifyVendorOTP` | Token payload differed from old mobile API. | Token is now signed as `{ userId: vendorId, role: "vendor" }` with `365d` expiry, matching the legacy response while remaining accepted by existing middleware. |
+| `POST /verifyVendorOTP` | Demo OTP flow must remain usable while testing. | The configured demo bypass (`OTP_BYPASS=true` and `OTP_BYPASS_CODE`, default `123456`) is preserved for this endpoint: when the bypass OTP is used, the verifier keeps the old status/expiry conditions but does not require plaintext `vendors.otp` to match. |
+
+### Compatibility Notes
+
+- This change is limited to `POST /verifyVendorOTP`.
+- `/vendor-login-otp`, `/vendor-login-verify-otp`, customer OTP routes, and
+  the shared `authService` are unchanged.
+- The response remains old-mobile shaped:
+  `{ success, message, vendorId, token, data }`.
+- The route accepts both `vendorId`, `vendor_id`, and `id` request keys.
+- Internally the lookup supports both `vendors.id` and `vendors.vendor_id` so
+  Vercel schema aliases still work with old mobile payloads.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+
 ## v4.5.77 - Customer enquiry list ordersteps compatibility (2026-07-03)
 
 ### Why

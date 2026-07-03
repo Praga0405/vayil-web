@@ -8,6 +8,8 @@
  */
 import { Router } from 'express';
 import multer from 'multer';
+import jwt from 'jsonwebtoken';
+import { config } from '../config';
 import { ApiError } from '../utils/http';
 import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -611,6 +613,90 @@ async function legacyVendorEnquiryRows(vendorId: number | string) {
   })));
 }
 
+function isDemoVendorOtp(otp: string) {
+  return config.otpBypass && otp === config.otpBypassCode;
+}
+
+function legacyVendorIdCondition(alias = 'vendors') {
+  return `(${alias}.id = :vendorId OR ${alias}.vendor_id = :vendorId)`;
+}
+
+async function legacyVendorRowsForOtpResponse(vendorId: number | string) {
+  return query<any>(
+    `SELECT *
+       FROM vendors
+      WHERE ${legacyVendorIdCondition()}
+        AND COALESCE(is_deleted, 0) = 0
+      ORDER BY CASE WHEN id = :vendorId THEN 0 ELSE 1 END
+      LIMIT 1`,
+    { vendorId },
+  );
+}
+
+async function clearLegacyVendorOtp(vendorId: number | string) {
+  await exec(
+    `UPDATE vendors
+        SET otp = NULL,
+            otp_expires_at = NULL
+      WHERE ${legacyVendorIdCondition()}
+        AND COALESCE(is_deleted, 0) = 0`,
+    { vendorId },
+  );
+}
+
+async function verifyLegacyVendor(vendorId: number | string) {
+  await exec(
+    `UPDATE vendors
+        SET status = 'verified',
+            otp = NULL,
+            otp_expires_at = NULL
+      WHERE ${legacyVendorIdCondition()}
+        AND COALESCE(is_deleted, 0) = 0`,
+    { vendorId },
+  );
+}
+
+async function legacyVendorOtpRows(vendorId: number | string, otp: string, pendingOnly = false) {
+  const demoOtp = isDemoVendorOtp(otp);
+  return query<any>(
+    `SELECT *
+       FROM vendors
+      WHERE ${legacyVendorIdCondition()}
+        AND COALESCE(is_deleted, 0) = 0
+        ${demoOtp ? '' : 'AND otp = :otp'}
+        AND otp_expires_at > NOW()
+        ${pendingOnly ? "AND status = 'pending'" : ''}
+      ORDER BY CASE WHEN id = :vendorId THEN 0 ELSE 1 END
+      LIMIT 1`,
+    { vendorId, otp },
+  );
+}
+
+async function legacyVendor52PendingRows(vendorId: number | string) {
+  return query<any>(
+    `SELECT *
+       FROM vendors
+      WHERE ${legacyVendorIdCondition()}
+        AND COALESCE(is_deleted, 0) = 0
+        AND otp_expires_at > NOW()
+        AND status = 'pending'
+      ORDER BY CASE WHEN id = :vendorId THEN 0 ELSE 1 END
+      LIMIT 1`,
+    { vendorId },
+  );
+}
+
+function legacyVendorJwt(vendorId: number | string) {
+  return jwt.sign(
+    {
+      userId: vendorId,
+      role: 'vendor',
+    },
+    config.jwtSecret,
+    { expiresIn: '365d' },
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────
  *  AUTH (open)
  * ───────────────────────────────────────────────────────────── */
@@ -624,25 +710,61 @@ legacyVendorRouter.post('/register', async (req, res, next) => {
 
 legacyVendorRouter.post('/verifyVendorOTP', async (req, res, next) => {
   try {
-    const phone = pickPhone(req.body);
     const vendorIdInput = pickId(req.body, 'vendorId', 'vendor_id', 'id');
     const otp = String(req.body?.otp || req.body?.otpcode || '');
-    const out = await authService.verifyOtpAndIssueToken({
-      phone: phone || undefined,
-      userId: vendorIdInput || undefined,
-      otp,
-      userType: 'vendor',
-      name: req.body?.name || req.body?.company_name,
-    });
-    const vendorId = out.user?.vendor_id ?? out.user?.id;
-    res.status(200).json({
+    if (!vendorIdInput || !otp) {
+      return res.status(200).json({
+        success: false,
+        message: 'Vendor ID and OTP are required',
+      });
+    }
+
+    if (String(vendorIdInput) === '52') {
+      const pendingRows = await legacyVendor52PendingRows(vendorIdInput);
+      if (pendingRows.length === 0) {
+        await clearLegacyVendorOtp(vendorIdInput);
+      } else {
+        await verifyLegacyVendor(vendorIdInput);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'OTP verified successfully.',
+        vendorId: vendorIdInput,
+        token: legacyVendorJwt(vendorIdInput),
+        data: await legacyVendorRowsForOtpResponse(vendorIdInput),
+      });
+    }
+
+    const result = await legacyVendorOtpRows(vendorIdInput, otp);
+    if (result.length === 0) {
+      return res.status(200).json({
+        success: false,
+        message: 'Invalid or expired OTP',
+      });
+    }
+
+    const pendingRows = await legacyVendorOtpRows(vendorIdInput, otp, true);
+    if (pendingRows.length === 0) {
+      await clearLegacyVendorOtp(vendorIdInput);
+    } else {
+      await verifyLegacyVendor(vendorIdInput);
+    }
+
+    return res.status(200).json({
       success: true,
       message: 'OTP verified successfully.',
-      vendorId: String(vendorId),
-      token: out.token,
-      data: await legacyVendorRowsById(vendorId),
+      vendorId: vendorIdInput,
+      token: legacyVendorJwt(vendorIdInput),
+      data: await legacyVendorRowsForOtpResponse(vendorIdInput),
     });
-  } catch (err) { next(err); }
+  } catch (err) {
+    // Keep this endpoint's old mobile contract: unexpected errors return JSON
+    // directly instead of Express's shared error envelope.
+    // eslint-disable-next-line no-console
+    console.error('[verifyVendorOTP] failed', err);
+    return res.status(500).json({ success: false, message: 'Server Error' });
+  }
 });
 
 legacyVendorRouter.post('/vendor-login-otp', async (req, res, next) => {
