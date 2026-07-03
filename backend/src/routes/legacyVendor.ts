@@ -1352,74 +1352,199 @@ legacyVendorRouter.post('/ServiceDetails', async (req: AuthRequest, res, next) =
 });
 
 /* ───── Enquiries ───── */
-/* v4.5.36 — mobile compat bridge, now using the EXACT categorization
- * logic from the old app.vayil.in vendorEnuqiryList handler (verified
- * against the April 12 source archive). The original logic is:
- *
- *   request_quotation = enquiry has NO matching order
- *   new_enquiry       = enquiry has an order whose order_step_logs.step === 1
- *   ongoing           = enquiry has an order whose order_step_logs.step === 2
- *
- * Each item carries `quotations` + `orders` arrays nested inside so the
- * mobile UI can render the timeline / quote chips. v4.5.35's initial
- * status-string heuristic was wrong; this replaces it with the real query.
+/* v4.5.83 — direct port of the old vendorController.ts
+ * vendorEnuqiryList flow. Keep this endpoint intentionally narrower than
+ * the shared enquiry/project helpers: the Flutter vendor dashboard expects
+ * only the old enquiry, quotation, order, order_step_logs, and plan keys.
  */
 legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next) => {
   try {
-    const vendorId = req.user!.id;
-    const enquiries: any[] = await legacyVendorEnquiryRows(vendorId);
+    const vendorId = req.user?.id;
+    if (!vendorId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized',
+      });
+    }
+
+    const enquiries = await query<any>(
+      `SELECT
+          CAST(COALESCE(e.id, e.enquiry_id) AS UNSIGNED) AS enquiry_id,
+          CAST(e.customer_id AS UNSIGNED) AS customer_id,
+          cu.name AS customer_name,
+          e.first_name,
+          e.last_name,
+          e.email,
+          e.phone,
+          e.message,
+          e.files,
+          CAST(${enquiryStatusExpr('e')} AS UNSIGNED) AS status,
+          e.created_at,
+          CAST(e.service_id AS UNSIGNED) AS service_id,
+          CAST(e.vendor_id AS UNSIGNED) AS vendor_id,
+          COALESCE(sm.status_name,
+            CASE
+              WHEN e.status IN ('new', 'pending') THEN 'Pending'
+              WHEN e.status IN ('quoted', 'quote_received') THEN 'Quote Received'
+              WHEN e.status = 'accepted' THEN 'Accepted'
+              WHEN e.status = 'rejected' THEN 'Rejected'
+              ELSE e.status
+            END) AS status_name,
+          v.company_name,
+          COALESCE(vs.service_title, vs.title) AS service_title,
+          vs.price,
+          COALESCE(vs.unit_name, vs.unit) AS unit_name,
+          vs.pricing_type,
+          vs.description,
+          COALESCE(vs.service_image, vs.thumbnail) AS service_image
+        FROM enquiries e
+        LEFT JOIN customers cu ON cu.id = e.customer_id OR cu.customer_id = e.customer_id
+        LEFT JOIN vendors v ON v.id = e.vendor_id OR v.vendor_id = e.vendor_id
+        LEFT JOIN vendor_services vs ON vs.id = e.service_id OR vs.vendor_service_id = e.service_id
+        LEFT JOIN (
+          SELECT id, MAX(status_name) AS status_name
+            FROM status_master
+           WHERE is_active = 1
+           GROUP BY id
+        ) sm ON sm.id = CAST(${enquiryStatusExpr('e')} AS UNSIGNED)
+       WHERE e.vendor_id = :vendorId
+         AND COALESCE(vs.is_deleted, 0) = 0
+       ORDER BY CAST(COALESCE(e.id, e.enquiry_id) AS UNSIGNED) DESC`,
+      { vendorId },
+    );
+
     if (!enquiries.length) {
       return res.status(200).json({ success: true, new_enquiry: [], ongoing: [], request_quotation: [] });
     }
+
     const enquiryIds = enquiries.map((e) => e.enquiry_id).filter(Boolean);
-    const [orderRows, stepLogRows, planRows] = await Promise.all([
-      query<any>(`SELECT * FROM orders WHERE enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
-      query<any>(`SELECT osl.*
-                    FROM order_step_logs osl
-                    JOIN orders o
-                      ON osl.order_id = COALESCE(o.id, o.order_id)
-                      OR osl.order_id = o.order_id
-                   WHERE o.enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
-      query<any>(`SELECT op.*
-                    FROM order_plan op
-                    JOIN orders o
-                      ON op.order_id = COALESCE(o.id, o.order_id)
-                      OR op.order_id = o.order_id
-                   WHERE o.enquiry_id IN (:ids)`, { ids: enquiryIds }).catch(() => []),
-    ]);
-    const orders = orderRows.map(normalizeVendorOrderRow);
-    const stepLogs = stepLogRows.map(normalizeVendorStepLogRow);
-    const plans = planRows.map(normalizeVendorPlanRow);
+
+    const quotations = await query<any>(
+      `SELECT
+          CAST(COALESCE(q.id, q.quotation_id) AS UNSIGNED) AS id,
+          CAST(q.enquiry_id AS UNSIGNED) AS enquiry_id,
+          CAST(q.customer_id AS UNSIGNED) AS customer_id,
+          q.message,
+          q.files,
+          q.amount,
+          q.service_time,
+          CAST(${enquiryStatusExpr('q')} AS UNSIGNED) AS status,
+          q.created_at,
+          COALESCE(sm.status_name,
+            CASE
+              WHEN q.status IN ('quoted', 'quote_received') THEN 'Quote Received'
+              WHEN q.status = 'accepted' THEN 'Accepted'
+              WHEN q.status = 'rejected' THEN 'Rejected'
+              ELSE q.status
+            END) AS status_name
+        FROM quotation q
+        LEFT JOIN (
+          SELECT id, MAX(status_name) AS status_name
+            FROM status_master
+           WHERE is_active = 1
+           GROUP BY id
+        ) sm ON sm.id = CAST(${enquiryStatusExpr('q')} AS UNSIGNED)
+       WHERE q.enquiry_id IN (:ids)
+       ORDER BY CAST(COALESCE(q.id, q.quotation_id) AS UNSIGNED) DESC`,
+      { ids: enquiryIds },
+    );
+
+    const orders = await query<any>(
+      `SELECT
+          CAST(COALESCE(id, order_id) AS UNSIGNED) AS id,
+          CAST(enquiry_id AS UNSIGNED) AS enquiry_id,
+          payment_status
+        FROM orders
+       WHERE enquiry_id IN (:ids)
+       ORDER BY CAST(COALESCE(id, order_id) AS UNSIGNED) DESC`,
+      { ids: enquiryIds },
+    );
+
+    const orderIds = orders.map((order: any) => order.id).filter(Boolean);
+    let orderStepLogs: any[] = [];
+    let plans: any[] = [];
+    if (orderIds.length) {
+      [orderStepLogs, plans] = await Promise.all([
+        query<any>(
+          `SELECT
+              id,
+              order_id,
+              step
+            FROM order_step_logs
+           WHERE order_id IN (:ids)
+             AND step IN (1, 2)
+           ORDER BY id DESC`,
+          { ids: orderIds },
+        ),
+        query<any>(
+          `SELECT
+              CAST(COALESCE(id, plan_id) AS UNSIGNED) AS id,
+              CAST(order_id AS UNSIGNED) AS order_id
+            FROM order_plan
+           WHERE order_id IN (:ids)
+           ORDER BY CAST(COALESCE(id, plan_id) AS UNSIGNED) DESC`,
+          { ids: orderIds },
+        ),
+      ]);
+    }
+
     const new_enquiry: any[] = [];
     const ongoing: any[] = [];
     const request_quotation: any[] = [];
+
     for (const enquiry of enquiries) {
-      const enquiryOrders = orders.filter((o: any) => Number(o.enquiry_id) === Number(enquiry.enquiry_id));
+      const enquiryOrders = orders.filter((order: any) => Number(order.enquiry_id) === Number(enquiry.enquiry_id));
+      const enquiryQuotations = quotations.filter((quotation: any) => Number(quotation.enquiry_id) === Number(enquiry.enquiry_id));
+
       if (enquiryOrders.length === 0) {
-        request_quotation.push({ ...enquiry, orders: [] });
+        request_quotation.push({
+          ...enquiry,
+          status_name: legacyStatusName(enquiry.status) ?? enquiry.status_name,
+          quotations: enquiryQuotations.map((quotation: any) => ({
+            ...quotation,
+            status_name: legacyStatusName(quotation.status) ?? quotation.status_name,
+          })),
+          orders: [],
+        });
         continue;
       }
+
       for (const order of enquiryOrders) {
-        const orderKeys = [order.id, order.order_id].filter((value) => value !== undefined && value !== null);
-        const orderStepLogs = stepLogs.filter((s: any) => orderKeys.some((key) => Number(s.order_id) === Number(key)));
-        const ordersteps = orderStepLogs.map(normalizeVendorLegacyOrderStepRow);
-        const orderPlans = plans.filter((p: any) => orderKeys.some((key) => Number(p.order_id) === Number(key)));
-        const stepLog = orderStepLogs[0];
-        const item = {
+        const orderLogs = orderStepLogs.filter((step: any) => Number(step.order_id) === Number(order.id));
+        const stepLog = orderLogs[0];
+        const orderData = {
           ...enquiry,
+          status_name: legacyStatusName(enquiry.status) ?? enquiry.status_name,
+          quotations: enquiryQuotations.map((quotation: any) => ({
+            ...quotation,
+            status_name: legacyStatusName(quotation.status) ?? quotation.status_name,
+          })),
           orders: [{
-            ...normalizeVendorEnquiryOrderRow(order, orderPlans, orderStepLogs),
-            ordersteps,
+            ...order,
+            plans: plans.filter((plan: any) => Number(plan.order_id) === Number(order.id)),
+            order_step_logs: orderLogs,
           }],
         };
-        if (Number(stepLog?.step) === 1)      new_enquiry.push(item);
-        else if (Number(stepLog?.step) === 2) ongoing.push(item);
-        // step 3+ (completed) intentionally falls into none of the three
-        // visible buckets — matches old behaviour.
+        if (Number(stepLog?.step) === 1) {
+          new_enquiry.push(orderData);
+        } else if (Number(stepLog?.step) === 2) {
+          ongoing.push(orderData);
+        }
       }
     }
-    res.status(200).json({ success: true, new_enquiry, ongoing, request_quotation });
-  } catch (err) { next(err); }
+
+    return res.status(200).json({
+      success: true,
+      new_enquiry,
+      ongoing,
+      request_quotation,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: 'Server Error',
+    });
+  }
 });
 
 legacyVendorRouter.post('/AcceptEnquiredStatusUpdate', async (req: AuthRequest, res, next) => {

@@ -1,5 +1,58 @@
 # Release Notes
 
+## v4.5.83 - Vendor enquiry list Node.js parity (2026-07-03)
+
+### Why
+
+The mobile team shared the exact old Node.js `vendorController.ts`
+`vendorEnuqiryList` function and asked the Vercel endpoint to match it.
+
+Endpoint:
+
+- `POST /vendorEnuqiryList`
+
+### RCA
+
+The previous Vercel handler already used the same high-level bucket rule, but
+it still reused richer compatibility helpers. That meant the response could
+include fields that were not part of the old Node.js function, including:
+
+- richer order rows
+- `ordersteps` alias
+- expanded plan fields
+- step logs outside the old `step IN (1,2)` filter
+
+The Flutter vendor dashboard is coupled to the narrower old response shape.
+
+### What Changed
+
+| Area | Issue Identified | Fix Implemented |
+|---|---|---|
+| Enquiry query | Used shared helper output rather than the exact old Node.js selected fields. | Replaced the handler with a dedicated query flow selecting the old enquiry fields: `enquiry_id`, customer details, message/files, status, service/vendor fields, and service listing details. |
+| Quotations | Used the shared quotation normalizer, which could add aliases outside the pasted function. | Now returns only `id`, `enquiry_id`, `customer_id`, `message`, `files`, `amount`, `service_time`, `status`, `created_at`, and `status_name`. |
+| Orders | Returned richer order rows. | Now returns only `id`, `enquiry_id`, and `payment_status`. |
+| Order steps | Included every step and also returned the `ordersteps` alias. | Now reads only `id`, `order_id`, and `step` from `order_step_logs` where `step IN (1,2)`, and only returns `order_step_logs`. |
+| Plans | Returned full normalized plan rows. | Now returns only `id` and `order_id` inside each order's `plans` array. |
+| Classification | Needed to follow the pasted Node.js logic exactly. | Preserved the exact bucket rules: no order means `request_quotation`; first matching step `1` means `new_enquiry`; first matching step `2` means `ongoing`. |
+| Unauthorized response | Auth middleware normally catches missing token before the handler. | Added the same in-handler guard from the old function returning `{ success: false, message: "Unauthorized" }` with HTTP 401 when no vendor id is available. |
+| Error response | Global error middleware could return different messages. | The handler now returns `{ success: false, message: "Server Error" }` with HTTP 500 for unexpected failures, matching the old function. |
+
+### Compatibility Notes
+
+The SQL keeps compatibility with Vercel's migrated schema by resolving both
+legacy and canonical id aliases, for example `id`/`enquiry_id`,
+`id`/`vendor_id`, and `id`/`vendor_service_id`. The response remains shaped
+like the old Node.js function.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+- Full Vercel build command completed and the Next.js production build passed:
+  - `npm run vercel-build`
+  - local migration/seed pre-steps emitted sandbox-only `tsx` IPC `EPERM`
+    warnings and were skipped by the script's existing `|| true` guard
+
 ## v4.5.82 - Vendor plan status and plan-list parity (2026-07-03)
 
 ### Why
