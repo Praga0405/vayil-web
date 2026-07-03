@@ -47,6 +47,17 @@ not render correctly.
 
 - Backend TypeScript build passed:
   - `npm run build --workspace backend`
+- Pushed implementation commits:
+  - `2c6cf55` (`Restore customer enquiry order steps`)
+  - `b6ae7ea` (`Normalize customer order step status`)
+- Vercel production validation passed for `POST /customer/enquiryList` using
+  the demo customer token:
+  - response returned `success: true`,
+  - first nested order returned both `order_id` and `id`,
+  - `orders[].ordersteps` was present,
+  - sample order returned 4 order steps,
+  - `step_status` values returned as numeric strings: `"1"`, `"1"`,
+    `"1"`, `"0"`.
 
 ## v4.5.76 - Place order, payment update, and plan creation PDF parity (2026-07-03)
 
