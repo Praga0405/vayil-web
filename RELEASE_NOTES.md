@@ -108,8 +108,28 @@ plan/material parity release. They were reviewed again in this pass:
 
 - Backend TypeScript build passed:
   - `npm run build --workspace backend`
-- The following are write/mutation APIs and should be smoke-tested carefully
-  by the mobile team using known demo orders after deployment:
+- Pushed implementation commit:
+  - `79da67c` (`Restore place order and plan flow parity`)
+- Vercel production deployment was verified with non-mutating/read calls:
+  - `POST /vendorOrderDetails`
+    - returns `message: "Steps and Plan Details"`,
+    - returns `data[]` plan rows,
+    - each plan row includes `order_plan_material: []`,
+    - keeps compatibility keys `steps`, `ordersMain`, `order_plan`, and
+      `ordermaterials`.
+  - `POST /vendorPlanDetails`
+    - returns `message: "Plan Details"`,
+    - returns list-shaped `data`.
+  - `POST /vendorgetPlan`
+    - returns `message: "Plan Details"`,
+    - returns top-level `summary` and `plans`.
+  - `POST /vendorgetMaterial`
+    - returns `message: "Materials Details"`,
+    - returns list-shaped `data` from `order_plan_materials`.
+- The following are write/mutation APIs and were not live-called from this
+  audit session to avoid creating duplicate orders, payments, plans, or
+  material rows in shared demo data. They should be smoke-tested carefully by
+  the mobile team using known demo orders:
   - `POST /customer/placeOrder`
   - `POST /customer/payment_update`
   - `POST /createPlan`
@@ -118,12 +138,6 @@ plan/material parity release. They were reviewed again in this pass:
   - `POST /addPlanMaterial`
   - `POST /editPlanMaterial`
   - `POST /createAcceptPlan`
-- Read endpoints can be live-checked without creating rows:
-  - `POST /vendorgetPlan`
-  - `POST /vendorPlanDetails`
-  - `POST /vendorgetMaterial`
-  - `POST /vendorMaterialDetails`
-  - `POST /vendorOrderDetails`
 
 ## v4.5.75 - Vendor plan/material and customer vendor-profile mobile parity (2026-07-01)
 
