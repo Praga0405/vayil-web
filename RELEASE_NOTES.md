@@ -34,6 +34,9 @@ Additional compatibility gaps found during validation:
 - `POST /listStatus` fell through to the bare customer router and returned
   `401 Missing bearer token`.
 - `/customer/listStatus` was not registered and returned the web HTML 404.
+- The Next.js Vercel rewrite allowlist did not include
+  `/customer/listStatus` or `/vendor/listStatus`, so those prefixed paths
+  could return the HTML app 404 before Express saw the request.
 - `/vendor/listStatus` existed as GET only and used the same raw table query.
 
 ### What Changed
@@ -45,6 +48,7 @@ Additional compatibility gaps found during validation:
 | `POST /listStatus` | Returned `401 Missing bearer token`. | Added public POST alias on the bare mobile router. |
 | `/customer/listStatus` | Returned HTML 404. | Added public GET and POST handlers before the customer auth wall. |
 | `/vendor/listStatus` | GET-only route returned duplicated DB rows. | Moved to the shared payload and added POST support. |
+| Vercel rewrites | Prefixed `listStatus` routes were not forwarded to `/api/...`. | Added `listStatus` to both customer and vendor rewrite allowlists in `next.config.js`. |
 | Route docs | Route inventory did not mention POST `/listStatus`. | Updated the backend route comment. |
 
 ### Compatibility Response

@@ -211,7 +211,7 @@ const nextConfig = {
       'saveCustomerInfo', 'getCustomerInfo',
       'upload_files', 'ServiceList', 'ServiceCategories',
       'ServiceSubcategories', 'ServiceInfo', 'vendorInfo',
-      'get_states_by_country_id', 'get_city',
+      'get_states_by_country_id', 'get_city', 'listStatus',
       'enquiryList', 'enquiryDetails', 'sendEnquiry', 'QuotationList', 'updateQuotation',
       'getPlan', 'CustomerupdatePlan', 'placeOrder', 'orderDetails',
       'getPaymentDetails', 'NeedPaymentSummary', 'payment_update',
@@ -232,7 +232,7 @@ const nextConfig = {
       'getVendorRevenueChart', 'vendorTransactionHistory',
       'vendorTransHistoryCurMon', 'vendorPayout', 'AddBankDetails',
       'EditBankDetails', 'GetBankDetails', 'EditBankDetailsReq',
-      'vendorNotificationList',
+      'vendorNotificationList', 'listStatus',
     ]
     const publicVendorSlugs = [
       'carpentry-1', 'carpentry-2', 'carpentry-3', 'carpentry-4', 'carpentry-5',
