@@ -74,6 +74,17 @@ identified directly in `projectService.signoffOrder`.
 
 - Backend TypeScript build passed:
   - `npm run build --workspace backend`
+- Pushed implementation commit:
+  - `6f0dcc7` (`Restore customer final step parity`)
+- Vercel production validation passed for safe non-mutating cases:
+  - `POST /customer/finalStep` with `order_id` but no `step_status`
+    returns
+    `{ "success": false, "message": "order id and step status are required" }`.
+  - `POST /customer/finalStep` with `order_id: 0` and `step_status: 0`
+    returns `{ "success": false, "message": "Order not found" }`, proving
+    `step_status: 0` is accepted as provided and no row was updated.
+- A valid order was not live-updated from this session because successful
+  validation updates `order_step_logs.step = 4`.
 
 ## v4.5.78 - Vendor OTP legacy verification parity (2026-07-03)
 
