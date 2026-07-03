@@ -121,7 +121,7 @@ multipart** unless noted otherwise.
 | `orderDetails` | `order_id` | `{success, data:{project, plan}}` | Project screen |
 | `getPaymentDetails` | `order_id` | `{success, data:{total,paid,remaining,intents}}` | Payment summary |
 | `NeedPaymentSummary` | `order_id` | `{success, data:{needed, …}}` | "Pay remaining" CTA |
-| `finalStep` | `order_id, rating?, comment?` | `{success, data:{status:'completed'}}` | Sign-off + escrow release |
+| `finalStep` | `order_id, step_status` | `{success, message}` | Update existing order step 4 for customer plan accept/reject; no insert, no escrow release |
 | `addReview` | `vendor_id, order_id?, rating, comment` | `{success, data:review}` | Rating modal |
 | `customerNotificationList` | — | `{success, data:[notification]}` | Notifications |
 | `addToCart` | `vendor_id?, service_id?, quantity?, price?` | `{success, data:cart}` | Service detail |
@@ -199,7 +199,11 @@ payment_update ─► paymentService.verifyAndHold
                    ↳ if purpose='quote' → materialise orders row
                    ↳ if purpose='materials' → mark materials PAID
 
-finalStep    ─► projectService.signoffOrder
+finalStep    ─► update order_step_logs step=4
+                   ↳ customer accepts/rejects vendor plan
+
+canonical signoff
+             ─► projectService.signoffOrder / signoff route
                    ↳ INSERT signoffs
                    ↳ orders.status='completed'
                    ↳ for each held intent → releaseEscrow()

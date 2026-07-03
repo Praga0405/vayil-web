@@ -511,7 +511,10 @@ payment_update (mobile)        ─►  paymentService.verifyAndHold
                                       ├── if purpose='quote' → materialise orders row
                                       └── if purpose='materials' → flip rows to PAID
 
-finalStep (mobile)             ─►  projectService.signoffOrder
+finalStep (mobile)             ─►  UPDATE order_step_logs step=4
+                                      └── customer accepts/rejects vendor plan
+
+canonical signoff              ─►  projectService.signoffOrder / signoff route
                                       ├── INSERT signoffs
                                       ├── orders.status = 'completed'
                                       └── for each held intent → releaseEscrow
@@ -769,7 +772,7 @@ Hot reload is on for both. Edits to `src/` reflect immediately; backend uses `ts
 | `npm run unseed:marketplace`         | Deletes every row tagged `vayil-demo-v1`                           |
 | `npm run smoke`                      | Original wire-check against a running backend                      |
 | `npm run smoke:web`                  | Canonical JSON path: `/auth/otp/{send,verify}` → `/customers/me` → `/customers/vendors` → `/customers/enquiries`. Exits 0 on full success. |
-| `npm run smoke:mobile`               | **Full 14-stage cross-flow** (38 endpoints) — customer register → enquiry → quote accept → placeOrder → payment_update → orderDetails → vendor createPlan → updatePlanStatus → addPlanMaterial → editPlanMaterial → AskPyament → AddBankDetails → finalStep (escrow release) → vendorPayout → addReview → vendorlistReviews. Mirrors what Flutter's Dio sends; requires `PAYMENT_VERIFY_BYPASS=true` on the target backend (smoke only — never prod). |
+| `npm run smoke:mobile`               | **Full 14-stage cross-flow** (38 endpoints) — customer register → enquiry → quote accept → placeOrder → payment_update → orderDetails → vendor createPlan → updatePlanStatus → addPlanMaterial → editPlanMaterial → AskPyament → AddBankDetails → finalStep (plan step 4) → canonical signoff (escrow release) → vendorPayout → addReview → vendorlistReviews. Mirrors what Flutter's Dio sends; requires `PAYMENT_VERIFY_BYPASS=true` on the target backend (smoke only — never prod). |
 
 ### Migrations
 

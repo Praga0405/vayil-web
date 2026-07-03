@@ -1,5 +1,80 @@
 # Release Notes
 
+## v4.5.79 - Customer finalStep plan-confirmation parity (2026-07-03)
+
+### Why
+
+The mobile team reported that when a customer accepts the plan proposed by
+the vendor, the API creates an extra step and the app shows an error.
+
+The endpoint involved is:
+
+- `POST /customer/finalStep`
+- body: `{ "order_id": ..., "step_status": ... }`
+
+### RCA
+
+The old Node.js `Customer.ts` implementation does **not** create a new order
+step. It updates the existing `order_step_logs` row:
+
+- `WHERE order_id = ? AND step = 4`
+- sets `step_status`
+- sets `performed_by = "CUSTOMER"`
+- sets `performed_by_id = customer_id`
+- sets `updated_at = NOW()`
+
+The Vercel implementation had drifted to the canonical project-signoff path:
+
+- `/customer/finalStep` called `projectSvc.signoffOrder(...)`.
+- `projectSvc.signoffOrder(...)` inserted an audit row:
+  `order_step_logs.step = 99`, `step_status = "SIGNED_OFF"`.
+- That row is the extra step the mobile app saw.
+- It also completed the order and released escrow, which is not what the
+  old mobile `finalStep` endpoint does during vendor-plan acceptance.
+
+The TiDB DB agent was used for repo/DB wiring checks. The active deploy clone
+does not contain TiDB credentials, so direct production DB-log inspection could
+not be run from this workspace. The code path that creates the extra step was
+identified directly in `projectService.signoffOrder`.
+
+### What Changed
+
+| Area | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /customer/finalStep` | Called `projectSvc.signoffOrder(...)`, which completed the order, released escrow, and inserted an extra signoff step. | Replaced the handler with the old mobile behavior: update existing `order_step_logs` row for `step = 4` only. |
+| `POST /customer/finalStep` | Old truthy validation would reject `step_status: 0`, while the mobile payload can send `0`. | Validation now checks whether `step_status` is present, so `0`, `1`, and `2` are accepted as actual values. |
+| `POST /customer/finalStep` | Extra `step = 99` insertion could still happen if `projectService.signoffOrder` is reused later. | Removed the `order_step_logs` insert from `projectService.signoffOrder`; canonical signoff still records `signoffs`, completes the order, and releases escrow through its normal path. |
+| Smoke/mobile docs | Smoke script and docs still described `finalStep` as escrow release. | Updated smoke flow and docs: `finalStep` is step-4 plan confirmation; canonical signoff is the escrow-release path. |
+
+### Response Behavior
+
+- Missing `order_id` or missing `step_status`:
+  `{ success: false, message: "order id and step status are required" }`
+- No existing step-4 row:
+  `{ success: false, message: "Final step not found" }`
+- Successful update:
+  `{ success: true, message: "Final step updated successfully" }`
+
+### Impact Areas Checked
+
+- `legacyCustomer.ts`
+  - `finalStep` restored to old mobile step-update contract.
+- `projectService.ts`
+  - removed the extra step-99 insert.
+- Canonical customer signoff route
+  - already has its own signoff/escrow-release implementation and does not
+    insert `order_step_logs`; left intact.
+- `smoke-mobile.ts`
+  - changed to call `/customer/finalStep` for step 4 and
+    `/customers/projects/:id/signoff` for escrow release before payout.
+- Mobile API docs and README
+  - updated to stop documenting `finalStep` as order completion/escrow release.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+
 ## v4.5.78 - Vendor OTP legacy verification parity (2026-07-03)
 
 ### Why

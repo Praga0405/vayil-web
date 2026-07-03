@@ -37,8 +37,9 @@
  *     V: addPlanMaterial, editPlanMaterial
  *     V: AskPyament (typo preserved)
  *     V: AddBankDetails, GetBankDetails
+ *     C: finalStep                         ─► confirms vendor plan step 4
+ *     C: canonical signoff                 ─► escrow released
  *     V: vendorPayout
- *     C: finalStep                         ─► escrow released
  *     C: addReview
  *     V: vendorlistReviews                 ─► review visible
  *
@@ -235,10 +236,17 @@ async function main() {
     }, authH(vT)));
   ok('POST /vendor/GetBankDetails',       await post('/vendor/GetBankDetails', {}, authH(vT)));
 
-  // 13. Customer finalStep (sign off) — releases all held escrow
+  // 13a. Customer accepts the vendor-submitted plan: legacy finalStep only
+  // updates the existing order_step_logs step=4 row.
   ok('POST /customer/finalStep',
     await post('/customer/finalStep', {
-      order_id: orderId, rating: 5, comment: 'Smoke e2e perfect',
+      order_id: orderId, step_status: 1,
+    }, authH(cT)));
+
+  // 13b. Canonical project signoff releases all held escrow before payout.
+  ok('POST /customers/projects/:id/signoff',
+    await postJSON(`/customers/projects/${orderId}/signoff`, {
+      rating: 5, comment: 'Smoke e2e perfect',
     }, authH(cT)));
 
   // 14. Vendor requests a payout (wallet now has 4766)

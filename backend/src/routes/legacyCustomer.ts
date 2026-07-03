@@ -1881,19 +1881,40 @@ legacyCustomerRouter.post('/NeedPaymentSummary', async (req: AuthRequest, res, n
 legacyCustomerRouter.post('/finalStep', async (req: AuthRequest, res, next) => {
   try {
     const orderId = pickId(req.body, 'order_id', 'orderId');
-    if (!orderId) throw new ApiError(400, 'order_id required');
-    const out = await projectSvc.signoffOrder(
-      orderId, req.user!.id,
-      req.body?.rating ? toNumberSafe(req.body.rating) : undefined,
-      req.body?.comment || req.body?.review_description || undefined,
+    const hasStepStatus = hasBodyKey(req.body, 'step_status', 'stepStatus');
+    const stepStatus = hasBodyKey(req.body, 'step_status')
+      ? req.body?.step_status
+      : req.body?.stepStatus;
+    if (!orderId || !hasStepStatus || stepStatus === null || stepStatus === undefined || stepStatus === '') {
+      return res.status(200).json({
+        success: false,
+        message: 'order id and step status are required',
+      });
+    }
+
+    await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
+    const result = await exec(
+      `UPDATE order_step_logs
+          SET step_status = :stepStatus,
+              performed_by = 'CUSTOMER',
+              performed_by_id = :customerId,
+              remarks = NULL,
+              updated_at = NOW()
+        WHERE order_id = :orderId
+          AND step = 4`,
+      { orderId, stepStatus: String(stepStatus), customerId: req.user!.id },
     );
-    // Release any held escrow.
-    const intents = await query<any>(
-      `SELECT intent_id FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
-      { id: orderId },
-    );
-    for (const i of intents) await paymentSvc.releaseEscrow(i.intent_id);
-    send(res, { message: 'Order completed', data: out });
+    if (Number(result?.affectedRows ?? 0) === 0) {
+      return res.status(200).json({
+        success: false,
+        message: 'Final step not found',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Final step updated successfully',
+    });
   } catch (err) { next(err); }
 });
 

@@ -70,7 +70,7 @@ JSON parser otherwise.
 | `POST /orderDetails` | `{order_id}` | `{project, plan}` |
 | `POST /getPaymentDetails` | `{order_id}` | `{total, paid, remaining, intents}` |
 | `POST /NeedPaymentSummary` | `{order_id}` | Same as `getPaymentDetails` |
-| `POST /finalStep` | `{order_id, rating?, comment?}` | `projectService.signoffOrder` — orders→completed, enquiries→completed, releaseEscrow for every held intent → vendor wallet credited |
+| `POST /finalStep` | `{order_id, step_status}` | Legacy plan-confirmation step — updates the existing `order_step_logs` row where `step = 4`; does not insert a new step and does not release escrow |
 
 ### Reviews / notifications / cart
 

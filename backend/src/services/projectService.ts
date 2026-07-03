@@ -206,13 +206,6 @@ export async function signoffOrder(orderId: number | string, customerId: number 
         WHERE o.order_id = ?`,
       [orderId],
     );
-    // Mobile-team audit trail: append a SIGNOFF step to order_step_logs
-    // so the mobile order detail timeline shows the signoff event.
-    await conn.query(
-      `INSERT INTO order_step_logs (order_id, step, step_status, performed_by, performed_by_id, remarks)
-       VALUES (?, 99, 'SIGNED_OFF', 'CUSTOMER', ?, ?)`,
-      [orderId, customerId, comment ?? null],
-    );
   });
   // Release every held payment_intent on this order — same behaviour as
   // the canonical /customers/projects/:id/signoff route. Without this
