@@ -18,6 +18,7 @@ import { one, query } from '../db';
 import { publicSettingsSafe } from './common';
 import { legacyVendorRouter } from './legacyVendor';
 import { uniqueCityRows } from '../utils/city';
+import { legacyStatusRows } from '../services/statusService';
 
 export const bareMobileRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -52,17 +53,13 @@ const toolsHandler = async (_req: any, res: any, next: any) => {
 bareMobileRouter.get('/getTools',    toolsHandler);
 bareMobileRouter.get('/getToolList', toolsHandler);
 
-bareMobileRouter.get('/listStatus', async (_req, res, next) => {
+const listStatusHandler = async (_req: any, res: any, next: any) => {
   try {
-    const rows = await query<any>(
-      `SELECT id, status_name, COALESCE(is_active, 1) AS is_active, created_at
-         FROM status_master
-        WHERE COALESCE(is_deleted,0)=0 AND is_active=1
-        ORDER BY id`,
-    );
-    res.status(200).json({ success: true, data: rows });
+    res.status(200).json({ success: true, data: legacyStatusRows() });
   } catch (err) { next(err); }
-});
+};
+bareMobileRouter.get('/listStatus', listStatusHandler);
+bareMobileRouter.post('/listStatus', listStatusHandler);
 
 bareMobileRouter.get('/get_states_by_country_id', async (req, res, next) => {
   try {

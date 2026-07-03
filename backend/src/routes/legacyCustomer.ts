@@ -32,6 +32,7 @@ import * as projectSvc from '../services/projectService';
 import * as paymentSvc from '../services/paymentService';
 import * as notifSvc from '../services/notificationService';
 import * as reviewSvc from '../services/reviewService';
+import { legacyStatusRows } from '../services/statusService';
 
 export const legacyCustomerRouter = Router();
 
@@ -1030,6 +1031,14 @@ legacyCustomerRouter.post('/vendorInfo', async (req, res, next) => {
 });
 
 /* ---- Public catalogue lookups (aliases of vendor / common router) ---- */
+const listStatusHandler = async (_req: any, res: any, next: any) => {
+  try {
+    res.status(200).json({ success: true, data: legacyStatusRows() });
+  } catch (err) { next(err); }
+};
+legacyCustomerRouter.get('/listStatus', listStatusHandler);
+legacyCustomerRouter.post('/listStatus', listStatusHandler);
+
 const publicServiceCategoriesHandler = async (_req: any, res: any, next: any) => {
   try {
     const cats = await query<any>(

@@ -165,7 +165,7 @@ app.use('/vendor',   legacyMultipart, legacyVendorRouter);
  * Routes exposed:
  *   GET  /getLanguages, /getTools, /getToolList, /listStatus,
  *        /get_states_by_country_id, /getSettings
- *   POST /get_city, /listProofTypes, /upload_files
+ *   POST /get_city, /listProofTypes, /listStatus, /upload_files
  *
  * Routes deliberately NOT exposed (admin-only mutations — kept behind
  * the admin gate): /service-category/toggle, /service-subcategory/toggle,
