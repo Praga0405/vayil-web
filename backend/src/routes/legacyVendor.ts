@@ -27,7 +27,7 @@ import * as notifSvc from '../services/notificationService';
 import * as reviewSvc from '../services/reviewService';
 import * as bankSvc from '../services/bankService';
 import * as payoutSvc from '../services/payoutService';
-import { legacyStatusRows } from '../services/statusService';
+import { legacyStatusName, legacyStatusRows } from '../services/statusService';
 
 export const legacyVendorRouter = Router();
 
@@ -230,6 +230,12 @@ function decimalString(value: any, fallback = '0.00'): string {
   return Number.isFinite(n) ? n.toFixed(2) : fallback;
 }
 
+function moneyNumber(value: any): number {
+  if (value === undefined || value === null || value === '') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function integerString(value: any, fallback = '0'): string {
   if (value === undefined || value === null || value === '') return fallback;
   const text = String(value).trim();
@@ -305,6 +311,7 @@ function normalizeVendorQuotationRow(row: any) {
   out.service_time = deriveServiceTime(row.service_time, row.estimated_days, row.message);
   out.status = intOrDefault(row.status_int ?? row.status);
   if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
+  out.status_name = legacyStatusName(out.status) ?? out.status_name;
   return out;
 }
 
@@ -326,6 +333,20 @@ function normalizeVendorOrderRow(row: any) {
   out.status = intOrDefault(row.status_int ?? row.status);
   if ('status_int' in out) out.status_int = intOrDefault(row.status_int ?? out.status);
   return out;
+}
+
+function normalizeVendorEnquiryOrderRow(order: any, plans: any[], stepLogs: any[]) {
+  return {
+    id: intOrNull(order.id) ?? intOrNull(order.order_id),
+    enquiry_id: intOrNull(order.enquiry_id),
+    payment_status: stringOrNull(order.payment_status),
+    plans,
+    order_step_logs: stepLogs.map((row: any) => ({
+      id: intOrNull(row.id),
+      order_id: intOrNull(row.order_id),
+      step: intOrNull(row.step),
+    })),
+  };
 }
 
 function normalizeVendorStepLogRow(row: any) {
@@ -392,6 +413,72 @@ async function legacyVendorMaterialRows(orderId: number | string) {
   ).catch(() => []);
   const fallback = await materialSvc.listMaterials(orderId).catch(() => []);
   return (primary.length ? primary : fallback).map(normalizeVendorMaterialRow);
+}
+
+function isMaterialPayment(row: any) {
+  return String(row.payment_type ?? row.notes ?? '').toLowerCase().includes('material');
+}
+
+function isPaidLegacyPayment(row: any) {
+  const status = String(row.payment_status ?? row.status ?? '').trim().toLowerCase();
+  if (!status) return true;
+  return ['success', 'paid', 'completed', 'captured', 'released', 'escrow_held'].includes(status);
+}
+
+function normalizeLegacyPaymentLogRow(row: any, totalPaidAmount: string) {
+  return {
+    id: intOrNull(row.id),
+    order_id: intOrNull(row.order_id),
+    customer_id: intOrNull(row.customer_id),
+    notes: stringOrNull(row.notes),
+    currency: stringOrNull(row.currency) ?? 'INR',
+    payment_id: stringOrNull(row.payment_id ?? row.provider_payment_id),
+    payment_json: stringOrNull(row.payment_json),
+    payment_status: stringOrNull(row.payment_status ?? row.status),
+    convenience_fee_cost: decimalString(row.convenience_fee_cost),
+    base_amount: decimalString(row.base_amount ?? row.amount),
+    payment_amount: decimalString(row.payment_amount ?? row.amount),
+    payment_date: stringOrNull(row.payment_date ?? row.created_at),
+    created_at: stringOrNull(row.created_at),
+    updated_at: stringOrNull(row.updated_at),
+    payment_data: stringOrNull(row.payment_data),
+    payment_type: stringOrNull(row.payment_type),
+    platform_cost: decimalString(row.platform_cost),
+    tax_cost: decimalString(row.tax_cost),
+    total_paid_amount: totalPaidAmount,
+  };
+}
+
+async function legacyPaymentSummaryTotals(orderId: number | string, paymentRows: any[]) {
+  const [plans, materials] = await Promise.all([
+    query<any>(
+      `SELECT amount FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC`,
+      { id: orderId },
+    ).catch(() => []),
+    legacyVendorMaterialRows(orderId),
+  ]);
+  const totalPlanAmount = plans.reduce((sum: number, row: any) => sum + moneyNumber(row.amount), 0);
+  const totalMaterialAmount = materials.reduce(
+    (sum: number, row: any) => sum + moneyNumber(row.total_cost ?? row.total ?? row.amount),
+    0,
+  );
+  const totalPaidAmount = paymentRows
+    .filter(isPaidLegacyPayment)
+    .reduce((sum: number, row: any) => sum + moneyNumber(row.payment_amount ?? row.amount), 0);
+  const orderFallback = await one<any>(
+    `SELECT COALESCE(order_amount, amount, 0) AS total_amount
+       FROM orders
+      WHERE order_id = :id OR id = :id
+      LIMIT 1`,
+    { id: orderId },
+  ).catch(() => null);
+  const calculatedTotal = totalMaterialAmount + totalPlanAmount;
+  return {
+    totalAmount: calculatedTotal > 0 ? calculatedTotal : moneyNumber(orderFallback?.total_amount),
+    totalPaidAmount,
+    totalMaterialAmount,
+    totalPlanAmount,
+  };
 }
 
 async function legacyVendorMaterialDetailRows(orderId: number | string | null, materialId: number | string) {
@@ -525,6 +612,7 @@ function normalizeVendorEnquiryRow(row: any) {
     'service_time',
   ]);
   out.status = intOrDefault(row.status);
+  out.status_name = legacyStatusName(out.status) ?? stringOrNull(row.status_name) ?? row.status_name;
   if ('is_active' in out) out.is_active = intOrNull(row.is_active);
   out.quotations = (row.quotations ?? []).map(normalizeVendorQuotationRow);
   out.service_time = deriveServiceTime(
@@ -1272,10 +1360,8 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
         const item = {
           ...enquiry,
           orders: [{
-            ...order,
-            plans:           orderPlans,
+            ...normalizeVendorEnquiryOrderRow(order, orderPlans, orderStepLogs),
             ordersteps,
-            order_step_logs: orderStepLogs,
           }],
         };
         if (Number(stepLog?.step) === 1)      new_enquiry.push(item);
@@ -1922,37 +2008,32 @@ legacyVendorRouter.post('/vendorPaymentSummary', async (req: AuthRequest, res, n
     const orderId = pickId(req.body, 'order_id', 'orderId');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToVendor(orderId, req.user!.id);
-    const intents: any[] = await query<any>(
-      `SELECT * FROM payment_intents WHERE order_id = :id ORDER BY intent_id DESC`,
+    const paymentRows: any[] = await query<any>(
+      `SELECT *
+         FROM payment_log
+        WHERE order_id = :id
+        ORDER BY id ASC`,
       { id: orderId },
-    );
-    const held     = intents.filter((i) => i.status === 'escrow_held').reduce((s, i) => s + Number(i.amount), 0);
-    const released = intents.filter((i) => i.status === 'released').reduce((s, i) => s + Number(i.amount), 0);
-    // v4.5.35 — mobile bridge: Vendor_Payment_summary_Model.dart reads
-    // 9 specific top-level keys (mind the capitalisation — TotalAmount with
-    // a capital T, servicePayment with lowercase).
-    const order = await one<any>('SELECT amount FROM orders WHERE order_id = :id', { id: orderId });
-    const totalAmount     = Number(order?.amount ?? 0);
-    const servicePayment  = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('service') || !i.purpose);
-    const materialPayment = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('material'));
-    const totalMaterialAmount = materialPayment.reduce((s, i) => s + Number(i.amount), 0);
-    const totalPlanAmount     = servicePayment.reduce((s, i) => s + Number(i.amount), 0);
-    // v4.5.36 — invoice_url matches the OLD app.vayil.in literal exactly.
-    // Mobile concatenates `${invoiceUrl}${order_id}/${intent_id}` to open
-    // the invoice in a webview. We preserve the string so existing builds
-    // get the same URL they did pre-migration. Override via env if you
-    // ever host the invoice page somewhere new.
+    ).catch(() => []);
+    const serviceRows = paymentRows.filter((row) => !isMaterialPayment(row));
+    const materialRows = paymentRows.filter(isMaterialPayment);
+    const servicePaid = serviceRows
+      .filter(isPaidLegacyPayment)
+      .reduce((sum: number, row: any) => sum + moneyNumber(row.payment_amount ?? row.amount), 0);
+    const materialPaid = materialRows
+      .filter(isPaidLegacyPayment)
+      .reduce((sum: number, row: any) => sum + moneyNumber(row.payment_amount ?? row.amount), 0);
+    const totals = await legacyPaymentSummaryTotals(orderId, paymentRows);
     const invoiceBase = process.env.INVOICE_URL_BASE || 'https://app.vayil.in/admin/invoice/';
-    send(res, {
-      data: { intents, held, released },
-      TotalAmount:         totalAmount.toFixed(2),
-      TotalPaidAmount:     released.toFixed(2),
-      TotalMaterialAmount: totalMaterialAmount.toFixed(2),
-      TotalPlanAmount:     totalPlanAmount.toFixed(2),
-      servicePayment,
-      materialPayment,
-      invoice_url:         invoiceBase,
-      https:               invoiceBase.startsWith('https'),
+    return res.status(200).json({
+      success: true,
+      TotalAmount: totals.totalAmount.toFixed(2),
+      TotalPaidAmount: totals.totalPaidAmount.toFixed(2),
+      TotalMaterialAmount: totals.totalMaterialAmount.toFixed(2),
+      TotalPlanAmount: totals.totalPlanAmount.toFixed(2),
+      servicePayment: serviceRows.map((row) => normalizeLegacyPaymentLogRow(row, servicePaid.toFixed(2))),
+      materialPayment: materialRows.map((row) => normalizeLegacyPaymentLogRow(row, materialPaid.toFixed(2))),
+      invoice_url: invoiceBase,
     });
   } catch (err) { next(err); }
 });

@@ -1,5 +1,102 @@
 # Release Notes
 
+## v4.5.81 - Vendor payment and enquiry legacy parity (2026-07-03)
+
+### Why
+
+The mobile team shared the old Node.js response contracts for:
+
+- `POST /vendorPaymentSummary`
+- `POST /vendorEnuqiryList`
+
+Both endpoints are used by the vendor app payment and enquiry dashboards.
+The Vercel backend needed to match the old app.vayil.in shapes exactly
+enough for the existing Flutter models to parse without code changes.
+
+### RCA
+
+`/vendorPaymentSummary` was still using the newer canonical
+`payment_intents` model. That produced modern intent rows and extra top-level
+fields such as `message`, `data`, and `https`.
+
+The legacy mobile endpoint expects the older `payment_log` model instead:
+
+- top-level `TotalAmount`
+- top-level `TotalPaidAmount`
+- top-level `TotalMaterialAmount`
+- top-level `TotalPlanAmount`
+- `servicePayment[]`
+- `materialPayment[]`
+- `invoice_url`
+
+`/vendorEnuqiryList` already had the old bucket rule, but two response-shape
+risks remained:
+
+- nested `orders[]` still carried the newer order object with fields such as
+  `order_id`, `customer_id`, `vendor_id`, and `status_int`.
+- `status_name` could drift if `status_master` contained duplicate or
+  lowercase seeded rows.
+
+### What Changed
+
+| Area | Issue Identified | Fix Implemented |
+|---|---|---|
+| `/vendorPaymentSummary` data source | Read from `payment_intents`; mobile expected `payment_log`. | Switched the compatibility endpoint to read `payment_log` ordered by legacy `id`. |
+| Payment row shape | Returned intent rows instead of legacy payment rows. | Added a legacy formatter with `id`, `order_id`, `customer_id`, `notes`, `currency`, `payment_id`, `payment_json`, `payment_status`, payment cost fields, dates, `payment_data`, `payment_type`, and `total_paid_amount`. |
+| Payment buckets | Material/service split used intent `purpose`. | Split rows by legacy `payment_type`/`notes`; `material` rows go to `materialPayment`, all other rows go to `servicePayment`. |
+| Payment totals | Totals were based on held/released intent amounts. | `TotalPaidAmount` is now based on successful legacy `payment_log.payment_amount`; `TotalPlanAmount` is based on `order_plan.amount`; `TotalMaterialAmount` is based on `order_plan_materials.total_cost`; `TotalAmount` is plan + material total with order amount fallback. |
+| Response wrapper | The endpoint used the shared `send()` wrapper, adding `message`. | The handler now returns the legacy top-level JSON directly with `success: true` and no extra wrapper fields. |
+| Invoice URL | Existing value had helper metadata. | Preserved the old literal `https://app.vayil.in/admin/invoice/` as `invoice_url`. |
+| `/vendorEnuqiryList` order shape | Nested orders were modernized. | Nested `orders[]` now exposes the legacy `id`, `enquiry_id`, `payment_status`, `plans`, and `order_step_logs` structure. Existing `ordersteps` is retained as a backward-compatible alias. |
+| Status names | Could come from dirty seeded DB rows. | Added `legacyStatusName()` and use the fixed legacy status list for enquiry and quotation `status_name` values. |
+
+### Compatibility Response Notes
+
+`/vendorPaymentSummary` now returns the legacy payment summary shape:
+
+```json
+{
+  "success": true,
+  "TotalAmount": "32214.00",
+  "TotalPaidAmount": "2714.01",
+  "TotalMaterialAmount": "31034.00",
+  "TotalPlanAmount": "1180.00",
+  "servicePayment": [],
+  "materialPayment": [],
+  "invoice_url": "https://app.vayil.in/admin/invoice/"
+}
+```
+
+`/vendorEnuqiryList` keeps the old Node.js categorisation:
+
+- `request_quotation`: enquiry has no matching order
+- `new_enquiry`: enquiry has an order whose first `order_step_logs.step` is `1`
+- `ongoing`: enquiry has an order whose first `order_step_logs.step` is `2`
+- step `3+` remains outside the three visible buckets, matching old behavior
+
+Nested order rows now include:
+
+```json
+{
+  "id": 136,
+  "enquiry_id": 105,
+  "payment_status": "pending",
+  "plans": [],
+  "order_step_logs": [
+    { "id": 270, "order_id": 136, "step": 1 }
+  ]
+}
+```
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+- Full Vercel build command completed and the Next.js production build passed:
+  - `npm run vercel-build`
+  - local migration/seed pre-steps emitted sandbox-only `tsx` IPC `EPERM`
+    warnings and were skipped by the script's existing `|| true` guard
+
 ## v4.5.80 - Mobile listStatus legacy parity (2026-07-03)
 
 ### Why

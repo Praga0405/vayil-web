@@ -24,3 +24,9 @@ const LEGACY_STATUS_ROWS: LegacyStatusRow[] = [
 export function legacyStatusRows(): LegacyStatusRow[] {
   return LEGACY_STATUS_ROWS.map((row) => ({ ...row }));
 }
+
+export function legacyStatusName(status: unknown): string | null {
+  const id = Number(status);
+  if (!Number.isFinite(id)) return null;
+  return LEGACY_STATUS_ROWS.find((row) => row.id === Math.trunc(id))?.status_name ?? null;
+}
