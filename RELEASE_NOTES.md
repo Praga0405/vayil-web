@@ -26,6 +26,7 @@ not render correctly.
 |---|---|---|
 | `POST /customer/enquiryList` | Nested `orders[]` were loaded directly from `orders` without joining `order_step_logs`, so `orders[].ordersteps` was missing. | Added a customer enquiry-list order bridge that loads `order_step_logs` for each nested order and returns them as `orders[].ordersteps[]`, ordered by `order_id`, `step`, and log id. |
 | `POST /customer/enquiryList` | Flutter expects `orders[].id` even if the DB row is keyed by `order_id`. | Normalization now explicitly sets `orders[].id = id || order_id`, while keeping `order_id` and other additional fields as non-breaking extras. |
+| `POST /customer/enquiryList` | Some existing step rows stored canonical text such as `pending` in `step_status`, while the old mobile API returns numeric strings like `"1"`. | Step log normalization now preserves numeric `step_status` values and converts non-numeric legacy/canonical values to the step number string for mobile response compatibility. |
 | `POST /customer/enquiryDetails` | It reuses the same enquiry-row builder as `enquiryList`, so it had the same potential nested order-step gap. | Because the shared `legacyCustomerEnquiryRows(...)` helper was fixed, `enquiryDetails` now also receives the same `orders[].ordersteps[]` structure. |
 
 ### Functional Impact Prevented
@@ -34,6 +35,8 @@ not render correctly.
   display the order progress timeline.
 - Flutter does not need a model change from `id` to `order_id`; both keys are
   available, with `id` restored as the old mobile alias.
+- Existing orders created before this release no longer leak
+  `step_status: "pending"` into the mobile response.
 - Additional fields such as `customer_id`, `vendor_id`, `quotation_id`,
   `amount`, `status`, `quote_id`, `service_id`, `message`, `files`,
   `order_amount`, `currency`, `payment_id`, `payment_json`, `updated_at`, and

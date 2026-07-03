@@ -178,7 +178,12 @@ function normalizeCustomerMaterialRow(row: any) {
   return out;
 }
 function normalizeCustomerStepLogRow(row: any) {
-  return normalizeNumericFields(row, ['id', 'order_id', 'step', 'performed_by_id']);
+  const out = normalizeNumericFields(row, ['id', 'order_id', 'step', 'performed_by_id']);
+  const current = row?.step_status === undefined || row?.step_status === null
+    ? ''
+    : String(row.step_status);
+  out.step_status = current && /^\d+$/.test(current) ? current : String(out.step ?? current ?? '');
+  return out;
 }
 async function legacyCustomerMaterialRows(orderId: number | string) {
   const primary = await query<any>(
