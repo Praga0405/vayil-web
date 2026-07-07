@@ -1,5 +1,89 @@
 # Release Notes
 
+## v4.5.84 - Customer/vendor API issue PDF parity pass (2026-07-07)
+
+### Why
+
+The mobile team shared `Vayil - Customer and Vendor Api issue.pdf` with the
+remaining endpoints that still needed to behave like the old Node.js backend.
+The key requirement was not just HTTP 200, but exact legacy response structure,
+field names, top-level keys, and business side effects used by the Flutter
+customer/vendor apps.
+
+### RCA
+
+Several Vercel handlers had been implemented through newer shared services.
+Those services are correct for the web app, but they return richer or
+canonicalized objects that differ from the old mobile backend. The gaps fell
+into four categories:
+
+- Payment summaries were reading newer payment-intent/project abstractions
+  instead of the old `payment_log`, `quotation`, and `order_plan_materials`
+  calculations.
+- Plan APIs were normalizing plan rows and summaries instead of returning raw
+  `order_plan` rows and the old Node.js summary math.
+- Customer project/review APIs were wrapped in generic response helpers instead
+  of the exact old top-level keys such as `steps`, `ordermaterials`,
+  `ordersMain`, `data`, and `review`.
+- `payment_update` wrote `payment_log` and balances, but did not yet mirror the
+  old wallet/platform transaction side effects.
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /vendorPaymentSummary` | Used a newer normalized payment summary and could calculate plan/material totals differently from app.vayil.in. | Replaced with the old Node.js calculation path: loads `orders.enquiry_id/quote_id`, `quotation.final_amount`, service payments from `payment_log.payment_type IN ('place_order','plan')`, material payments from `payment_log.payment_type = 'material'`, material total from `order_plan_materials.m_final_amount`, and returns the exact top-level keys `TotalAmount`, `TotalPaidAmount`, `TotalMaterialAmount`, `TotalPlanAmount`, `servicePayment`, `materialPayment`, and `invoice_url`. |
+| `POST /customer/getPaymentDetails` | Used `paymentService.getOrderPaymentSummary()` and added newer wrapper fields. | Mirrored the same old `payment_log` summary used by `vendorPaymentSummary`, including `orderID is required` and `Order not found` JSON responses instead of HTML/generic errors. |
+| `POST /NeedPaymentSummary` | Returned normalized/all plan and material rows, including fully paid rows. | Restored old query shape: `plan` and `materials` only include rows where `balance_cost != 0`; `planoverall` and `materialsoverall` are aggregate arrays from the old SQL. |
+| `POST /customer/payment_update` | Missing old vendor wallet, vendor transaction, and platform transaction side effects. | Added Razorpay fetch/capture when payment keys are configured, preserved legacy invalid-payment response, writes `payment_log`, updates material/plan balances, credits `vendor_wallet` by `base_amount`, inserts `vendor_transactions` with `type='earning'`, inserts `platform_transactions` for platform/convenience/tax earning, and returns `Place Order Successfully`. |
+| `POST /AskPyament` | Routed through the newer milestone-payment service and returned `Payment requested`. | Restored the old order/service lookup, customer notification, notification failure logging, and response `{ success: true, message: "Ask Payment send successfully" }`. |
+| `POST /updatePlan` | Used the shared plan updater. | Added the old calculation flow: resolve plan order, subtract `SUM(payment_log.base_amount)` from quotation amount, calculate plan `amount` from `amount_percentage`, update `order_plan`, and return `Plan updated successfully`. |
+| `POST /updatePlanStatus` | Single-plan status path only updated status, and multi-plan path used the normalized updater. | Restored old single/multi update behavior for `title`, `amount_percentage`, `amount`, `balance_cost`, `completion_days`, `update_photo`, `update_comments`, and `status`, while keeping vendor ownership validation for valid requests. |
+| `POST /vendorgetPlan` | Summary came from a newer formatter. | Restored the old summary math from `payment_log`, `orders`, `quotation`, and raw `order_plan` rows. The response is now exactly `{ success, message: "Plan Details", summary, plans }`, with `plans` returned from `order_plan`. |
+| `GET /getVendorRevenueChart` | Used payout/revenue service data instead of old payment-log monthly revenue. | Reimplemented against `payment_log` joined to `orders`, grouped by current-year month, returning all 12 month labels `JAN` through `DEC`. |
+| `GET/POST /customer/enquiryList` | POST existed, but the PDF/mobile reference also uses GET. | Mounted both GET and POST to the same legacy enquiry response, preserving `orders[].ordersteps`. |
+| `POST /customer/getPlan` | Returned the newer shared project payload wrapper. | Restored top-level old response keys: `message: "steps and Plan Details"`, `steps`, `ordermaterials`, `ordersMain`, `data`, and `review`. |
+| `POST /customer/CustomerupdatePlan` | Used the newer approve/revision workflow and returned `Plan approved/reject` style responses. | Restored the old single-plan status update: validates `plan_id`, updates `order_plan.status`, and returns `{ success: true, message: "Plan status updated successfully" }`. |
+| `POST /customer/addReview` | Used the web review service response shape. | Restored mobile validation for `vendor_id`, `service_id`, and `rating`; inserts into `customer_review`; returns `review_id`; still mirrors into `customer_reviews` and refreshes vendor rating so web/admin surfaces remain consistent. |
+| `GET/POST /customer/listReviews` | Only POST with mandatory vendor id was available, and the bare `/customer/listReviews` URL was not in the Vercel rewrite allow-list. | Added GET and optional `vendor_id` / `service_id` filters against the mobile `customer_review` table, returning `{ success: true, data }`, and added the legacy rewrite so Vercel forwards the mobile URL to Express instead of serving HTML 404. |
+| `POST /register` vendor OTP generation | Response was `Registration OTP sent` with a nested service object. | Restored the mobile OTP-generation shape `{ success: true, message: "OTP sent successfully", vendorId }`. `POST /verifyVendorOTP` verification logic was already aligned and the demo OTP flow remains unchanged. |
+
+### Impact For Mobile
+
+- Vendor payment summary, customer payment details, need-payment summary, plan
+  list, and plan status screens now receive the legacy top-level keys and row
+  sets expected by the existing Flutter models.
+- Customer order details can again read `steps`, `ordermaterials`,
+  `ordersMain`, `data`, and `review` without needing Flutter model changes.
+- Vendor/customer payment flows now keep wallet and platform transaction data in
+  sync with the old backend side effects.
+- Review list/add-review flows now read/write the mobile `customer_review`
+  table while preserving web review mirrors.
+- GET-based mobile calls for `customer/enquiryList` and `customer/listReviews`
+  no longer fall through to missing-route behavior.
+
+### Compatibility Notes
+
+The SQL still supports the migrated Vercel schema aliases (`id` and legacy
+primary keys such as `order_id`, `quotation_id`, `vendor_id`, and
+`vendor_service_id`). This keeps the mobile response shape old-style while
+remaining compatible with the current TiDB schema.
+
+### Validation
+
+- Backend TypeScript build passed after the final route + rewrite changes:
+  - `npm run build --workspace backend`
+- Legacy rewrite config check passed:
+  - `/customer/listReviews` now resolves to `/api/customer/listReviews`
+- Full Vercel build command completed before the final one-line rewrite
+  allow-list addition, and the Next.js production build passed:
+  - `npm run vercel-build`
+  - Local migration/seed pre-steps emitted the known sandbox-only `tsx` IPC
+    `EPERM` warnings and were skipped by the script's existing `|| true` guard.
+  - After the final rewrite allow-list addition, a repeated local `next build`
+    did not emit progress beyond the startup banner in this sandbox, so the
+    final post-rewrite validation is the backend build plus rewrite parse check.
+
 ## v4.5.83 - Vendor enquiry list Node.js parity (2026-07-03)
 
 ### Why
@@ -46,12 +130,8 @@ like the old Node.js function.
 
 ### Validation
 
-- Backend TypeScript build passed:
+- Pending build after this release note update:
   - `npm run build --workspace backend`
-- Full Vercel build command completed and the Next.js production build passed:
-  - `npm run vercel-build`
-  - local migration/seed pre-steps emitted sandbox-only `tsx` IPC `EPERM`
-    warnings and were skipped by the script's existing `|| true` guard
 
 ## v4.5.82 - Vendor plan status and plan-list parity (2026-07-03)
 

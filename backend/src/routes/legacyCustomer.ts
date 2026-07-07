@@ -55,6 +55,11 @@ function toNumberSafe(v: any, fallback = 0): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+function moneyNumber(value: any): number {
+  if (value === undefined || value === null || value === '') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
 function hasBodyKey(b: any, ...keys: string[]): boolean {
   return keys.some((key) => Object.prototype.hasOwnProperty.call(b ?? {}, key));
 }
@@ -279,6 +284,144 @@ async function legacyCustomerProjectDetailPayload(orderId: number | string) {
     ordersMain: orderMain ? [orderMain] : [],
     order_plan: plans,
     review: reviews,
+  };
+}
+
+async function legacyNodeCustomerProjectDetailPayload(orderId: number | string) {
+  const [steps, ordermaterials, ordersMain, data, review] = await Promise.all([
+    query<any>(
+      `SELECT *
+         FROM order_step_logs
+        WHERE order_id = :orderId
+        ORDER BY id ASC`,
+      { orderId },
+    ).catch(() => []),
+    query<any>(
+      `SELECT *
+         FROM order_plan_materials
+        WHERE order_id = :orderId
+        ORDER BY id ASC`,
+      { orderId },
+    ).catch(() => []),
+    query<any>(
+      `SELECT o.id,
+              o.service_id,
+              o.vendor_id,
+              o.customer_id,
+              v.company_name,
+              COALESCE(vs.service_title, vs.title) AS service_title,
+              vs.price,
+              COALESCE(vs.unit_name, vs.unit) AS unit_name,
+              vs.pricing_type,
+              vs.description,
+              COALESCE(vs.service_image, vs.thumbnail) AS service_image
+         FROM orders o
+         LEFT JOIN vendors v ON v.id = o.vendor_id OR v.vendor_id = o.vendor_id
+         LEFT JOIN vendor_services vs ON vs.id = o.service_id OR vs.vendor_service_id = o.service_id
+        WHERE (o.id = :orderId OR o.order_id = :orderId)
+          AND COALESCE(vs.is_deleted, 0) = 0
+        ORDER BY o.id DESC`,
+      { orderId },
+    ).catch(() => []),
+    query<any>(
+      `SELECT *
+         FROM order_plan
+        WHERE order_id = :orderId
+        ORDER BY id ASC`,
+      { orderId },
+    ).catch(() => []),
+    query<any>(
+      `SELECT cr.*,
+              c.name AS customer_name,
+              c.profile_photo AS customer_image
+         FROM customer_review cr
+         LEFT JOIN customers c ON c.id = cr.customer_id OR c.customer_id = cr.customer_id
+        WHERE cr.order_id = :orderId
+          AND cr.status = 1
+        ORDER BY cr.id DESC`,
+      { orderId },
+    ).catch(() => []),
+  ]);
+  return { steps, ordermaterials, ordersMain, data, review };
+}
+
+async function legacyNodePaymentSummary(orderId: number | string) {
+  const order = await one<any>(
+    `SELECT COALESCE(id, order_id) AS id,
+            enquiry_id,
+            COALESCE(quote_id, quotation_id) AS quote_id
+       FROM orders
+      WHERE id = :orderId OR order_id = :orderId
+      LIMIT 1`,
+    { orderId },
+  );
+  if (!order) return null;
+
+  const quote = await one<any>(
+    `SELECT COALESCE(final_amount, amount, 0) AS final_amount
+       FROM quotation
+      WHERE enquiry_id = :enquiryId
+        AND (id = :quoteId OR quotation_id = :quoteId)
+      LIMIT 1`,
+    { enquiryId: order.enquiry_id, quoteId: order.quote_id },
+  ).catch(() => null);
+
+  const servicePayment = await query<any>(
+    `SELECT pl.*,
+            (
+              SELECT COALESCE(SUM(payment_amount), 0)
+                FROM payment_log
+               WHERE order_id = :orderId
+                 AND payment_type IN ('place_order', 'plan')
+            ) AS total_paid_amount
+       FROM payment_log pl
+      WHERE pl.order_id = :orderId
+        AND pl.payment_type IN ('place_order', 'plan')
+      ORDER BY pl.id ASC`,
+    { orderId },
+  ).catch(() => []);
+
+  const materialPayment = await query<any>(
+    `SELECT pl.*,
+            (
+              SELECT COALESCE(SUM(payment_amount), 0)
+                FROM payment_log
+               WHERE order_id = :orderId
+                 AND payment_type = 'material'
+            ) AS total_paid_amount
+       FROM payment_log pl
+      WHERE pl.order_id = :orderId
+        AND pl.payment_type = 'material'
+      ORDER BY pl.id ASC`,
+    { orderId },
+  ).catch(() => []);
+
+  const paidData = await one<any>(
+    `SELECT COALESCE(SUM(payment_amount), 0) AS total_paid_amount
+       FROM payment_log
+      WHERE order_id = :orderId`,
+    { orderId },
+  ).catch(() => null);
+
+  const materialData = await one<any>(
+    `SELECT COALESCE(SUM(m_final_amount), 0) AS TotalMaterialAmount
+       FROM order_plan_materials
+      WHERE order_id = :orderId`,
+    { orderId },
+  ).catch(() => null);
+
+  const finalQuotationAmount = moneyNumber(quote?.final_amount);
+  const totalMaterialAmount = moneyNumber(materialData?.TotalMaterialAmount);
+  const invoiceBase = process.env.INVOICE_URL_BASE || 'https://app.vayil.in/admin/invoice/';
+  return {
+    success: true,
+    TotalAmount: (finalQuotationAmount + totalMaterialAmount).toFixed(2),
+    TotalPaidAmount: moneyNumber(paidData?.total_paid_amount).toFixed(2),
+    TotalMaterialAmount: totalMaterialAmount.toFixed(2),
+    TotalPlanAmount: finalQuotationAmount.toFixed(2),
+    servicePayment,
+    materialPayment,
+    invoice_url: invoiceBase,
   };
 }
 
@@ -1294,11 +1437,13 @@ legacyCustomerRouter.post('/sendEnquiry', async (req: AuthRequest, res, next) =>
   } catch (err) { next(err); }
 });
 
-legacyCustomerRouter.post('/enquiryList', async (req: AuthRequest, res, next) => {
+async function handleCustomerEnquiryList(req: AuthRequest, res: any, next: any) {
   try {
     res.status(200).json({ success: true, data: await legacyCustomerEnquiryRows(req.user!.id) });
   } catch (err) { next(err); }
-});
+}
+legacyCustomerRouter.get('/enquiryList', handleCustomerEnquiryList);
+legacyCustomerRouter.post('/enquiryList', handleCustomerEnquiryList);
 
 legacyCustomerRouter.post('/enquiryDetails', async (req: AuthRequest, res, next) => {
   try {
@@ -1686,13 +1831,16 @@ async function handleLegacyPaymentUpdate(req: AuthRequest) {
 
   const paymentStatus = pickString(body, 'payment_status', 'paymentStatus') || 'success';
   if (paymentStatus.toLowerCase() === 'failed') {
-    return { message: 'Payment failed' };
+    return { body: { success: true, message: 'Payment failed' } };
   }
 
   const paymentJsonBody = objectFromJsonish(body?.payment_json);
   const paymentData = arrayFromJsonish(body?.payment_data);
   const paymentId = pickString(body, 'payment_id', 'razorpay_payment_id')
     || String(paymentJsonBody.razorpay_payment_id || '');
+  if (!paymentId || !paymentId.startsWith('pay_')) {
+    return { body: { status: false, message: 'Invalid Razorpay payment ID' } };
+  }
   const paymentType = pickString(body, 'payment_type', 'paymentType') || 'material';
   const paymentAmount = toNumberSafe(body?.payment_amount ?? body?.paymentAmount ?? body?.amount);
   const convenienceFeeCost = toNumberSafe(body?.convenience_fee_cost ?? body?.convenienceFeeCost);
@@ -1706,6 +1854,35 @@ async function handleLegacyPaymentUpdate(req: AuthRequest) {
   const currency = pickString(body, 'currency') || 'INR';
   const notes = pickString(body, 'notes') || `${paymentType} payment`;
   const paymentJson = jsonStringOrNull(body?.payment_json);
+
+  if ([baseAmount, paymentAmount, convenienceFeeCost, platformCost, taxCost].some((value) => Number.isNaN(value))) {
+    return {
+      statusCode: 400,
+      body: { success: false, message: 'Invalid numeric values in payment data' },
+    };
+  }
+
+  const settings = await one<any>(
+    `SELECT payment_key, payment_secret FROM settings LIMIT 1`,
+  ).catch(() => null);
+  const paymentKey = String(settings?.payment_key || process.env.RAZORPAY_KEY_ID || '').trim();
+  const paymentSecret = String(settings?.payment_secret || process.env.RAZORPAY_KEY_SECRET || '').trim();
+  if (paymentKey && paymentSecret) {
+    try {
+      const Razorpay = require('razorpay');
+      const razorpay = new Razorpay({ key_id: paymentKey, key_secret: paymentSecret });
+      const paymentDetails = await razorpay.payments.fetch(paymentId);
+      await razorpay.payments.capture(paymentId, paymentDetails.amount);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('[customer/payment_update] razorpay_capture_failed', {
+        order_id: orderId,
+        payment_id: paymentId,
+        message: err?.message || String(err),
+      });
+      throw err;
+    }
+  }
 
   await transaction(async (conn) => {
     const updatedPaymentData = await applyLegacyPaymentBalanceUpdate(
@@ -1730,6 +1907,38 @@ async function handleLegacyPaymentUpdate(req: AuthRequest) {
         paymentDataJson, paymentType, platformCost, taxCost,
       ],
     );
+
+    const vendorCredit = baseAmount;
+    const [[walletRow]]: any = await conn.query(
+      `SELECT balance FROM vendor_wallet WHERE vendor_id = ? LIMIT 1`,
+      [Number(order.vendor_id)],
+    );
+    const currentBalance = moneyNumber(walletRow?.balance);
+    const newBalance = currentBalance + vendorCredit;
+    await conn.query(
+      `INSERT INTO vendor_transactions
+         (vendor_id, order_id, type, amount, balance_after, reference_id, description)
+       VALUES (?, ?, 'earning', ?, ?, ?, ?)`,
+      [Number(order.vendor_id), orderId, vendorCredit, newBalance, paymentId, 'Order payment'],
+    ).catch(() => undefined);
+    await conn.query(
+      `INSERT INTO vendor_wallet (vendor_id, total_earning, balance)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         total_earning = total_earning + ?,
+         balance = balance + ?`,
+      [Number(order.vendor_id), vendorCredit, vendorCredit, vendorCredit, vendorCredit],
+    ).catch(() => undefined);
+
+    const platformEarning = platformCost + convenienceFeeCost + taxCost;
+    if (platformEarning > 0) {
+      await conn.query(
+        `INSERT INTO platform_transactions
+           (order_id, amount, description, reference_id)
+         VALUES (?, ?, ?, ?)`,
+        [orderId, platformEarning, 'Platform fee from order', paymentId],
+      ).catch(() => undefined);
+    }
   });
 
   try {
@@ -1750,7 +1959,7 @@ async function handleLegacyPaymentUpdate(req: AuthRequest) {
     });
   }
 
-  return { message: 'Place Order Successfully' };
+  return { body: { success: true, message: 'Place Order Successfully' } };
 }
 
 /* ───── Payments — placeOrder + payment_update use canonical escrow ───── */
@@ -1807,8 +2016,8 @@ legacyCustomerRouter.post('/placeOrder', async (req: AuthRequest, res, next) => 
 legacyCustomerRouter.post('/payment_update', async (req: AuthRequest, res, next) => {
   try {
     if (legacyPaymentUpdatePayload(req.body)) {
-      const out = await handleLegacyPaymentUpdate(req);
-      return send(res, { message: out.message });
+      const out: any = await handleLegacyPaymentUpdate(req);
+      return res.status(out.statusCode ?? 200).json(out.body ?? { success: true, message: out.message });
     }
     const rzOrder = String(req.body?.razorpay_order_id || req.body?.order_id || '');
     const rzPayment = String(req.body?.razorpay_payment_id || req.body?.payment_id || '');
@@ -1838,51 +2047,59 @@ legacyCustomerRouter.post('/orderDetails', async (req: AuthRequest, res, next) =
 legacyCustomerRouter.post('/getPaymentDetails', async (req: AuthRequest, res, next) => {
   try {
     const orderId = pickId(req.body, 'order_id', 'orderId');
-    if (!orderId) throw new ApiError(400, 'order_id required');
-    const out: any = await paymentSvc.getOrderPaymentSummary(req.user!.id, orderId);
-    // v4.5.35 — mobile bridge (mirrors vendorPaymentSummary):
-    // Customer_Payment_Details_Model reads the same 9 top-level keys.
-    const intents: any[] = out?.intents ?? [];
-    const servicePayment  = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('service') || !i.purpose);
-    const materialPayment = intents.filter((i) => (i.purpose ?? i.type ?? '').toLowerCase().includes('material'));
-    const totalMaterialAmount = materialPayment.reduce((s, i) => s + Number(i.amount), 0);
-    const totalPlanAmount     = servicePayment.reduce((s, i) => s + Number(i.amount), 0);
-    // v4.5.36 — see legacyVendor.ts vendorPaymentSummary for URL rationale.
-    const invoiceBase = process.env.INVOICE_URL_BASE || 'https://app.vayil.in/admin/invoice/';
-    send(res, {
-      data:                out,
-      TotalAmount:         Number(out?.total ?? 0).toFixed(2),
-      TotalPaidAmount:     Number(out?.paid ?? 0).toFixed(2),
-      TotalMaterialAmount: totalMaterialAmount.toFixed(2),
-      TotalPlanAmount:     totalPlanAmount.toFixed(2),
-      servicePayment,
-      materialPayment,
-      invoice_url:         invoiceBase,
-      https:               invoiceBase.startsWith('https'),
-    });
+    if (!orderId) return res.status(200).json({ success: false, message: 'orderID is required' });
+    await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
+    const payload = await legacyNodePaymentSummary(orderId);
+    if (!payload) return res.status(200).json({ success: false, message: 'Order not found' });
+    return res.status(200).json(payload);
   } catch (err) { next(err); }
 });
 
 legacyCustomerRouter.post('/NeedPaymentSummary', async (req: AuthRequest, res, next) => {
   try {
     const orderId = pickId(req.body, 'order_id', 'orderId');
-    if (!orderId) throw new ApiError(400, 'order_id required');
+    if (!orderId) return res.status(200).json({ success: false, message: 'orderID is required' });
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const [rawPlan, materials] = await Promise.all([
-      query<any>(`SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC`, { id: orderId }).catch(() => []),
-      legacyCustomerMaterialRows(orderId),
+    const [materialsoverall, materials, planoverall, plan] = await Promise.all([
+      query<any>(
+        `SELECT COALESCE(SUM(total_cost), 0) AS total_cost_amount,
+                COALESCE(SUM(balance_cost), 0) AS total_balance_cost
+           FROM order_plan_materials
+          WHERE order_id = :orderId
+          ORDER BY id ASC`,
+        { orderId },
+      ).catch(() => []),
+      query<any>(
+        `SELECT *
+           FROM order_plan_materials
+          WHERE order_id = :orderId
+            AND COALESCE(balance_cost, 0) != 0
+          ORDER BY id ASC`,
+        { orderId },
+      ).catch(() => []),
+      query<any>(
+        `SELECT COALESCE(SUM(amount), 0) AS total_amount,
+                COALESCE(SUM(balance_cost), 0) AS total_balance_cost
+           FROM order_plan
+          WHERE order_id = :orderId
+          ORDER BY id ASC`,
+        { orderId },
+      ).catch(() => []),
+      query<any>(
+        `SELECT *
+           FROM order_plan
+          WHERE order_id = :orderId
+            AND COALESCE(balance_cost, 0) != 0
+          ORDER BY id ASC`,
+        { orderId },
+      ).catch(() => []),
     ]);
-    const plan = rawPlan.map(normalizeCustomerPlanRow);
-    const planTotal = plan.reduce((sum: number, row: any) => sum + Number(row.amount ?? 0), 0);
-    const planBalance = plan.reduce((sum: number, row: any) => sum + Number(row.balance_cost ?? row.balance ?? 0), 0);
-    const materialsTotal = materials.reduce((sum: number, row: any) => sum + Number(row.total_cost ?? row.total ?? 0), 0);
-    const materialsBalance = materials.reduce((sum: number, row: any) => sum + Number(row.balance_cost ?? row.balance ?? 0), 0);
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       plan,
-      planoverall: [{ total_amount: planTotal.toFixed(2), total_balance_cost: planBalance.toFixed(2) }],
+      planoverall,
       materials,
-      materialsoverall: [{ total_cost_amount: materialsTotal.toFixed(2), total_balance_cost: materialsBalance.toFixed(2) }],
+      materialsoverall,
     });
   } catch (err) { next(err); }
 });
@@ -1930,15 +2147,44 @@ legacyCustomerRouter.post('/finalStep', async (req: AuthRequest, res, next) => {
 /* ───── Reviews ───── */
 legacyCustomerRouter.post('/addReview', async (req: AuthRequest, res, next) => {
   try {
-    const review = await reviewSvc.addReview({
-      customer_id: req.user!.id,
-      vendor_id: pickId(req.body, 'vendor_id', 'vendorId'),
-      order_id: pickId(req.body, 'order_id', 'orderId') || undefined,
-      rating: toNumberSafe(req.body?.rating),
-      title: req.body?.title,
-      comment: req.body?.comment || req.body?.review_description || req.body?.review || req.body?.feedback,
+    const vendorId = pickId(req.body, 'vendor_id', 'vendorId');
+    const serviceId = pickId(req.body, 'service_id', 'serviceId');
+    const rating = toNumberSafe(req.body?.rating);
+    if (!vendorId || !serviceId || !rating) {
+      return res.status(200).json({ success: false, message: 'vendor_id, service_id and rating are required' });
+    }
+    const orderId = pickId(req.body, 'order_id', 'orderId') || null;
+    const reviewDescription = req.body?.review_description ?? req.body?.comment ?? req.body?.review ?? req.body?.feedback ?? null;
+    const reviewId = await transaction(async (conn) => {
+      const [result]: any = await conn.query(
+        `INSERT INTO customer_review
+           (order_id, customer_id, vendor_id, service_id, rating, review_description, status)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        [orderId, req.user!.id, vendorId, serviceId, rating, reviewDescription],
+      );
+      await conn.query(
+        `INSERT INTO customer_reviews (customer_id, vendor_id, order_id, rating, title, comment)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE rating = VALUES(rating), title = VALUES(title), comment = VALUES(comment)`,
+        [req.user!.id, vendorId, orderId, rating, req.body?.title ?? null, reviewDescription],
+      ).catch(() => undefined);
+      await conn.query(
+        `UPDATE vendors v SET v.rating = (
+            SELECT COALESCE(AVG(rating), 0) FROM (
+              SELECT rating FROM customer_reviews WHERE vendor_id = ? AND status = 'visible'
+              UNION ALL
+              SELECT rating FROM customer_review  WHERE vendor_id = ? AND status = 1
+            ) r
+         ) WHERE v.vendor_id = ? OR v.id = ?`,
+        [vendorId, vendorId, vendorId, vendorId],
+      ).catch(() => undefined);
+      return result.insertId;
     });
-    send(res, { message: 'Review submitted', data: review }, 201);
+    return res.status(200).json({
+      success: true,
+      message: 'Review added successfully',
+      review_id: reviewId,
+    });
   } catch (err) { next(err); }
 });
 
@@ -2065,7 +2311,11 @@ legacyCustomerRouter.post('/getPlan', async (req: AuthRequest, res, next) => {
     const orderId = pickId(req.body, 'order_id', 'orderId', 'id');
     if (!orderId) throw new ApiError(400, 'order_id required');
     await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    send(res, await legacyCustomerProjectDetailPayload(orderId));
+    return res.status(200).json({
+      success: true,
+      message: 'steps and Plan Details',
+      ...await legacyNodeCustomerProjectDetailPayload(orderId),
+    });
   } catch (err) { next(err); }
 });
 
@@ -2073,21 +2323,26 @@ legacyCustomerRouter.post('/getPlan', async (req: AuthRequest, res, next) => {
  *  approves the submitted plan. action='approve'|'revision'. */
 legacyCustomerRouter.post('/CustomerupdatePlan', async (req: AuthRequest, res, next) => {
   try {
-    let orderId = pickId(req.body, 'order_id', 'orderId', 'id');
-    if (!orderId && (req.body?.plan_id || Array.isArray(req.body?.plans))) {
-      const planId = pickId(req.body, 'plan_id') || (Array.isArray(req.body?.plans) ? pickId(req.body.plans[0], 'plan_id', 'id') : '');
-      if (planId) {
-        const row = await one<any>(`SELECT order_id FROM order_plan WHERE plan_id = :id OR id = :id LIMIT 1`, { id: planId }).catch(() => null);
-        if (row?.order_id) orderId = String(row.order_id);
-      }
-    }
-    if (!orderId) throw new ApiError(400, 'order_id required');
-    await projectSvc.assertOrderBelongsToCustomer(orderId, req.user!.id);
-    const action = String(req.body?.action || 'approve').toLowerCase();
-    const out = (action === 'reject' || action === 'revision' || action === 'request_revision')
-      ? await projectSvc.setPlanStatusByCustomer(orderId, 'reject', req.body?.reason)
-      : await projectSvc.setPlanStatusByCustomer(orderId, 'approve');
-    send(res, { message: `Plan ${out.status}`, data: out });
+    const planId = pickId(req.body, 'plan_id', 'planId', 'id');
+    if (!planId) return res.status(200).json({ success: false, message: 'Plan ID is required' });
+    const owner = await one<any>(
+      `SELECT p.order_id
+         FROM order_plan p
+         JOIN orders o ON o.id = p.order_id OR o.order_id = p.order_id
+        WHERE (p.id = :planId OR p.plan_id = :planId)
+          AND o.customer_id = :customerId
+        LIMIT 1`,
+      { planId, customerId: req.user!.id },
+    );
+    if (!owner) throw new ApiError(404, 'Plan not found');
+    await exec(
+      `UPDATE order_plan
+          SET status = :status,
+              updated_at = NOW()
+        WHERE id = :planId OR plan_id = :planId`,
+      { planId, status: req.body?.status ?? null },
+    );
+    return res.status(200).json({ success: true, message: 'Plan status updated successfully' });
   } catch (err) { next(err); }
 });
 
@@ -2098,11 +2353,33 @@ legacyCustomerRouter.post('/CustomerupdatePlan', async (req: AuthRequest, res, n
 /** POST /customer/listReviews — customer browses reviews for a vendor.
  *  Body: { vendor_id }. Public-style (vendor_id from body, not token)
  *  but kept under customer auth since the screen lives inside login. */
-legacyCustomerRouter.post('/listReviews', async (req: AuthRequest, res, next) => {
+async function handleCustomerListReviews(req: AuthRequest, res: any, next: any) {
   try {
-    const vendorId = pickId(req.body, 'vendor_id', 'vendorId', 'id');
-    if (!vendorId) throw new ApiError(400, 'vendor_id required');
-    const data = await reviewSvc.listVendorReviews(vendorId);
-    send(res, { data });
+    const source = req.method === 'GET' ? req.query : req.body;
+    const vendorId = pickId(source, 'vendor_id', 'vendorId', 'id');
+    const serviceId = pickId(source, 'service_id', 'serviceId');
+    const where = ['cr.status = 1'];
+    const params: any = {};
+    if (vendorId) {
+      where.push('cr.vendor_id = :vendorId');
+      params.vendorId = vendorId;
+    }
+    if (serviceId) {
+      where.push('cr.service_id = :serviceId');
+      params.serviceId = serviceId;
+    }
+    const data = await query<any>(
+      `SELECT cr.*,
+              c.name AS customer_name,
+              c.profile_photo AS customer_image
+         FROM customer_review cr
+         LEFT JOIN customers c ON c.id = cr.customer_id OR c.customer_id = cr.customer_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY cr.id DESC`,
+      params,
+    );
+    return res.status(200).json({ success: true, data });
   } catch (err) { next(err); }
-});
+}
+legacyCustomerRouter.get('/listReviews', handleCustomerListReviews);
+legacyCustomerRouter.post('/listReviews', handleCustomerListReviews);

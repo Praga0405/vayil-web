@@ -215,7 +215,7 @@ const nextConfig = {
       'enquiryList', 'enquiryDetails', 'sendEnquiry', 'QuotationList', 'updateQuotation',
       'getPlan', 'CustomerupdatePlan', 'placeOrder', 'orderDetails',
       'getPaymentDetails', 'NeedPaymentSummary', 'payment_update',
-      'finalStep', 'addReview', 'customerNotificationList', 'addToCart',
+      'finalStep', 'addReview', 'listReviews', 'customerNotificationList', 'addToCart',
       'getCart', 'removeCartItem', 'clearCart',
     ]
     const vendorLegacyEndpoints = [
