@@ -32,7 +32,7 @@ import * as projectSvc from '../services/projectService';
 import * as paymentSvc from '../services/paymentService';
 import * as notifSvc from '../services/notificationService';
 import * as reviewSvc from '../services/reviewService';
-import { legacyStatusRows } from '../services/statusService';
+import { legacyStatusName, legacyStatusRows } from '../services/statusService';
 
 export const legacyCustomerRouter = Router();
 
@@ -49,6 +49,9 @@ function pickId(b: any, ...keys: string[]): string {
     if (b && b[k] !== undefined && b[k] !== null && b[k] !== '') return String(b[k]);
   }
   return '';
+}
+function statusSlug(value: any): string {
+  return String(value ?? '').trim().toLowerCase();
 }
 function toNumberSafe(v: any, fallback = 0): number {
   if (v === undefined || v === null || v === '') return fallback;
@@ -631,8 +634,16 @@ function enquiryStatusExpr(alias: string) {
       WHEN ${alias}.status IN ('new', 'pending') THEN 1
       WHEN ${alias}.status IN ('accepted', 'active') THEN 2
       WHEN ${alias}.status IN ('quoted', 'quote_received') THEN 11
-      WHEN ${alias}.status = 'rejected' THEN 4
-      WHEN ${alias}.status = 'completed' THEN 8
+      WHEN ${alias}.status = 'rejected' THEN 3
+      WHEN ${alias}.status IN ('in_progress', 'progress') THEN 4
+      WHEN ${alias}.status = 'paid' THEN 5
+      WHEN ${alias}.status IN ('partial_completion', 'partial') THEN 6
+      WHEN ${alias}.status = 'verify' THEN 7
+      WHEN ${alias}.status = 'need_payment' THEN 8
+      WHEN ${alias}.status = 'ongoing' THEN 9
+      WHEN ${alias}.status = 'completed' THEN 10
+      WHEN ${alias}.status = 'need_verify' THEN 12
+      WHEN ${alias}.status = 'verified' THEN 13
       ELSE CAST(${alias}.status AS UNSIGNED)
     END)`;
 }
@@ -680,6 +691,27 @@ function normalizeEnquiryRow(row: any) {
   out.quotations = (row.quotations ?? []).map(normalizeQuotationRow);
   out.orders = (row.orders ?? []).map(normalizeOrderRow);
   return out;
+}
+
+function deriveCustomerEnquiryStatus(row: any) {
+  const orders = Array.isArray(row.orders) ? row.orders : [];
+  const quotations = Array.isArray(row.quotations) ? row.quotations : [];
+  const steps = orders.flatMap((order: any) => Array.isArray(order.ordersteps) ? order.ordersteps : []);
+  const finalStep = steps.find((step: any) => Number(step.step) === 4);
+  const finalStatus = statusSlug(finalStep?.step_status);
+  if (finalStep && !['2', 'rejected', 'reject'].includes(finalStatus)) {
+    return { status: 10, status_name: 'Completed' };
+  }
+  if (finalStep && ['2', 'rejected', 'reject'].includes(finalStatus)) {
+    return { status: 3, status_name: 'Rejected' };
+  }
+  if (orders.length) return { status: 9, status_name: 'Ongoing' };
+  if (quotations.length) return { status: 11, status_name: 'Quote Received' };
+  const existingStatus = intOrNull(row.status);
+  return {
+    status: existingStatus ?? 1,
+    status_name: legacyStatusName(existingStatus) ?? row.status_name ?? 'Pending',
+  };
 }
 
 async function legacyQuotationRows(enquiryId: number | string) {
@@ -784,11 +816,15 @@ async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?
     { customerId, enquiryId },
   );
   return Promise.all(rows.map(async (row: any) => {
-    return normalizeEnquiryRow({
+    const mapped = normalizeEnquiryRow({
       ...row,
       quotations: await legacyQuotationRows(row.enquiry_id),
       orders: await legacyCustomerOrderRows(row.enquiry_id),
     });
+    return {
+      ...mapped,
+      ...deriveCustomerEnquiryStatus(mapped),
+    };
   }));
 }
 
@@ -1701,6 +1737,42 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
         baseAmount, amount, paymentJson, paymentType, convenienceFeeCost, platformCost, taxCost,
       ],
     );
+
+    if (isPaid) {
+      const [[existingWalletCredit]]: any = await conn.query(
+        `SELECT id
+           FROM vendor_transactions
+          WHERE vendor_id = ?
+            AND order_id = ?
+            AND type = 'earning'
+            AND reference_id = ?
+          LIMIT 1`,
+        [vendorId, orderId, paymentId || String(orderId)],
+      );
+      if (!existingWalletCredit) {
+        const [[walletRow]]: any = await conn.query(
+          `SELECT balance FROM vendor_wallet WHERE vendor_id = ? LIMIT 1`,
+          [vendorId],
+        );
+        const currentBalance = moneyNumber(walletRow?.balance);
+        const vendorCredit = baseAmount;
+        const newBalance = currentBalance + vendorCredit;
+        await conn.query(
+          `INSERT INTO vendor_transactions
+             (vendor_id, order_id, type, amount, balance_after, reference_id, description)
+           VALUES (?, ?, 'earning', ?, ?, ?, ?)`,
+          [vendorId, orderId, vendorCredit, newBalance, paymentId || String(orderId), 'Order payment'],
+        ).catch(() => undefined);
+        await conn.query(
+          `INSERT INTO vendor_wallet (vendor_id, total_earning, balance)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             total_earning = total_earning + ?,
+             balance = balance + ?`,
+          [vendorId, vendorCredit, vendorCredit, vendorCredit, vendorCredit],
+        ).catch(() => undefined);
+      }
+    }
   });
 
   try {

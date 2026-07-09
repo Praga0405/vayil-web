@@ -40,6 +40,9 @@ function pickId(b: any, ...keys: string[]): string {
   for (const k of keys) if (b && b[k] !== undefined && b[k] !== null && b[k] !== '') return String(b[k]);
   return '';
 }
+function hasBodyKey(b: any, ...keys: string[]): boolean {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(b ?? {}, key));
+}
 function pickNullable(b: any, ...keys: string[]): string | null {
   const value = pickId(b, ...keys);
   return value || null;
@@ -199,8 +202,16 @@ function enquiryStatusExpr(alias: string) {
       WHEN ${alias}.status IN ('new', 'pending') THEN 1
       WHEN ${alias}.status IN ('accepted', 'active') THEN 2
       WHEN ${alias}.status IN ('quoted', 'quote_received') THEN 11
-      WHEN ${alias}.status = 'rejected' THEN 4
-      WHEN ${alias}.status = 'completed' THEN 8
+      WHEN ${alias}.status = 'rejected' THEN 3
+      WHEN ${alias}.status IN ('in_progress', 'progress') THEN 4
+      WHEN ${alias}.status = 'paid' THEN 5
+      WHEN ${alias}.status IN ('partial_completion', 'partial') THEN 6
+      WHEN ${alias}.status = 'verify' THEN 7
+      WHEN ${alias}.status = 'need_payment' THEN 8
+      WHEN ${alias}.status = 'ongoing' THEN 9
+      WHEN ${alias}.status = 'completed' THEN 10
+      WHEN ${alias}.status = 'need_verify' THEN 12
+      WHEN ${alias}.status = 'verified' THEN 13
       ELSE CAST(${alias}.status AS UNSIGNED)
     END)`;
 }
@@ -1634,10 +1645,26 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
 
 legacyVendorRouter.post('/AcceptEnquiredStatusUpdate', async (req: AuthRequest, res, next) => {
   try {
-    const enquiryId = pickId(req.body, 'enquiry_id', 'enquiryId', 'id');
-    if (!enquiryId) throw new ApiError(400, 'enquiry_id required');
-    const out = await enquirySvc.vendorAcceptEnquiry(req.user!.id, enquiryId);
-    send(res, { message: 'Enquiry accepted', data: out });
+    const id = pickId(req.body, 'id', 'vendor_id', 'vendorId');
+    if (!id || !hasBodyKey(req.body, 'accept_enquires', 'acceptEnquires')) {
+      return res.status(200).json({
+        success: false,
+        message: 'ID and status required',
+      });
+    }
+    const acceptEnquires = req.body?.accept_enquires ?? req.body?.acceptEnquires;
+    const acceptFlag = mobileFlag(acceptEnquires) ?? 0;
+    await exec(
+      `UPDATE vendors
+          SET accept_enquires = ?
+        WHERE (id = ? OR vendor_id = ?)
+          AND COALESCE(is_deleted, 0) = 0`,
+      [acceptFlag, id, id],
+    );
+    return res.status(200).json({
+      success: true,
+      message: `Accept enquires ${acceptFlag ? 'activated' : 'inactivated'}`,
+    });
   } catch (err) { next(err); }
 });
 
@@ -2471,9 +2498,13 @@ async function loadVendorAggregates(vendorId: number | string) {
 
 function legacyBankStatus(row: any): number {
   if (row?.status_int !== undefined && row?.status_int !== null) return Number(row.status_int) || 0;
-  return String(row?.status || '').toLowerCase() === 'active' ? 1
-    : String(row?.status || '').toLowerCase() === 'pending_edit' ? 2
-      : 0;
+  const status = String(row?.status || '').toLowerCase();
+  if (/^\d+$/.test(status)) return Number(status);
+  if (['active', 'approved'].includes(status)) return 1;
+  if (['pending_edit', 'pending', 'request_received', 'request received'].includes(status)) return 2;
+  if (status === 'rejected') return 3;
+  if (status === 'verified') return 4;
+  return 0;
 }
 
 function legacyBankRow(row: any) {
@@ -2643,6 +2674,9 @@ legacyVendorRouter.post('/GetBankDetails', async (req: AuthRequest, res, next) =
         ORDER BY bank_id DESC`,
       { vendorId: req.user!.id, bankId: bankId || null },
     ).catch(() => []);
+    if (!data.length) {
+      return res.status(200).json({ success: false, message: 'no data found' });
+    }
     return res.status(200).json({ success: true, data: data.map(legacyBankRow) });
   } catch (err) { next(err); }
 });
@@ -2650,7 +2684,12 @@ legacyVendorRouter.post('/GetBankDetails', async (req: AuthRequest, res, next) =
 legacyVendorRouter.post('/EditBankDetailsReq', async (req: AuthRequest, res, next) => {
   try {
     const bankId = pickId(req.body, 'bank_id', 'bankId', 'id');
-    if (!bankId) throw new ApiError(400, 'bank_id required');
+    if (!bankId) {
+      return res.status(200).json({
+        success: false,
+        message: 'Bank ID required',
+      });
+    }
     const out = await bankSvc.requestEditBankDetails(req.user!.id, bankId, {
       account_holder: req.body?.account_holder, account_number: req.body?.account_number,
       ifsc_code: req.body?.ifsc_code, bank_name: req.body?.bank_name,

@@ -259,6 +259,7 @@ const nextConfig = {
       '/step3',
       '/step4',
       '/serviceTagStep',
+      '/AcceptEnquiredStatusUpdate',
       '/VendorAddServiceTag',
       '/saveServiceListing',
       '/updateServiceListing',
@@ -292,6 +293,12 @@ const nextConfig = {
       '/service-categories',
       '/service-subcategories',
       '/service-tags',
+    ]
+    const bareCustomerMobilePaths = [
+      '/enquiryList',
+      '/placeOrder',
+      '/getPaymentDetails',
+      '/finalStep',
     ]
     return {
       afterFiles: [
@@ -327,6 +334,7 @@ const nextConfig = {
         // posts to this path; mounted on bareMobileRouter on the backend.
         { source: '/city/request',              destination: '/api/city/request' },
         ...bareMobilePaths.map((path) => ({ source: path, destination: `/api${path}` })),
+        ...bareCustomerMobilePaths.map((path) => ({ source: path, destination: `/api${path}` })),
       ],
     }
   },

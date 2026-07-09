@@ -1,5 +1,61 @@
 # Release Notes
 
+## v4.5.86 - Pending BG mobile API parity fixes (2026-07-09)
+
+### Why
+
+The mobile team shared `VAYIL Pending Bg List.pdf` with another pending list of
+customer/vendor API gaps. The report included old Node.js controller snippets
+and expected response examples, so the fix target was the old mobile contract,
+not the newer web/canonical API behavior.
+
+### RCA
+
+The remaining issues came from three compatibility layers:
+
+- Some bare mobile URLs were mounted in Express but were not present in the
+  Vercel rewrite list. In production these requests could return a Next.js HTML
+  404 before the backend API router received them.
+- `AcceptEnquiredStatusUpdate` had drifted into an enquiry-acceptance handler,
+  but the old Node.js function in the PDF is actually a vendor availability
+  toggle for `vendors.accept_enquires`.
+- Bank and enquiry-list responses still had small but mobile-breaking shape
+  differences: no-data bank rows returned `success: true, data: []`, missing
+  bank id validation used the generic API error message, and customer enquiry
+  `status_name` could surface stale raw DB text such as `cancelled` after order
+  progress changed.
+- The legacy `placeOrder` path wrote order/payment rows but did not mirror the
+  old successful-payment side effect that credits `vendor_wallet` and inserts a
+  `vendor_transactions` earning row. That made vendor balance/history lag the
+  successful order payment for the mobile flow.
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /AcceptEnquiredStatusUpdate` | Backend handler accepted an enquiry using `enquiry_id`, while the PDF's old Node.js function expects `{ id, accept_enquires }` and updates `vendors.accept_enquires`. Bare production URL was also missing from Vercel rewrites. | Restored the old availability-toggle behavior. It now validates `id` and `accept_enquires`, updates the vendor row, and returns `Accept enquires activated` / `Accept enquires inactivated`. Added the missing bare Vercel rewrite. |
+| `POST /GetBankDetails` | Empty results returned `{ success: true, data: [] }`; old mobile API expects `{ success: false, message: "no data found" }`. | Added the old no-data response while preserving the legacy row fields: `bank_id`, `vendor_id`, `pan_number`, `account_number`, `ifsc_code`, `swift_code`, numeric `status`, `created_at`, and `updated_at`. |
+| `POST /EditBankDetailsReq` | Missing `bank_id` used the generic `bank_id required` error. Old mobile API returns HTTP 200 with `Bank ID required`. | Restored the old validation response and kept success as `Bank update request sent to admin`. |
+| Bank status mapping | String statuses such as `active` / `pending_edit` did not fully match the PDF's numeric status meanings. | Expanded legacy status conversion: approved/active -> `1`, request received/pending edit -> `2`, rejected -> `3`, verified -> `4`, with numeric values preserved when already stored. |
+| `GET/POST /enquiryList` | Customer enquiry rows could expose stale/raw `status_name` such as `cancelled` after final-step progress, and string status mapping used wrong legacy IDs for `rejected` and `completed`. Bare production URL was not rewritten. | Corrected legacy status ID mapping (`Rejected=3`, `Completed=10`, etc.) and derive customer `status_name` from the actual flow: final step -> `Completed`, rejected final step -> `Rejected`, order exists -> `Ongoing`, quotations exist -> `Quote Received`, otherwise existing legacy status/Pending. Added the bare Vercel rewrite. |
+| `POST /finalStep` | Express already matched the old update-existing-step behavior, but the PDF uses bare `/finalStep`; production could serve a Next.js 404 without a rewrite. | Added the bare Vercel rewrite so `/finalStep` reaches the existing legacy customer handler. The handler still updates only existing `order_step_logs` step `4`; it does not insert an extra step. |
+| `POST /placeOrder` | Successful legacy place-order payments wrote order/payment rows but did not credit vendor wallet/history like the old Node.js flow. Bare production URL was not rewritten. | Added an idempotent successful-payment wallet mirror: on paid legacy place-order, insert one `vendor_transactions` earning row per `vendor_id/order_id/reference_id` and increment `vendor_wallet.total_earning` and `balance` by `base_amount`. Added the bare Vercel rewrite. |
+| `POST /getPaymentDetails` | Express already returns the old `payment_log` summary shape, but the PDF uses bare `/getPaymentDetails`; production could miss the API without a rewrite. | Added the bare Vercel rewrite. The old top-level response remains `TotalAmount`, `TotalPaidAmount`, `TotalMaterialAmount`, `TotalPlanAmount`, `servicePayment`, `materialPayment`, and `invoice_url`. |
+
+### Notes On Payment Summary Formula
+
+The PDF text says the summary should include plan amount, GST, and platform fee,
+but the pasted old Node.js function returns `TotalPlanAmount` from
+`quotation.final_amount` and `TotalAmount` as `quotation.final_amount +
+SUM(order_plan_materials.m_final_amount)`. The implementation keeps that old
+controller contract intact for both `customer/getPaymentDetails` and
+`vendorPaymentSummary`.
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+
 ## v4.5.85 - Pending mobile API response parity pass (2026-07-09)
 
 ### Why
