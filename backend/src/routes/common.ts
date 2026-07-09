@@ -14,6 +14,19 @@ const activeListingWhere = (alias: string) =>
   `LOWER(CAST(COALESCE(${alias}.is_active, ${alias}.status, 0) AS CHAR)) IN ('1', 'active', 'true')
         AND COALESCE(${alias}.is_deleted, 0) = 0`;
 
+const approvedVendorWhere = (alias: string) =>
+  `LOWER(CAST(COALESCE(${alias}.status, '') AS CHAR)) IN ('verified', 'approved', 'active')`;
+
+function dedupeBy<T>(rows: T[], keyFn: (row: T) => string): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = keyFn(row).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function activeListingsForVendors(vendorIds: Array<number | string>) {
   if (!vendorIds.length) return [];
   return query<any>(
@@ -47,6 +60,7 @@ async function publicVendorList(_req: any, res: any, next: any) {
          FROM vendors
         WHERE COALESCE(is_deleted, 0) = 0
           AND COALESCE(accept_enquires, 1) = 1
+          AND ${approvedVendorWhere('vendors')}
           AND EXISTS (
             SELECT 1
               FROM vendor_services vs_check
@@ -73,7 +87,10 @@ async function publicVendorDetail(req: any, res: any, next: any) {
   try {
     const vendor = await one<any>(
       `SELECT vendor_id, name, company_name, city, rating, status, proof_type
-         FROM vendors WHERE vendor_id = :id`,
+         FROM vendors
+        WHERE vendor_id = :id
+          AND COALESCE(is_deleted, 0) = 0
+          AND ${approvedVendorWhere('vendors')}`,
       { id: req.params.id },
     );
     if (!vendor) throw new ApiError(404, 'Vendor not found');
@@ -97,7 +114,10 @@ commonRouter.get('/service-categories', async (_req, res, next) => {
         WHERE COALESCE(is_deleted, 0) = 0 AND COALESCE(is_active, status, 1) = 1
         ORDER BY name ASC`,
     );
-    res.status(200).json({ success: true, categories });
+    res.status(200).json({
+      success: true,
+      categories: dedupeBy(categories as any[], (r: any) => String(r.name || r.category_name || r.category_id || r.id || '')),
+    });
   } catch (err) { next(err); }
 });
 commonRouter.get('/service-subcategories', async (req, res, next) => {
@@ -127,7 +147,10 @@ commonRouter.get('/service-subcategories', async (req, res, next) => {
             ORDER BY ss.name ASC`,
           { catId },
         );
-    res.status(200).json({ success: true, subcategories: rows });
+    res.status(200).json({
+      success: true,
+      subcategories: dedupeBy(rows as any[], (r: any) => `${r.category_id || ''}:${r.name || r.sub_category_name || r.subcategory_id || r.id || ''}`),
+    });
   } catch (err) { next(err); }
 });
 commonRouter.get('/service-tags', async (_req, res, next) => {
@@ -140,7 +163,10 @@ commonRouter.get('/service-tags', async (_req, res, next) => {
           AND TRIM(COALESCE(name, '')) <> ''
         ORDER BY name ASC`,
     );
-    res.status(200).json({ success: true, tags });
+    res.status(200).json({
+      success: true,
+      tags: dedupeBy(tags as any[], (r: any) => String(r.name || r.tag_name || r.tag_id || r.id || '')),
+    });
   } catch (err) { next(err); }
 });
 /**

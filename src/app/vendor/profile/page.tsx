@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
+import { apiArray, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
+import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea } from '@/components/ui'
 import { ProfileImageUploader } from '@/components/shared/ProfileImageUploader'
 import { LogOut } from 'lucide-react'
@@ -17,6 +19,7 @@ export default function VendorProfilePage() {
   const [form, setForm] = useState({
     company_name: '', description: '', email_id: '', state_id: '', city_id: '',
   })
+  const draftKey = user?.id ? `vayil:draft:vendor-profile:${user.id}` : 'vayil:draft:vendor-profile'
   const [states,  setStates]  = useState<any[]>([])
   const [cities,  setCities]  = useState<any[]>([])
   const [saving,  setSaving]  = useState(false)
@@ -29,25 +32,34 @@ export default function VendorProfilePage() {
     if (user?.type === 'customer') { router.replace('/account/profile'); return }
     Promise.all([vendorApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
-        const p = pr.data?.data || pr.data?.result || {}
-        setForm({
-          company_name: p.company_name || p.name || user?.name || '',
+        const p = pr.data?.vendor || pr.data?.data || pr.data?.result || {}
+        const hydratedForm = {
+          company_name: p.company_name || '',
           description:  p.description || '',
           email_id:     p.email_id || p.email || user?.email || '',
           state_id:     p.state_id?.toString() || '',
           city_id:      p.city_id?.toString() || '',
-        })
-        const s = sr.data?.data || sr.data?.result || []
-        setStates(Array.isArray(s) ? s : [])
+        }
+        const draft = loadDraft<typeof hydratedForm>(draftKey)
+        setForm(draft ? { ...hydratedForm, ...draft } : hydratedForm)
+        setStates(uniqueMasterRows(apiArray(sr, ['states_list', 'states'])))
+        if (p.state_id) {
+          commonApi.getCity(Number(p.state_id)).then(r => {
+            setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
+          }).catch(() => setCities([]))
+        }
       })
   }, [token, hydrated, user?.type])
+
+  useEffect(() => {
+    if (hydrated && token) saveDraft(draftKey, form)
+  }, [form, hydrated, token, draftKey])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
     if (k === 'state_id') {
       commonApi.getCity(Number(e.target.value)).then(r => {
-        const c = r.data?.data || r.data?.result || []
-        setCities(Array.isArray(c) ? c : [])
+        setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
       })
     }
   }
@@ -56,7 +68,8 @@ export default function VendorProfilePage() {
     setSaving(true)
     try {
       await vendorApi.saveStep1(form)
-      if (user && token) setAuth({ ...user, name: form.company_name }, token)
+      if (user && token) setAuth({ ...user, email: form.email_id || user.email }, token)
+      clearDraft(draftKey)
       toast.success('Profile updated!')
     } catch { toast.error('Failed to update') }
     finally { setSaving(false) }
@@ -95,9 +108,9 @@ export default function VendorProfilePage() {
         <Input label="Email" type="email" value={form.email_id} onChange={set('email_id')} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Select label="State" value={form.state_id} onChange={set('state_id')}
-            options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
+            options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
           <Select label="City" value={form.city_id} onChange={set('city_id')}
-            options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
+            options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
         </div>
         <Button full loading={saving} onClick={save}>Save Changes</Button>
       </div>

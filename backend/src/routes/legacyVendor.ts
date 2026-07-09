@@ -89,6 +89,27 @@ function activeFlag(v: any): boolean | undefined {
   if (v === undefined || v === null || v === '') return undefined;
   return v === '1' || v === 1 || v === true || v === 'true';
 }
+function dedupeBy<T>(rows: T[], keyFn: (row: T) => string): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = keyFn(row).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function firstUploadedUrl(value: any): string | undefined {
+  const raw = value?.thumbnail || value?.service_image || value?.service_image_url ||
+    (Array.isArray(value?.images) ? value.images[0] : undefined) ||
+    (Array.isArray(value?.image_urls) ? value.image_urls[0] : undefined);
+  if (!raw) return undefined;
+  return typeof raw === 'string' ? raw : raw.url || raw.location || raw.file_url;
+}
+async function vendorIsApproved(vendorId: number | string): Promise<boolean> {
+  const row = await one<any>('SELECT status FROM vendors WHERE vendor_id = :id', { id: vendorId });
+  const status = String(row?.status || '').toLowerCase();
+  return ['verified', 'approved', 'active'].includes(status);
+}
 async function defaultBankHolder(vendorId: number | string) {
   const row = await one<any>(
     `SELECT COALESCE(NULLIF(full_name, ''), NULLIF(owner_name, ''), NULLIF(name, ''),
@@ -1058,7 +1079,7 @@ legacyVendorRouter.get('/getLanguages', async (_req, res, next) => {
         WHERE COALESCE(is_deleted,0)=0 AND status=1
         ORDER BY language_name`,
     );
-    res.status(200).json({ success: true, languages: rows });
+    res.status(200).json({ success: true, languages: dedupeBy(rows, (r) => String(r.language_name || r.id || '')) });
   } catch (err) { next(err); }
 });
 legacyVendorRouter.get('/getTools', async (_req, res, next) => {
@@ -1100,15 +1121,29 @@ legacyVendorRouter.post('/get_city', async (req, res, next) => {
   try {
     const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
     const stateName = String((req.body as any)?.state_name || (req.body as any)?.city_state || '').trim();
+    const state = sid
+      ? await one<any>(
+          `SELECT name, state_code FROM states
+            WHERE id = :sid AND COALESCE(is_deleted,0)=0 LIMIT 1`,
+          { sid },
+        ).catch(() => null)
+      : null;
+    const resolvedStateName = stateName || state?.name || '';
     const rows = sid
       ? await commonQuery<any>(
           `SELECT city_id, city_name, city_state, city_state_id,
                   COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
              FROM city
-            WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
-          { sid },
+            WHERE COALESCE(is_deleted,0)=0 AND status=1
+              AND (
+                city_state_id = :sid
+                OR (:stateName <> '' AND LOWER(city_state) = LOWER(:stateName))
+                OR (:stateCode <> '' AND LOWER(city_state) = LOWER(:stateCode))
+              )
+            ORDER BY city_name`,
+          { sid, stateName: resolvedStateName, stateCode: state?.state_code || '' },
         )
-      : stateName
+      : resolvedStateName
         ? await commonQuery<any>(
             `SELECT city_id, city_name, city_state, city_state_id,
                     COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
@@ -1116,7 +1151,7 @@ legacyVendorRouter.post('/get_city', async (req, res, next) => {
               WHERE LOWER(city_state) = LOWER(:stateName)
                 AND COALESCE(is_deleted,0)=0 AND status=1
               ORDER BY city_name`,
-            { stateName },
+            { stateName: resolvedStateName },
           )
       : await commonQuery<any>(
           `SELECT city_id, city_name, city_state, city_state_id,
@@ -1277,23 +1312,33 @@ legacyVendorRouter.use(requireApprovedVendor({
 /* ───── Onboarding step1..step4 + serviceTagStep ───── */
 async function handleStep(step: number, req: AuthRequest, res: any, next: any) {
   try {
+    const cityId = pickId(req.body, 'city_id', 'cityId');
+    const stateId = pickId(req.body, 'state_id', 'stateId');
+    const [cityRow, stateRow] = await Promise.all([
+      cityId ? one<any>('SELECT city_name FROM city WHERE city_id = :id LIMIT 1', { id: cityId }).catch(() => null) : Promise.resolve(null),
+      stateId ? one<any>('SELECT name FROM states WHERE id = :id LIMIT 1', { id: stateId }).catch(() => null) : Promise.resolve(null),
+    ]);
+    const hoursFrom = pickNullable(req.body, 'working_hours_from', 'workingHoursFrom', 'start_time') ??
+      (typeof req.body?.hours === 'string' && req.body.hours.includes('-') ? req.body.hours.split('-')[0] : null);
+    const hoursTo = pickNullable(req.body, 'working_hours_to', 'workingHoursTo', 'end_time') ??
+      (typeof req.body?.hours === 'string' && req.body.hours.includes('-') ? req.body.hours.split('-')[1] : null);
     await vendorSvc.onboardingStep(req.user!.id, step, {
       name: pickNullable(req.body, 'name'),
       company_name: pickNullable(req.body, 'company_name', 'companyName'),
       ph_code: pickNullable(req.body, 'ph_code', 'phone_code'),
       phone: pickNullable(req.body, 'phone', 'mobile', 'mobile_number'),
-      email: pickNullable(req.body, 'email'),
+      email: pickNullable(req.body, 'email', 'email_id'),
       full_name: pickNullable(req.body, 'full_name', 'fullName', 'owner_name', 'ownerName'),
       owner_name: pickNullable(req.body, 'owner_name', 'ownerName', 'full_name', 'fullName'),
-      state: pickNullable(req.body, 'state', 'state_id', 'stateId'),
-      city: pickNullable(req.body, 'city', 'city_id', 'cityId'),
+      state: pickNullable(req.body, 'state') ?? stateRow?.name ?? pickNullable(req.body, 'state_id', 'stateId'),
+      city: pickNullable(req.body, 'city') ?? cityRow?.city_name ?? pickNullable(req.body, 'city_id', 'cityId'),
       address: pickNullable(req.body, 'address'),
       pincode: pickNullable(req.body, 'pincode', 'pin_code', 'pinCode'),
-      about: pickNullable(req.body, 'about', 'short_bio', 'shortBio'),
-      short_bio: pickNullable(req.body, 'short_bio', 'shortBio', 'about'),
+      about: pickNullable(req.body, 'about', 'description', 'bio', 'short_bio', 'shortBio'),
+      short_bio: pickNullable(req.body, 'short_bio', 'shortBio', 'description', 'bio', 'about'),
       profile_image: pickNullable(req.body, 'profile_image', 'profile_photo', 'profile_photo_url', 'profilePhoto', 'profilePhotoUrl'),
       profile_photo: pickNullable(req.body, 'profile_photo', 'profile_photo_url', 'profile_image', 'profilePhoto', 'profilePhotoUrl'),
-      service_tag: pickCsv(req.body, 'service_tag', 'service_tags', 'serviceTag', 'serviceTags', 'tag_ids', 'tagIds'),
+      service_tag: pickCsv(req.body, 'service_tag', 'service_tags', 'serviceTag', 'serviceTags', 'service_tag_ids', 'serviceTagIds', 'tag_ids', 'tagIds'),
       service_category: pickNullable(req.body, 'service_category', 'serviceCategory', 'category_id', 'categoryId'),
       sub_service: pickNullable(req.body, 'sub_service', 'subService', 'service_subcategory', 'subcategory_id', 'subcategoryId'),
       gst_number: pickNullable(req.body, 'gst_number', 'gstNumber'),
@@ -1302,9 +1347,9 @@ async function handleStep(step: number, req: AuthRequest, res: any, next: any) {
       years_of_experience: req.body?.years_of_experience ? num(req.body.years_of_experience) : null,
       certifications: pickCsv(req.body, 'certifications', 'certification_urls', 'certificationUrls'),
       languages: pickCsv(req.body, 'languages'),
-      area_of_service: pickCsv(req.body, 'area_of_service', 'areaOfService'),
-      working_hours_from: pickNullable(req.body, 'working_hours_from', 'workingHoursFrom'),
-      working_hours_to: pickNullable(req.body, 'working_hours_to', 'workingHoursTo'),
+      area_of_service: pickCsv(req.body, 'area_of_service', 'areaOfService', 'service_area'),
+      working_hours_from: hoursFrom,
+      working_hours_to: hoursTo,
       willing_to_travel: mobileFlag(req.body?.willing_to_travel ?? req.body?.willingToTravel),
       tools_available: pickCsv(req.body, 'tools_available', 'toolsAvailable'),
       proof_type: pickNullable(req.body, 'proof_type', 'kyc_id_type', 'id_type'),
@@ -1327,9 +1372,15 @@ legacyVendorRouter.post('/step4', (req: AuthRequest, res, next) => handleStep(4,
 
 legacyVendorRouter.post('/serviceTagStep', async (req: AuthRequest, res, next) => {
   try {
-    const serviceTag = pickCsv(req.body, 'service_tag', 'service_tags', 'serviceTag', 'serviceTags', 'tag_ids', 'tagIds');
-    if (!serviceTag) throw new ApiError(400, 'service_tag is required');
-    await vendorSvc.onboardingStep(req.user!.id, 0, { service_tag: serviceTag });
+    const serviceTag = pickCsv(req.body, 'service_tag', 'service_tags', 'serviceTag', 'serviceTags', 'service_tag_ids', 'serviceTagIds', 'tag_ids', 'tagIds');
+    const serviceCategory = pickNullable(req.body, 'service_category', 'serviceCategory', 'category_id', 'categoryId');
+    const subService = pickNullable(req.body, 'sub_service', 'subService', 'service_subcategory', 'subcategory_id', 'subcategoryId');
+    if (!serviceTag && !serviceCategory && !subService) throw new ApiError(400, 'service_tag is required');
+    await vendorSvc.onboardingStep(req.user!.id, 0, {
+      service_tag: serviceTag,
+      service_category: serviceCategory,
+      sub_service: subService,
+    });
     send(res, { message: 'Tag saved', data: await legacyVendorRowsById(req.user!.id) });
   } catch (err) { next(err); }
 });
@@ -1345,6 +1396,7 @@ legacyVendorRouter.post('/VendorAddServiceTag', async (req: AuthRequest, res, ne
 legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, next) => {
   try {
     const active = activeFlag(req.body?.is_active ?? req.body?.status);
+    const approved = await vendorIsApproved(req.user!.id);
     const out = await vendorSvc.createListing(req.user!.id, {
       title: req.body?.title || req.body?.service_title,
       description: req.body?.description,
@@ -1352,12 +1404,12 @@ legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, nex
       unit: req.body?.unit || req.body?.unit_name,
       category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
-      thumbnail: req.body?.thumbnail || req.body?.service_image || req.body?.service_image_url,
+      thumbnail: firstUploadedUrl(req.body),
       pricing_type: req.body?.pricing_type,
       certificate_url: req.body?.certificate_url || req.body?.certificate,
       minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
       tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds'),
-      status: active,
+      status: approved ? active : false,
     });
     const rows = await legacyVendorServiceRows(req.user!.id, String(out?.vendor_service_id ?? out?.id));
     res.status(200).json({
@@ -1373,18 +1425,19 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
     const serviceId = pickId(req.body, 'vendor_service_id', 'service_id', 'serviceId', 'id');
     if (!serviceId) throw new ApiError(400, 'vendor_service_id required');
     const active = activeFlag(req.body?.is_active ?? req.body?.status);
+    const approved = await vendorIsApproved(req.user!.id);
     const out = await vendorSvc.updateListing(req.user!.id, serviceId, {
       title: req.body?.title || req.body?.service_title, description: req.body?.description,
       price: req.body?.price ? num(req.body.price) : undefined,
       unit: req.body?.unit || req.body?.unit_name,
       category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
-      thumbnail: req.body?.thumbnail || req.body?.service_image || req.body?.service_image_url,
+      thumbnail: firstUploadedUrl(req.body),
       pricing_type: req.body?.pricing_type,
       certificate_url: req.body?.certificate_url || req.body?.certificate,
       minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
       tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds'),
-      status: active,
+      status: approved ? active : false,
     });
     const rows = await legacyVendorServiceRows(req.user!.id, serviceId);
     res.status(200).json({
@@ -1425,6 +1478,9 @@ async function handleServiceStatusUpdate(req: AuthRequest, res: any, next: any) 
       });
     }
     const active = activeFlag(req.body?.is_active ?? req.body?.status) ?? false;
+    if (active && !(await vendorIsApproved(req.user!.id))) {
+      throw new ApiError(403, 'Vendor approval is required before publishing services');
+    }
     await vendorSvc.setListingStatus(req.user!.id, serviceId, active);
     res.status(200).json({
       success: true,

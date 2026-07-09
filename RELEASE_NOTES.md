@@ -1,5 +1,106 @@
 # Release Notes
 
+## v4.5.87 - Vendor flow stabilization without API shape changes (2026-07-09)
+
+### Why
+
+Vendor onboarding and Vendor Studio had several parallel implementations
+that parsed the same master-data and service-list APIs differently. This
+made the web flow feel inconsistent: dropdowns could be empty even when
+the API returned data, service images uploaded but did not render, company
+names were mixed with account names, and service activation could publish
+unapproved vendors.
+
+This release keeps the existing OTP bypass flow unchanged and does not
+rename or remove any API response fields/request fields. Fixes are limited
+to client-side normalization, additive backend compatibility, and existing
+mobile-compatible vendor columns.
+
+### What Changed
+
+- Added shared frontend compatibility helpers for existing response shapes:
+  `categories`, `subcategories`, `states_list`, `city`, `languages`,
+  `tags`, `data`, and `result`.
+- Added a 24-hour local draft helper for vendor forms. Add/edit service,
+  vendor onboarding, and business profile edits now survive refreshes and
+  are cleared after successful submit.
+- Fixed vendor service image persistence by normalizing upload responses
+  and sending existing backend-compatible fields:
+  `thumbnail`, `service_image`, and `service_image_url`.
+- Made the legacy vendor backend also accept existing `images` arrays and
+  derive the first image as the service thumbnail, so older callers do not
+  silently drop uploads.
+- Changed the Vendor Studio service edit page to call the existing
+  `updateServiceListing` endpoint instead of creating a duplicate service
+  through `saveServiceListing`.
+- Fixed business profile hydration to read canonical `/vendors/me`
+  responses from the existing `vendor` key as well as legacy
+  `data/result`.
+- Stopped business profile saves from overwriting the auth display name
+  with `company_name`; company and account identity now remain separate.
+- Fixed vendor onboarding state/city/category/subcategory/tag/language
+  dropdowns to read all existing response shapes and de-dupe duplicate
+  master rows.
+- Replaced the old `/vendor-onboarding` hardcoded category/subcategory
+  choices with live master-data options.
+- Replaced free-text operational fields with selectable working-hour
+  presets and language chips where the master data is available.
+- Changed the old `/vendor-onboarding` fallback behavior so failed saves
+  no longer show “Saved (offline mode)”; the UI now reports the real save
+  failure.
+- Mapped web onboarding fields such as `email_id`, `state_id`, `city_id`,
+  `category_id`, `subcategory_id`, `service_tag_ids`, `languages`,
+  `service_area`, and working-hour values into existing vendor/mobile
+  columns where available.
+- De-duped live language/tag/category/subcategory master rows at the
+  backend and frontend without changing response field names.
+- Improved city lookup compatibility by resolving cities through
+  `city_state_id`, state name, or state code when web and mobile state IDs
+  differ.
+- Added shared avatar image-load fallback so broken uploaded profile
+  photos fall back to initials instead of rendering a broken image.
+- Added approval gating for public vendor/service publishing:
+  unapproved vendors can save service details, but active public visibility
+  requires an approved/verified vendor status.
+- Public `/vendors` and vendor detail feeds now only expose approved
+  vendors with active, non-deleted listings.
+- Added missing Vendor Studio enquiry tabs for `ONGOING` and `REJECTED`
+  so enquiries no longer disappear from the list.
+- Improved vendor enquiry detail mapping so property type, scope,
+  timeline, preferred date, and attachments are preserved when the backend
+  supplies them.
+- Added a vendor quote update path for non-accepted quotes. Vendors can
+  edit an already-sent quote until the customer accepts it.
+
+### Compatibility Notes
+
+- Existing API response field names were preserved.
+- Existing service save request fields are still accepted.
+- The quote edit route is additive:
+  `PUT /vendors/enquiries/:id/quotes/:quoteId`.
+- OTP bypass behavior was intentionally left unchanged.
+- Unapproved vendors can still save drafts/details, but activating a
+  service returns the existing error response shape with a clear approval
+  message.
+
+### Verification
+
+```bash
+npm run lint
+npm run build --workspace backend
+npm run build
+npx tsc --noEmit
+```
+
+`npm run lint` passed with existing warnings only. Backend TypeScript
+build passed. The production Next.js build passed after allowing network
+access for Google Fonts. Standalone `tsc --noEmit` still fails on
+pre-existing `useParams`/`usePathname` nullability issues outside this
+patch; the two touched vendor enquiry files were updated to avoid adding
+new errors there.
+
+---
+
 ## v4.5.86 - Pending BG mobile API parity fixes (2026-07-09)
 
 ### Why

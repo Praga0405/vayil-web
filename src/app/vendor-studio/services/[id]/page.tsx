@@ -2,7 +2,9 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
-import { vendorApi, commonApi } from '@/lib/api/client'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { apiArray, isActiveMaster, optionId, optionLabel, serviceImagePayload, serviceImageUrls, uniqueMasterRows } from '@/lib/api/compat'
+import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload, PageLoader, StatusBadge } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
 import { ChevronLeft, Wrench, ToggleLeft, ToggleRight } from 'lucide-react'
@@ -71,13 +73,11 @@ export default function EditServicePage() {
       // Row may use vendor_service_id (legacy), service_id (canonical), or id (mirror).
       const s = list.find((x: any) => (x.id || x.service_id || x.vendor_service_id) === sid)
       if (!s) { toast.error('Service not found'); router.push('/vendor-studio/listing'); return }
-      const cats = cr.data?.categories || cr.data?.data || cr.data?.result || []
-      setCats(Array.isArray(cats) ? cats : [])
-      const tagList = tr?.data?.tags || tr?.data?.data || tr?.data?.result || []
-      setTags(Array.isArray(tagList) ? tagList : [])
+      setCats(uniqueMasterRows(apiArray(cr, ['categories'])))
+      setTags(uniqueMasterRows(apiArray(tr, ['tags'])))
       setStatus(serviceIsActive(s.is_active ?? s.status) ? 'active' : 'inactive')
-      setExistingImages(Array.isArray(s.images) ? s.images : [])
-      setForm({
+      setExistingImages(serviceImageUrls(s))
+      const baseForm = {
         title:          s.title || s.service_title || '',
         description:    s.description || '',
         category_id:    String(s.category_id || ''),
@@ -87,11 +87,12 @@ export default function EditServicePage() {
         price:          String(s.price ?? ''),
         unit:           s.unit || 'sqft',
         images:         [],
-      })
+      }
+      const draft = loadDraft<Omit<typeof baseForm, 'images'>>(`vayil:draft:vendor-studio:service-${sid}`)
+      setForm(draft ? { ...baseForm, ...draft, images: [] } : baseForm)
       if (s.category_id) {
         commonApi.getSubcategories(Number(s.category_id)).then(r => {
-          const d = r.data?.subcategories || r.data?.data || r.data?.result || []
-          setSubcats(Array.isArray(d) ? d : [])
+          setSubcats(uniqueMasterRows(apiArray(r, ['subcategories'])))
         }).catch(() => setSubcats([]))
       }
       setLoaded(true)
@@ -101,14 +102,19 @@ export default function EditServicePage() {
     })
   }, [sid, router])
 
+  useEffect(() => {
+    if (!loaded || !sid) return
+    const { images, ...draft } = form
+    saveDraft(`vayil:draft:vendor-studio:service-${sid}`, draft)
+  }, [form, loaded, sid])
+
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const v = e.target.value
     setForm(f => ({ ...f, [k]: v }))
     if (k === 'category_id') {
       setForm(f => ({ ...f, category_id: v, subcategory_id: '' }))
       commonApi.getSubcategories(Number(v)).then(r => {
-        const d = r.data?.subcategories || r.data?.data || r.data?.result || []
-        setSubcats(Array.isArray(d) ? d : [])
+        setSubcats(uniqueMasterRows(apiArray(r, ['subcategories'])))
       }).catch(() => setSubcats([]))
     }
   }
@@ -123,10 +129,10 @@ export default function EditServicePage() {
         const fd = new FormData()
         form.images.forEach(f => fd.append('files', f))
         const ur = await vendorApi.uploadFiles(fd)
-        const fresh = ur.data?.data || ur.data?.files || []
+        const fresh = normalizeUploadedUrls(ur)
         imageUrls = [...existingImages, ...fresh]
       }
-      await vendorApi.saveServiceListing({
+      await vendorApi.updateServiceListing({
         service_id:     sid,
         title:          form.title.trim(),
         description:    form.description.trim(),
@@ -136,8 +142,9 @@ export default function EditServicePage() {
         price_type:     form.price_type,
         price:          form.price,
         unit:           form.unit,
-        images:         imageUrls,
+        ...serviceImagePayload(imageUrls),
       })
+      clearDraft(`vayil:draft:vendor-studio:service-${sid}`)
       toast.success('Service updated')
       router.push('/vendor-studio/listing')
     } catch (e: any) {
@@ -153,7 +160,9 @@ export default function EditServicePage() {
       await vendorApi.updateServiceStatus({ service_id: sid, status: next })
       setStatus(next)
       toast.success(`Service ${next}`)
-    } catch { toast.error('Failed to update status') }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.response?.data?.error || 'Failed to update status')
+    }
     finally { setToggling(false) }
   }
 
@@ -234,19 +243,19 @@ export default function EditServicePage() {
               <FieldGrid columns={3}>
                 <Select label="Category" value={form.category_id} onChange={set('category_id')} required
                   options={[{ value: '', label: 'Select category' },
-                            ...cats.filter(c => c.is_active !== 0 && c.is_deleted !== 1)
-                                   .map(c => ({ value: c.category_id || c.id,
-                                                label: c.name || c.category_name }))]} />
+                            ...cats.filter(isActiveMaster)
+                                   .map(c => ({ value: optionId(c),
+                                                label: optionLabel(c) }))]} />
                 <Select label="Sub-category" value={form.subcategory_id} onChange={set('subcategory_id')}
                         disabled={!form.category_id || subcats.length === 0}
                   options={[{ value: '', label: subcats.length ? 'Select sub-category' : 'No sub-categories' },
-                            ...subcats.filter(s => s.is_active !== 0 && s.is_deleted !== 1)
-                                      .map(s => ({ value: s.subcategory_id || s.id,
-                                                   label: s.name || s.sub_category_name }))]} />
+                            ...subcats.filter(isActiveMaster)
+                                      .map(s => ({ value: optionId(s),
+                                                   label: optionLabel(s) }))]} />
                 <Select label="Tag (optional)" value={form.tag_id} onChange={set('tag_id')}
                   options={[{ value: '', label: tags.length ? 'No tag' : 'Tags unavailable' },
-                            ...tags.filter(t => t.is_active !== 0 && t.is_deleted !== 1)
-                                   .map(t => ({ value: t.id, label: t.name || t.tag_name }))]} />
+                            ...tags.filter(isActiveMaster)
+                                   .map(t => ({ value: optionId(t), label: optionLabel(t) }))]} />
               </FieldGrid>
             </PageSection>
 

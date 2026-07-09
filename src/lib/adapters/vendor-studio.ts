@@ -18,6 +18,11 @@ type BackendEnquiry = {
   category?: string | null; description?: string | null; location?: string | null;
   status?: string | null; created_at?: string | null;
   customer_name?: string | null; customer_mobile?: string | null;
+  service_title?: string | null; category_name?: string | null;
+  property_type?: string | null; propertyType?: string | null;
+  scope?: string | null; work_scope?: string | null;
+  timeline?: string | null; preferred_date?: string | null;
+  attachments?: unknown; images?: unknown; image_urls?: unknown;
 }
 type BackendOrder = {
   order_id: number; customer_id: number; vendor_id: number;
@@ -50,6 +55,12 @@ function statusToMilestone(vendor?: string | null, customer?: string | null): Mo
 }
 
 export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | null }): MockEnquiry {
+  const attachmentsRaw = row.attachments ?? row.images ?? row.image_urls
+  const attachments = Array.isArray(attachmentsRaw)
+    ? attachmentsRaw.map((item: any) => typeof item === 'string' ? item : item?.url || item?.location || item?.file_url).filter(Boolean)
+    : typeof attachmentsRaw === 'string'
+      ? attachmentsRaw.split(',').map(s => s.trim()).filter(Boolean)
+      : []
   return {
     id:               row.enquiry_id,
     customer_name:    row.customer_name ?? `Customer #${row.customer_id}`,
@@ -57,14 +68,14 @@ export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | n
     // enquiry; before that it returns null so we show "—" instead of
     // an empty +91.
     customer_mobile:  row.customer_phone ?? row.customer_mobile ?? '',
-    service_title:    row.category ?? 'Home Service',
-    category_name:    row.category ?? 'Service',
+    service_title:    row.service_title ?? row.category ?? 'Home Service',
+    category_name:    row.category_name ?? row.category ?? 'Service',
     location:         row.location ?? '',
-    property_type:    '—',
-    scope:            '—',
-    timeline:         '—',
+    property_type:    row.property_type ?? row.propertyType ?? '—',
+    scope:            row.scope ?? row.work_scope ?? '—',
+    timeline:         row.timeline ?? row.preferred_date ?? '—',
     description:      row.description ?? '',
-    attachments:      [],
+    attachments,
     status:           statusToEnquiry(row.status),
     created_at:       row.created_at ?? new Date().toISOString(),
   }

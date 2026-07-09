@@ -1,11 +1,12 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import PublicHeader from '@/components/shared/PublicHeader'
 import { Button, Input, Select, Textarea } from '@/components/ui'
 import { CheckCircle, ChevronLeft, ChevronRight, Building2, Wrench, Briefcase, MapPin, ShieldCheck, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { vendorApi } from '@/lib/api/client'
+import { commonApi, vendorApi } from '@/lib/api/client'
+import { apiArray, isActiveMaster, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
 
 const TIMEOUT_MS = 5000
 async function callWithFallback<T>(p: Promise<T>): Promise<{ ok: boolean }> {
@@ -16,8 +17,6 @@ async function callWithFallback<T>(p: Promise<T>): Promise<{ ok: boolean }> {
     ])
     return { ok: true }
   } catch {
-    // Offline fallback while backend onboarding routes are deployed.
-    // TODO(post-launch): show real error to user instead of fallback.
     return { ok: false }
   }
 }
@@ -32,6 +31,12 @@ const STEPS = [
 ] as const
 
 type StepKey = typeof STEPS[number]['key']
+const WORKING_HOUR_OPTIONS = [
+  { value: '09:00-18:00', label: '9:00 AM - 6:00 PM' },
+  { value: '10:00-19:00', label: '10:00 AM - 7:00 PM' },
+  { value: '08:00-20:00', label: '8:00 AM - 8:00 PM' },
+  { value: '00:00-23:59', label: '24 hours' },
+]
 
 export default function VendorOnboardingWizard() {
   const router = useRouter()
@@ -42,9 +47,27 @@ export default function VendorOnboardingWizard() {
   const [svcTags, setSvcTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
   const [prof, setProf] = useState({ category: '', subcategory: '', years: '', bio: '' })
-  const [ops, setOps] = useState({ service_area: '', hours: '', languages: 'English, Tamil' })
+  const [ops, setOps] = useState({ service_area: '', hours: '09:00-18:00', languages: ['English'] as string[] })
   const [kyc, setKyc] = useState({ id_type: '', id_number: '', consent: false })
   const [saving, setSaving] = useState(false)
+  const [categories, setCategories] = useState<any[]>([])
+  const [subcategories, setSubcategories] = useState<any[]>([])
+  const [languages, setLanguages] = useState<any[]>([])
+
+  useEffect(() => {
+    commonApi.getCategories().then(r => setCategories(uniqueMasterRows(apiArray(r, ['categories'])))).catch(() => setCategories([]))
+    commonApi.getLanguages().then(r => setLanguages(uniqueMasterRows(apiArray(r, ['languages'])))).catch(() => setLanguages([]))
+  }, [])
+
+  useEffect(() => {
+    if (!prof.category) {
+      setSubcategories([])
+      return
+    }
+    commonApi.getSubcategories(Number(prof.category))
+      .then(r => setSubcategories(uniqueMasterRows(apiArray(r, ['subcategories']))))
+      .catch(() => setSubcategories([]))
+  }, [prof.category])
 
   const next = () => {
     const i = STEPS.findIndex(s => s.key === step)
@@ -61,14 +84,29 @@ export default function VendorOnboardingWizard() {
     // aren't on the new backend yet; offline-fallback keeps the wizard
     // moving until backend onboarding lands.
     let req: Promise<any> | null = null
-    if (step === 'business')    req = vendorApi.saveStep1(biz)
-    else if (step === 'services')     req = vendorApi.saveServiceTags({ tags: svcTags })
+    if (step === 'business')    req = vendorApi.saveStep1({
+      company_name: biz.company,
+      owner_name: biz.owner,
+      email_id: biz.email,
+      pincode: biz.pincode,
+      address: biz.address,
+    })
+    else if (step === 'services')     req = svcTags.length
+      ? Promise.all(svcTags.map(tag => vendorApi.addServiceTag({ name: tag })))
+      : Promise.resolve()
     else if (step === 'professional') req = vendorApi.saveStep2(prof)
-    else if (step === 'operational')  req = vendorApi.saveStep3(ops)
+    else if (step === 'operational')  req = vendorApi.saveStep3({
+      ...ops,
+      languages: ops.languages.join(', '),
+    })
 
     const { ok } = req ? await callWithFallback(req) : { ok: true }
     setSaving(false)
-    toast.success(ok ? 'Saved' : 'Saved (offline mode)')
+    if (!ok) {
+      toast.error('Could not save. Please check your connection and try again.')
+      return
+    }
+    toast.success('Saved')
     if (callNext) next()
   }
 
@@ -87,7 +125,11 @@ export default function VendorOnboardingWizard() {
     // doesn't block the wizard from advancing.
     try { await vendorApi.submitForReview() } catch { /* swallow */ }
     setSaving(false)
-    toast.success(ok ? 'KYC submitted' : 'KYC submitted (offline mode)')
+    if (!ok) {
+      toast.error('Could not submit KYC. Please try again.')
+      return
+    }
+    toast.success('KYC submitted')
     next()
   }
 
@@ -168,9 +210,9 @@ export default function VendorOnboardingWizard() {
             <>
               <h2 className="text-base font-bold text-navy">Professional Details</h2>
               <Select label="Category"    value={prof.category}    onChange={e => setProf({ ...prof, category: e.target.value })}
-                options={[{ value: 'home-services', label: 'Home Services' }, { value: 'renovation', label: 'Renovation' }]} />
+                options={categories.filter(isActiveMaster).map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
               <Select label="Subcategory" value={prof.subcategory} onChange={e => setProf({ ...prof, subcategory: e.target.value })}
-                options={[{ value: 'plumbing', label: 'Plumbing' }, { value: 'painting', label: 'Painting' }]} />
+                options={subcategories.filter(isActiveMaster).map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
               <Input  label="Years of Experience" value={prof.years} onChange={e => setProf({ ...prof, years: e.target.value })} type="number" />
               <Textarea label="Bio" rows={3} value={prof.bio} onChange={e => setProf({ ...prof, bio: e.target.value })}
                 placeholder="Tell customers what makes your team different" />
@@ -181,8 +223,31 @@ export default function VendorOnboardingWizard() {
             <>
               <h2 className="text-base font-bold text-navy">Operational Details</h2>
               <Input    label="Service Area" value={ops.service_area} onChange={e => setOps({ ...ops, service_area: e.target.value })} placeholder="e.g. Coimbatore South" />
-              <Input    label="Working Hours" value={ops.hours}       onChange={e => setOps({ ...ops, hours: e.target.value })}       placeholder="e.g. Mon–Sat, 9 AM – 7 PM" />
-              <Input    label="Languages"     value={ops.languages}   onChange={e => setOps({ ...ops, languages: e.target.value })}   placeholder="Comma-separated" />
+              <Select label="Working Hours" value={ops.hours} onChange={e => setOps({ ...ops, hours: e.target.value })}
+                options={WORKING_HOUR_OPTIONS} />
+              {languages.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Languages</p>
+                  <div className="flex flex-wrap gap-2">
+                    {languages.map(lang => {
+                      const value = optionLabel(lang)
+                      const selected = ops.languages.includes(value)
+                      return (
+                        <button key={optionId(lang) || value} type="button"
+                          onClick={() => setOps(prev => ({
+                            ...prev,
+                            languages: selected ? prev.languages.filter(x => x !== value) : [...prev.languages, value],
+                          }))}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                            selected ? 'bg-orange text-white border-orange' : 'bg-white text-navy border-gray-200 hover:border-orange'
+                          }`}>
+                          {value}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </>
           )}
 

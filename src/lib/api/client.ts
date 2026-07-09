@@ -263,6 +263,8 @@ export const vendorApi = {
                       vendorClient.post(`/enquiries/${id}/reject`, { reason }),
   postQuote:        (id: string | number, data: Record<string, unknown>) =>
                       vendorClient.post(`/enquiries/${id}/quotes`, data),
+  updateQuote:      (id: string | number, quoteId: string | number, data: Record<string, unknown>) =>
+                      vendorClient.put(`/enquiries/${id}/quotes/${quoteId}`, data),
 
   // Projects
   listProjects:     () => vendorClient.get('/projects'),

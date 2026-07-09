@@ -2,13 +2,22 @@
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
-import { vendorApi, commonApi } from '@/lib/api/client'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { apiArray, isActiveMaster, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
+import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
 
 const STEPS = ['Company', 'Services', 'Availability', 'KYC']
+const DRAFT_KEY = 'vayil:draft:vendor:onboarding'
+const WORKING_HOUR_PRESETS = [
+  { value: '09:00-18:00', label: '9:00 AM - 6:00 PM' },
+  { value: '10:00-19:00', label: '10:00 AM - 7:00 PM' },
+  { value: '08:00-20:00', label: '8:00 AM - 8:00 PM' },
+  { value: '00:00-23:59', label: '24 hours' },
+]
 
 export default function VendorOnboardingPage() {
   const router = useRouter()
@@ -39,6 +48,8 @@ export default function VendorOnboardingPage() {
     start_time: '09:00', end_time: '18:00',
     service_area: '', radius_km: '10',
   })
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([])
+  const [languages, setLanguages] = useState<any[]>([])
 
   // Step 4 — KYC
   const [proofTypes, setProofTypes] = useState<any[]>([])
@@ -49,19 +60,47 @@ export default function VendorOnboardingPage() {
   useEffect(() => {
     if (!hydrated) return
     if (!token) { router.replace('/vendor/login'); return }
+    const draft = loadDraft<any>(DRAFT_KEY)
+    if (draft?.company) setCompany(c => ({ ...c, ...draft.company }))
+    if (draft?.availability) setAvailability(a => ({ ...a, ...draft.availability }))
+    if (Array.isArray(draft?.selectedLanguages)) setSelectedLanguages(draft.selectedLanguages)
+    if (draft?.selectedCat) setSelectedCat(draft.selectedCat)
+    if (draft?.selectedSubcat) setSelectedSubcat(draft.selectedSubcat)
+    if (Array.isArray(draft?.selectedTags)) setSelectedTags(draft.selectedTags)
+    vendorApi.getProfile().then(r => {
+      const p = r.data?.vendor || r.data?.data || r.data?.result || {}
+      setCompany(c => ({
+        ...c,
+        company_name: c.company_name || p.company_name || '',
+        description: c.description || p.description || p.about || p.short_bio || '',
+        email_id: c.email_id || p.email_id || p.email || user?.email || '',
+        state_id: c.state_id || String(p.state_id || ''),
+        city_id: c.city_id || String(p.city_id || ''),
+      }))
+      if (p.state_id) {
+        commonApi.getCity(Number(p.state_id)).then(cr => {
+          setCities(uniqueMasterRows(apiArray(cr, ['city', 'cities'])))
+        }).catch(() => setCities([]))
+      }
+    }).catch(() => {})
     commonApi.getCategories().then(r => {
-      const d = r.data?.data || r.data?.result || []
-      setCats(Array.isArray(d) ? d : [])
+      setCats(uniqueMasterRows(apiArray(r, ['categories'])))
     })
     commonApi.getStates().then(r => {
-      const d = r.data?.data || r.data?.result || []
-      setStates(Array.isArray(d) ? d : [])
+      setStates(uniqueMasterRows(apiArray(r, ['states_list', 'states'])))
     })
+    commonApi.getLanguages().then(r => {
+      setLanguages(uniqueMasterRows(apiArray(r, ['languages'])))
+    }).catch(() => setLanguages([]))
     commonApi.listProofTypes().then(r => {
-      const d = r.data?.data || r.data?.result || []
-      setProofTypes(Array.isArray(d) ? d : [])
+      setProofTypes(uniqueMasterRows(apiArray(r, ['proof_types', 'proofTypes'])))
     })
   }, [token])
+
+  useEffect(() => {
+    if (!hydrated || !token) return
+    saveDraft(DRAFT_KEY, { company, availability, selectedLanguages, selectedCat, selectedSubcat, selectedTags })
+  }, [company, availability, selectedLanguages, selectedCat, selectedSubcat, selectedTags, hydrated, token])
 
   const next = async () => {
     if (step === 0) {
@@ -75,7 +114,7 @@ export default function VendorOnboardingPage() {
           state_id:     company.state_id,
           city_id:      company.city_id,
         })
-        if (user && token) setAuth({ ...user, name: company.company_name }, token)
+        if (user && token) setAuth({ ...user, email: company.email_id || user.email }, token)
         setStep(1)
       } catch { toast.error('Failed to save company details') }
       finally { setLoading(false) }
@@ -104,6 +143,7 @@ export default function VendorOnboardingPage() {
           end_time:     availability.end_time,
           service_area: availability.service_area,
           radius_km:    availability.radius_km,
+          languages:    selectedLanguages.join(', '),
         })
         setStep(3)
       } catch { toast.error('Failed to save availability') }
@@ -116,8 +156,9 @@ export default function VendorOnboardingPage() {
       try {
         const fd = new FormData(); fd.append('files', kyc.document_file)
         const ur = await vendorApi.uploadFiles(fd)
-        const url = ur.data?.data?.[0] || ur.data?.files?.[0] || ''
+        const url = normalizeUploadedUrls(ur)[0] || ''
         await vendorApi.submitKYC({ proof_type_id: kyc.proof_type_id, document_url: url })
+        clearDraft(DRAFT_KEY)
         toast.success('KYC submitted! Awaiting verification.')
         router.push('/vendor/dashboard')
       } catch { toast.error('Failed to submit KYC') }
@@ -128,12 +169,10 @@ export default function VendorOnboardingPage() {
   const loadSubcats = (catId: string) => {
     setSelectedCat(catId)
     commonApi.getSubcategories(Number(catId)).then(r => {
-      const d = r.data?.data || r.data?.result || []
-      setSubcats(Array.isArray(d) ? d : [])
+      setSubcats(uniqueMasterRows(apiArray(r, ['subcategories'])))
     })
     commonApi.getTags().then(r => {
-      const d = r.data?.data || r.data?.result || []
-      setTags(Array.isArray(d) ? d : [])
+      setTags(uniqueMasterRows(apiArray(r, ['tags'])))
     })
   }
 
@@ -183,14 +222,13 @@ export default function VendorOnboardingPage() {
                   onChange={e => {
                     setCompany(c => ({ ...c, state_id: e.target.value, city_id: '' }))
                     commonApi.getCity(Number(e.target.value)).then(r => {
-                      const d = r.data?.data || r.data?.result || []
-                      setCities(Array.isArray(d) ? d : [])
+                      setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
                     })
                   }}
-                  options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
+                  options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
                 <Select label="City" value={company.city_id}
                   onChange={e => setCompany(c => ({ ...c, city_id: e.target.value }))}
-                  options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
+                  options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
               </div>
             </div>
           )}
@@ -200,25 +238,25 @@ export default function VendorOnboardingPage() {
             <div className="space-y-4">
               <h2 className="heading-md">Your Services</h2>
               <Select label="Service Category" value={selectedCat} onChange={e => loadSubcats(e.target.value)}
-                options={cats.map(c => ({ value: c.id, label: c.category_name || c.name }))} />
+                options={cats.filter(isActiveMaster).map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
               {subcats.length > 0 && (
                 <Select label="Sub-category" value={selectedSubcat}
                   onChange={e => setSelectedSubcat(e.target.value)}
-                  options={subcats.map(s => ({ value: s.id, label: s.sub_category_name || s.name }))} />
+                  options={subcats.filter(isActiveMaster).map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
               )}
               {tags.length > 0 && (
                 <div>
                   <label className="label">Service Tags (select all that apply)</label>
                   <div className="flex flex-wrap gap-2">
-                    {tags.map((t: any) => (
-                      <button key={t.id} type="button"
+                    {tags.filter(isActiveMaster).map((t: any) => (
+                      <button key={optionId(t)} type="button"
                         onClick={() => setSelectedTags(prev =>
-                          prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id]
+                          prev.includes(Number(optionId(t))) ? prev.filter(x => x !== Number(optionId(t))) : [...prev, Number(optionId(t))]
                         )}
-                        className={cn('px-3 py-1.5 rounded-full text-xs font-semibold border transition-all', selectedTags.includes(t.id)
+                        className={cn('px-3 py-1.5 rounded-full text-xs font-semibold border transition-all', selectedTags.includes(Number(optionId(t)))
                           ? 'bg-orange text-white border-orange'
                           : 'bg-white text-navy border-[var(--border)] hover:border-orange')}>
-                        {t.tag_name || t.name}
+                        {optionLabel(t)}
                       </button>
                     ))}
                   </div>
@@ -246,12 +284,39 @@ export default function VendorOnboardingPage() {
                   ))}
                 </div>
               </div>
+              <Select label="Working Hours" value={`${availability.start_time}-${availability.end_time}`}
+                onChange={e => {
+                  const [start_time, end_time] = e.target.value.split('-')
+                  setAvailability(a => ({ ...a, start_time, end_time }))
+                }}
+                options={WORKING_HOUR_PRESETS} />
               <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
                 <Input label="Start Time" type="time" value={availability.start_time}
                   onChange={e => setAvailability(a => ({ ...a, start_time: e.target.value }))} />
                 <Input label="End Time" type="time" value={availability.end_time}
                   onChange={e => setAvailability(a => ({ ...a, end_time: e.target.value }))} />
               </div>
+              {languages.length > 0 && (
+                <div>
+                  <label className="label">Languages</label>
+                  <div className="flex flex-wrap gap-2">
+                    {languages.map(lang => {
+                      const value = optionLabel(lang)
+                      const selected = selectedLanguages.includes(value)
+                      return (
+                        <button key={optionId(lang) || value} type="button"
+                          onClick={() => setSelectedLanguages(prev =>
+                            selected ? prev.filter(x => x !== value) : [...prev, value],
+                          )}
+                          className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all',
+                            selected ? 'bg-orange text-white border-orange' : 'bg-white text-navy border-[var(--border)] hover:border-orange')}>
+                          {value}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <Input label="Service Area / City" placeholder="e.g. Chennai, Coimbatore"
                 value={availability.service_area}
                 onChange={e => setAvailability(a => ({ ...a, service_area: e.target.value }))} />
@@ -269,7 +334,7 @@ export default function VendorOnboardingPage() {
               </p>
               <Select label="Proof Type" value={kyc.proof_type_id}
                 onChange={e => setKyc(k => ({ ...k, proof_type_id: e.target.value }))}
-                options={proofTypes.map(p => ({ value: p.id || p.proof_type_id, label: p.proof_type_name || p.name }))} />
+                options={proofTypes.map(p => ({ value: optionId(p), label: optionLabel(p) || p.proof_name }))} />
               <FileUpload label="Upload Document"
                 accept="image/*,.pdf"
                 onChange={files => setKyc(k => ({ ...k, document_file: files[0] }))} />

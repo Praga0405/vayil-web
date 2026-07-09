@@ -1,7 +1,9 @@
 'use client'
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { vendorApi, commonApi } from '@/lib/api/client'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { apiArray, isActiveMaster, optionId, optionLabel, serviceImagePayload, uniqueMasterRows } from '@/lib/api/compat'
+import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload } from '@/components/ui'
 import { ChevronLeft } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -13,6 +15,8 @@ const PRICE_TYPES = [
   { value: 'per_unit', label: 'Per Unit' },
   { value: 'quote_based', label: 'Quote Based' },
 ]
+
+const DRAFT_KEY = 'vayil:draft:vendor:service-add'
 
 export default function AddServicePage() {
   const router = useRouter()
@@ -27,17 +31,22 @@ export default function AddServicePage() {
 
   useEffect(() => {
     commonApi.getCategories().then(r => {
-      const d = r.data?.data || r.data?.result || []
-      setCats(Array.isArray(d) ? d : [])
+      setCats(uniqueMasterRows(apiArray(r, ['categories'])))
     })
+    const draft = loadDraft<Omit<typeof form, 'images'>>(DRAFT_KEY)
+    if (draft) setForm(f => ({ ...f, ...draft, images: [] }))
   }, [])
+
+  useEffect(() => {
+    const { images, ...draft } = form
+    saveDraft(DRAFT_KEY, draft)
+  }, [form])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
     if (k === 'category_id') {
       commonApi.getSubcategories(Number(e.target.value)).then(r => {
-        const d = r.data?.data || r.data?.result || []
-        setSubcats(Array.isArray(d) ? d : [])
+        setSubcats(uniqueMasterRows(apiArray(r, ['subcategories'])))
       })
     }
   }
@@ -52,7 +61,7 @@ export default function AddServicePage() {
         const fd = new FormData()
         form.images.forEach(f => fd.append('files', f))
         const ur = await vendorApi.uploadFiles(fd)
-        imageUrls = ur.data?.data || ur.data?.files || []
+        imageUrls = normalizeUploadedUrls(ur)
       }
       await vendorApi.saveServiceListing({
         title:          form.title,
@@ -62,8 +71,9 @@ export default function AddServicePage() {
         price_type:     form.price_type,
         price:          form.price,
         unit:           form.unit,
-        images:         imageUrls,
+        ...serviceImagePayload(imageUrls),
       })
+      clearDraft(DRAFT_KEY)
       toast.success('Service added!')
       router.push('/vendor/services')
     } catch { toast.error('Failed to add service') }
@@ -82,9 +92,9 @@ export default function AddServicePage() {
         <Textarea label="Description" rows={3} placeholder="Describe your service..." value={form.description} onChange={set('description')} />
         <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
           <Select label="Category" value={form.category_id} onChange={set('category_id')}
-            options={cats.map(c => ({ value: c.id, label: c.category_name || c.name }))} />
+            options={cats.filter(isActiveMaster).map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
           <Select label="Sub-category" value={form.subcategory_id} onChange={set('subcategory_id')}
-            options={subcats.map(s => ({ value: s.id, label: s.sub_category_name || s.name }))} />
+            options={subcats.filter(isActiveMaster).map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
         </div>
         <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
           <Select label="Pricing Type" value={form.price_type} onChange={set('price_type')} options={PRICE_TYPES} />

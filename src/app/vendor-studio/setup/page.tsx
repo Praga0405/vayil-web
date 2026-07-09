@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect, useState } from 'react'
-import { vendorApi, commonApi } from '@/lib/api/client'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { apiArray, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
 import { Button, Input, Select, StatusBadge } from '@/components/ui'
 import { ShieldCheck, Clock, CheckCircle, Edit2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -29,9 +30,8 @@ export default function VendorStudioSetupPage() {
   useEffect(() => {
     Promise.all([vendorApi.getProfile(), commonApi.listProofTypes()])
       .then(([pr, ptr]) => {
-        setProfile(pr.data?.data || pr.data?.result || {})
-        const d = ptr.data?.data || ptr.data?.result || []
-        setProofTypes(Array.isArray(d) ? d : [])
+        setProfile(pr.data?.vendor || pr.data?.data || pr.data?.result || {})
+        setProofTypes(uniqueMasterRows(apiArray(ptr, ['proof_types', 'proofTypes'])))
       })
       .finally(() => setKycLoading(false))
 
@@ -51,7 +51,7 @@ export default function VendorStudioSetupPage() {
     try {
       const fd = new FormData(); fd.append('files', file)
       const ur = await vendorApi.uploadFiles(fd)
-      const url = ur.data?.data?.[0] || ur.data?.files?.[0] || ''
+      const url = normalizeUploadedUrls(ur)[0] || ''
       await vendorApi.submitKYC({ proof_type_id: proofTypeId, document_url: url })
       toast.success('KYC submitted!')
       setProfile((p: any) => ({ ...p, kyc_status: 'pending' }))
@@ -129,7 +129,7 @@ export default function VendorStudioSetupPage() {
                 label="Proof Type"
                 value={proofTypeId}
                 onChange={e => setProofTypeId(e.target.value)}
-                options={proofTypes.map(p => ({ value: p.id || p.proof_type_id, label: p.name || p.proof_type_name }))}
+                options={proofTypes.map(p => ({ value: optionId(p), label: optionLabel(p) || p.proof_name }))}
               />
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Upload Document</p>

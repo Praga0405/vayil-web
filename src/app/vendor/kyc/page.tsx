@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect, useState } from 'react'
-import { vendorApi, commonApi } from '@/lib/api/client'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { apiArray, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
 import { Button, Select, FileUpload, StatusBadge } from '@/components/ui'
 import { ShieldCheck, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -16,9 +17,8 @@ export default function VendorKYCPage() {
   useEffect(() => {
     Promise.all([vendorApi.getProfile(), commonApi.listProofTypes()])
       .then(([pr, ptr]) => {
-        setProfile(pr.data?.data || pr.data?.result || {})
-        const d = ptr.data?.data || ptr.data?.result || []
-        setProofTypes(Array.isArray(d) ? d : [])
+        setProfile(pr.data?.vendor || pr.data?.data || pr.data?.result || {})
+        setProofTypes(uniqueMasterRows(apiArray(ptr, ['proof_types', 'proofTypes'])))
       })
       .finally(() => setLoading(false))
   }, [])
@@ -30,7 +30,7 @@ export default function VendorKYCPage() {
     try {
       const fd = new FormData(); fd.append('files', file)
       const ur = await vendorApi.uploadFiles(fd)
-      const url = ur.data?.data?.[0] || ur.data?.files?.[0] || ''
+      const url = normalizeUploadedUrls(ur)[0] || ''
       await vendorApi.submitKYC({ proof_type_id: proofTypeId, document_url: url })
       toast.success('KYC resubmitted!')
       setProfile((p: any) => ({ ...p, kyc_status: 'pending' }))
@@ -71,7 +71,7 @@ export default function VendorKYCPage() {
           </p>
           <Select label="Document Type" value={proofTypeId}
             onChange={e => setProofTypeId(e.target.value)}
-            options={proofTypes.map(p => ({ value: p.id || p.proof_type_id, label: p.proof_type_name || p.name }))} />
+            options={proofTypes.map(p => ({ value: optionId(p), label: optionLabel(p) || p.proof_name }))} />
           <FileUpload label="Upload Document" accept="image/*,.pdf"
             onChange={files => setFile(files[0])} />
           {file && <p className="text-xs text-green-600 font-semibold">✓ {file.name}</p>}

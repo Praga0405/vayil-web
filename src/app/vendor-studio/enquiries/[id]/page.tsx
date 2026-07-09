@@ -10,7 +10,8 @@ import { ChevronLeft, CheckCircle, XCircle, FileText, Phone, MapPin, Calendar, H
 import toast from 'react-hot-toast'
 
 export default function VendorEnquiryDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id
   const router = useRouter()
   const { data: enquiry, loading } = useLiveEnquiry(id)
   // All hooks declared up-front — never after a conditional return.
@@ -111,9 +112,14 @@ export default function VendorEnquiryDetailPage() {
             </Button>
           )}
           {displayStatus === 'QUOTED' && (
-            <p className="text-sm text-gray-500 text-center py-2">
-              Quote sent — waiting for the customer to accept or reject.
-            </p>
+            <>
+              <Button full onClick={() => router.push(`/vendor-studio/enquiries/${id}/quote`)}>
+                <FileText className="w-4 h-4" /> Edit Quote
+              </Button>
+              <p className="text-xs text-gray-500 leading-relaxed pt-1">
+                You can edit the quote until the customer accepts it.
+              </p>
+            </>
           )}
           {(displayStatus === 'REJECTED' || displayStatus === 'CANCELLED') && (
             <p className="text-sm text-gray-500 text-center py-2">

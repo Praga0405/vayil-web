@@ -83,15 +83,29 @@ bareMobileRouter.post('/get_city', async (req, res, next) => {
   try {
     const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
     const stateName = String((req.body as any)?.state_name || (req.body as any)?.city_state || '').trim();
+    const state = sid
+      ? await one<any>(
+          `SELECT name, state_code FROM states
+            WHERE id = :sid AND COALESCE(is_deleted,0)=0 LIMIT 1`,
+          { sid },
+        ).catch(() => null)
+      : null;
+    const resolvedStateName = stateName || state?.name || '';
     const rows = sid
       ? await query<any>(
           `SELECT city_id, city_name, city_state, city_state_id,
                   COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
              FROM city
-            WHERE city_state_id = :sid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
-          { sid },
+            WHERE COALESCE(is_deleted,0)=0 AND status=1
+              AND (
+                city_state_id = :sid
+                OR (:stateName <> '' AND LOWER(city_state) = LOWER(:stateName))
+                OR (:stateCode <> '' AND LOWER(city_state) = LOWER(:stateCode))
+              )
+            ORDER BY city_name`,
+          { sid, stateName: resolvedStateName, stateCode: state?.state_code || '' },
         )
-      : stateName
+      : resolvedStateName
         ? await query<any>(
             `SELECT city_id, city_name, city_state, city_state_id,
                     COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
@@ -99,7 +113,7 @@ bareMobileRouter.post('/get_city', async (req, res, next) => {
               WHERE LOWER(city_state) = LOWER(:stateName)
                 AND COALESCE(is_deleted,0)=0 AND status=1
               ORDER BY city_name`,
-            { stateName },
+            { stateName: resolvedStateName },
           )
       : await query<any>(
           `SELECT city_id, city_name, city_state, city_state_id,

@@ -158,9 +158,19 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyProp
 
 // ── Avatar ──────────────────────────────────────────────────
 export function Avatar({ name, src, size=10 }: { name?: string; src?: string; size?: number }) {
+  const [failed, setFailed] = React.useState(false)
   const initials = name?.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase() || '?'
   const s = `w-${size} h-${size}`
-  if (src) return <img src={src} alt={name} className={cn(s, 'rounded-full object-cover flex-shrink-0')} />
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        onError={() => setFailed(true)}
+        className={cn(s, 'rounded-full object-cover flex-shrink-0')}
+      />
+    )
+  }
   return (
     <div className={cn(s, 'rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0')}>
       <span className="text-orange-600 font-bold text-sm">{initials}</span>

@@ -118,6 +118,52 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
   } catch (err) { next(err); }
 });
 
+vendorRouter.put('/enquiries/:id/quotes/:quoteId', async (req: AuthRequest, res, next) => {
+  try {
+    const body = z.object({
+      amount: z.number(),
+      message: z.string().optional(),
+      estimatedDays: z.number().optional(),
+      validUntil: z.string().optional(),
+    }).parse(req.body);
+
+    const quote = await one<any>(
+      `SELECT q.*
+         FROM quotation q
+         JOIN enquiries e ON e.enquiry_id = q.enquiry_id
+        WHERE q.quotation_id = :quoteId
+          AND q.enquiry_id = :enquiryId
+          AND q.vendor_id = :vendorId
+          AND e.vendor_id = :vendorId
+        LIMIT 1`,
+      { quoteId: req.params.quoteId, enquiryId: req.params.id, vendorId: req.user!.id },
+    );
+    if (!quote) throw new ApiError(404, 'Quote not found');
+    if (String(quote.status || '').toLowerCase() === 'accepted') {
+      throw new ApiError(400, 'Accepted quotes cannot be edited');
+    }
+
+    await exec(
+      `UPDATE quotation
+          SET amount = :amount,
+              message = COALESCE(:message, message),
+              estimated_days = COALESCE(:estimatedDays, estimated_days),
+              valid_until = COALESCE(:validUntil, valid_until),
+              status = 'sent'
+        WHERE quotation_id = :quoteId`,
+      {
+        quoteId: req.params.quoteId,
+        amount: body.amount,
+        message: body.message ?? null,
+        estimatedDays: body.estimatedDays ?? null,
+        validUntil: body.validUntil ?? null,
+      },
+    );
+    await exec(`UPDATE enquiries SET status = 'quoted' WHERE enquiry_id = :id`, { id: req.params.id });
+    ok(res, { quote: await one<any>('SELECT * FROM quotation WHERE quotation_id = :id', { id: req.params.quoteId }) });
+  } catch (err) { next(err); }
+});
+
 vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
   try {
     // JOIN customer name + roll up plan status + escrow totals so the

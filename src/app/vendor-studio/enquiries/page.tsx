@@ -7,7 +7,8 @@ import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight } from 'lucide-react'
 import { PageHero } from '@/components/shared/PageLayout'
 
-type Tab = 'NEW' | 'ACCEPTED' | 'QUOTED' | 'COMPLETED'
+type Tab = 'NEW' | 'ACCEPTED' | 'QUOTED' | 'ONGOING' | 'COMPLETED' | 'REJECTED'
+const TABS: Tab[] = ['NEW', 'ACCEPTED', 'QUOTED', 'ONGOING', 'COMPLETED', 'REJECTED']
 
 export default function VendorEnquiriesListPage() {
   const [tab, setTab] = useState<Tab>('NEW')
@@ -21,7 +22,7 @@ export default function VendorEnquiriesListPage() {
         subtitle="Customer requests — accept, quote, or reject."
         meta={
           <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 overflow-x-auto">
-            {(['NEW', 'ACCEPTED', 'QUOTED', 'COMPLETED'] as Tab[]).map(t => (
+            {TABS.map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`flex-1 min-w-[100px] py-2 rounded-lg text-sm font-semibold transition-all ${
                   tab === t ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'

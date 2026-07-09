@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { vendorApi } from '@/lib/api/client'
+import { serviceImageUrls } from '@/lib/api/compat'
 import { PageLoader, EmptyState, StatusBadge, Button } from '@/components/ui'
 import { Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -19,7 +20,10 @@ export default function VendorServicesPage() {
     setLoading(true)
     vendorApi.getMyServices()
       .then(r => {
-        const d = r.data?.data || r.data?.result || []
+        const wrapper = r.data?.data ?? r.data?.result ?? {}
+        const d = Array.isArray(wrapper)
+          ? wrapper
+          : (wrapper.listings || wrapper.services || r.data?.listings || [])
         setServices(Array.isArray(d) ? d : [])
       })
       .finally(() => setLoading(false))
@@ -33,7 +37,9 @@ export default function VendorServicesPage() {
       await vendorApi.updateServiceStatus({ service_id: serviceId, status: next })
       setServices(prev => prev.map(s => (s.id || s.service_id) === serviceId ? { ...s, status: next } : s))
       toast.success(`Service ${next}`)
-    } catch { toast.error('Failed to update status') }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.response?.data?.error || 'Failed to update status')
+    }
   }
 
   return (
@@ -60,11 +66,12 @@ export default function VendorServicesPage() {
           {services.map((s: any) => {
             const sid = s.id || s.service_id
             const active = serviceIsActive(s)
+            const image = serviceImageUrls(s)[0]
             return (
               <div key={sid} className="card flex items-center gap-3 sm:gap-4">
                 <div className="w-14 h-14 rounded-xl bg-navy-50 overflow-hidden shrink-0">
-                  {s.images?.[0]
-                    ? <img src={s.images[0]} className="w-full h-full object-cover" alt={s.title} />
+                  {image
+                    ? <img src={image} className="w-full h-full object-cover" alt={s.title} />
                     : <div className="w-full h-full flex items-center justify-center"><Wrench className="w-6 h-6 text-navy" /></div>
                   }
                 </div>

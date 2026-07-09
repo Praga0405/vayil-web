@@ -2,7 +2,9 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { vendorApi, commonApi } from '@/lib/api/client'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { apiArray, isActiveMaster, optionId, optionLabel, serviceImagePayload, uniqueMasterRows } from '@/lib/api/compat'
+import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
 import { ChevronLeft, Wrench } from 'lucide-react'
@@ -38,6 +40,8 @@ const UNIT_OPTIONS = [
   { value: 'day',  label: 'Per day' },
 ]
 
+const DRAFT_KEY = 'vayil:draft:vendor-studio:service-add'
+
 export default function AddServicePage() {
   const router = useRouter()
   const [cats,    setCats]    = useState<any[]>([])
@@ -54,14 +58,22 @@ export default function AddServicePage() {
 
   useEffect(() => {
     commonApi.getCategories().then(r => {
-      const d = r.data?.categories || r.data?.data || r.data?.result || []
-      setCats(Array.isArray(d) ? d : [])
+      setCats(uniqueMasterRows(apiArray(r, ['categories'])))
     }).catch(() => {})
     commonApi.getTags?.().then(r => {
-      const d = r.data?.tags || r.data?.data || r.data?.result || []
-      setTags(Array.isArray(d) ? d : [])
+      setTags(uniqueMasterRows(apiArray(r, ['tags'])))
     }).catch(() => setTags([]))
+    const draft = loadDraft<Omit<typeof form, 'images'>>(DRAFT_KEY)
+    if (draft) {
+      setForm(f => ({ ...f, ...draft, images: [] }))
+      toast('Restored your unsaved service draft')
+    }
   }, [])
+
+  useEffect(() => {
+    const { images, ...draft } = form
+    saveDraft(DRAFT_KEY, draft)
+  }, [form])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const v = e.target.value
@@ -69,8 +81,7 @@ export default function AddServicePage() {
     if (k === 'category_id') {
       setForm(f => ({ ...f, category_id: v, subcategory_id: '' }))
       commonApi.getSubcategories(Number(v)).then(r => {
-        const d = r.data?.subcategories || r.data?.data || r.data?.result || []
-        setSubcats(Array.isArray(d) ? d : [])
+        setSubcats(uniqueMasterRows(apiArray(r, ['subcategories'])))
       }).catch(() => setSubcats([]))
     }
   }
@@ -89,7 +100,7 @@ export default function AddServicePage() {
         const fd = new FormData()
         form.images.forEach(f => fd.append('files', f))
         const ur = await vendorApi.uploadFiles(fd)
-        imageUrls = ur.data?.data || ur.data?.files || []
+        imageUrls = normalizeUploadedUrls(ur)
       }
 
       await vendorApi.saveServiceListing({
@@ -101,8 +112,9 @@ export default function AddServicePage() {
         price_type:     form.price_type,
         price:          form.price,
         unit:           form.unit,
-        images:         imageUrls,
+        ...serviceImagePayload(imageUrls),
       })
+      clearDraft(DRAFT_KEY)
       toast.success('Service added')
       router.push('/vendor-studio/listing')
     } catch (e: any) {
@@ -177,19 +189,19 @@ export default function AddServicePage() {
               <FieldGrid columns={3}>
                 <Select label="Category" value={form.category_id} onChange={set('category_id')} required
                   options={[{ value: '', label: 'Select category' },
-                            ...cats.filter(c => c.is_active !== 0 && c.is_deleted !== 1)
-                                   .map(c => ({ value: c.category_id || c.id,
-                                                label: c.name || c.category_name }))]} />
+                            ...cats.filter(isActiveMaster)
+                                   .map(c => ({ value: optionId(c),
+                                                label: optionLabel(c) }))]} />
                 <Select label="Sub-category" value={form.subcategory_id} onChange={set('subcategory_id')}
                         disabled={!form.category_id || subcats.length === 0}
                   options={[{ value: '', label: subcats.length ? 'Select sub-category' : 'No sub-categories' },
-                            ...subcats.filter(s => s.is_active !== 0 && s.is_deleted !== 1)
-                                      .map(s => ({ value: s.subcategory_id || s.id,
-                                                   label: s.name || s.sub_category_name }))]} />
+                            ...subcats.filter(isActiveMaster)
+                                      .map(s => ({ value: optionId(s),
+                                                   label: optionLabel(s) }))]} />
                 <Select label="Tag (optional)" value={form.tag_id} onChange={set('tag_id')}
                   options={[{ value: '', label: tags.length ? 'No tag' : 'Tags unavailable' },
-                            ...tags.filter(t => t.is_active !== 0 && t.is_deleted !== 1)
-                                   .map(t => ({ value: t.id, label: t.name || t.tag_name }))]} />
+                            ...tags.filter(isActiveMaster)
+                                   .map(t => ({ value: optionId(t), label: optionLabel(t) }))]} />
               </FieldGrid>
             </PageSection>
 
