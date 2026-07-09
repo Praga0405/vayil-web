@@ -16,6 +16,31 @@ rename or remove any API response fields/request fields. Fixes are limited
 to client-side normalization, additive backend compatibility, and existing
 mobile-compatible vendor columns.
 
+### Root Cause Summary
+
+- Web vendor pages had grown multiple implementations for the same flows:
+  `/vendor/onboarding`, `/vendor-onboarding`, `/vendor/profile`,
+  `/vendor/services/add`, `/vendor-studio/services/add`, and
+  `/vendor-studio/listing` were each interpreting backend responses
+  slightly differently.
+- Several master-data readers assumed only one response envelope, while
+  production/mobile-compatible APIs can return useful rows through
+  `data`, `result`, or named keys such as `categories`, `subcategories`,
+  `states_list`, `city`, `languages`, and `tags`.
+- Service upload handling was not aligned end-to-end. The frontend could
+  retain an uploaded image URL locally, but older backend paths did not
+  always derive the persisted service thumbnail from the submitted image
+  list.
+- Business profile saves were mixing vendor company identity with the
+  signed-in account display name. That made the company name appear to
+  change depending on which page saved last.
+- Vendor approval status was not consistently enforced before public
+  search/listing visibility. This made it possible for draft or unapproved
+  vendor services to look publishable in some web surfaces.
+- Vendor enquiries had status and detail-mapping gaps. Some enquiry states
+  were not visible in Vendor Studio, and detail fields supplied by the
+  backend were being dropped or rendered as empty placeholders.
+
 ### What Changed
 
 - Added shared frontend compatibility helpers for existing response shapes:
@@ -72,6 +97,69 @@ mobile-compatible vendor columns.
 - Added a vendor quote update path for non-accepted quotes. Vendors can
   edit an already-sent quote until the customer accepts it.
 
+### Issue Coverage Matrix
+
+| # | Observed issue | Resolution in this release | Compatibility stance |
+|---|---|---|---|
+| 1 | Master data not fetching in services | Vendor service forms now use shared response normalization for `categories`, `subcategories`, `tags`, `languages`, `states_list`, `city`, `data`, and `result` shapes. Empty dropdowns caused by envelope mismatches are fixed. | No endpoint or response-field rename. |
+| 2 | Signup asks for the same details again in business profile | Business profile hydration now reads the canonical `vendor` object as well as legacy `data/result` objects, so previously submitted onboarding values are reused. | Reads additional existing response shapes only. |
+| 3 | Category and subcategory show only two options | The legacy `/vendor-onboarding` page no longer uses hardcoded category/subcategory values; it loads live master data and de-dupes repeated rows. | Master-data API remains unchanged. |
+| 4 | Working hours should be selectable like mobile | Onboarding/business operations now use selectable working-hour presets instead of relying only on free-text entry. | Values still map into existing vendor/mobile-compatible fields. |
+| 5 | Languages should be in a dropdown/selectable control | Languages now load from master data and render as selectable chips/options with duplicate rows removed. | Existing language response fields are preserved. |
+| 6 | Business profile state/city not showing during initial onboarding | State and city parsing now supports `states_list`, `city`, `data`, and `result` envelopes, and city lookup can resolve by state ID, state name, or state code. | No request/response contract change. |
+| 7 | Company name changes in business profile instead of preserving onboarding identity | Business profile saves no longer overwrite the auth display name with `company_name`. Vendor company identity and user display identity now remain separate. | Auth/OTP payloads untouched. |
+| 8 | Service image added is not shown | Upload responses are normalized and service saves send `thumbnail`, `service_image`, and `service_image_url`; legacy backend handling also derives thumbnails from submitted `images` arrays. | Existing save payloads still work; image support is additive. |
+| 9 | Restrict publish unless vendor is approved | Vendors can save service details while unapproved, but activating/publicly exposing a service now requires approved/verified vendor status. | Existing error response shape is preserved with a clearer approval message. |
+| 10 | Temporary save for 24 hours across refresh | Add/edit service, onboarding, and business profile forms now use a 24-hour local draft helper. Drafts survive refresh and are cleared on successful submit or expiry. | Client-side only; no API change and no server data retention change. |
+| 11 | Customer sees a default photo when uploaded photo fails | Shared avatar fallback now replaces failed image loads with initials instead of a broken image/default placeholder state. | Presentation-only change. |
+| 12 | Vendor enquiry detail screen misses additional details | Enquiry mapping now preserves property type, scope, timeline, preferred date, and attachments when supplied by the backend. | Uses existing fields returned by current APIs. |
+| 13 | Vendor should edit quote if customer has not accepted it | Vendors can update a non-accepted quote through the additive quote update path. Accepted quotes remain locked. | New route is additive; existing quote create/read paths remain compatible. |
+
+### Implementation Detail
+
+- Introduced frontend normalization utilities so vendor pages can consume
+  existing backend/mobile response variants without each page duplicating
+  envelope parsing.
+- Added reusable expiring form-draft storage with a 24-hour TTL. This is
+  intentionally client-side so interrupted vendor setup work survives
+  refreshes without introducing new backend persistence or cleanup jobs.
+- Updated vendor onboarding and business profile form hydration so saved
+  values are preferred over empty defaults, while still allowing vendors to
+  edit fields before approval.
+- Updated service add/edit flows so image URLs are kept through upload,
+  preview, submit, and subsequent edit screens.
+- Updated listing activation behavior so the save action and public
+  publish action are distinct: vendors can continue preparing data, while
+  public visibility is held until approval.
+- Updated vendor enquiry list/detail handling so additional backend fields
+  are surfaced where present and missing optional values are handled
+  gracefully.
+- Added quote-edit support only for quotes that have not been accepted by
+  the customer, preserving the expected lock once the customer accepts.
+
+### Files and Areas Changed
+
+- Frontend API compatibility: shared response-envelope and option parsing
+  helpers used by vendor onboarding, business profile, service forms, and
+  Vendor Studio screens.
+- Frontend draft persistence: reusable 24-hour local draft helper for
+  interrupted vendor form sessions.
+- Vendor onboarding: category, subcategory, state, city, service tag,
+  language, service area, and working-hour controls now hydrate from live
+  master data where available.
+- Business profile: canonical vendor-profile hydration, company/account
+  identity separation, state/city/language compatibility, and draft save
+  support.
+- Service catalogue/add/edit: image persistence, compatible image payloads,
+  draft support, update-vs-create behavior, and approval-aware activation.
+- Public vendor/search surfaces: public visibility now requires an approved
+  vendor and active, non-deleted service listings.
+- Vendor enquiries: missing status tabs, richer detail-field mapping, and
+  non-accepted quote editing.
+- Backend compatibility paths: legacy vendor handlers accept existing image
+  array input, derive thumbnails consistently, de-dupe master data, and map
+  web onboarding fields into existing mobile-compatible vendor columns.
+
 ### Compatibility Notes
 
 - Existing API response field names were preserved.
@@ -82,6 +170,36 @@ mobile-compatible vendor columns.
 - Unapproved vendors can still save drafts/details, but activating a
   service returns the existing error response shape with a clear approval
   message.
+
+### API Compatibility Detail
+
+| Area | Existing compatibility preserved | Additive behavior |
+|---|---|---|
+| Master data | Existing `categories`, `subcategories`, `states_list`, `city`, `languages`, `tags`, `data`, and `result` response fields remain valid. | Frontend now normalizes all known shapes instead of assuming one envelope. |
+| Vendor onboarding | Existing vendor/mobile-compatible columns remain the write target. | Web-only form names are mapped into existing fields such as `email_id`, `state_id`, `city_id`, `category_id`, `subcategory_id`, `service_tag_ids`, `languages`, `service_area`, and working-hour fields. |
+| Service save/edit | Existing service create/update fields remain accepted. | `images` arrays, `thumbnail`, `service_image`, and `service_image_url` are handled consistently so older and newer callers can coexist. |
+| Public search/vendor feeds | Existing public feed shapes are preserved. | Visibility now filters out unapproved vendors and inactive/deleted listings. |
+| Enquiries | Existing enquiry list/detail fields remain supported. | Additional supplied fields such as property type, scope, timeline, preferred date, and attachments are rendered when available. |
+| Quotes | Existing quote creation/read behavior remains supported. | `PUT /vendors/enquiries/:id/quotes/:quoteId` lets vendors edit quotes before customer acceptance. |
+| Auth/OTP | OTP bypass flow and auth request handling are unchanged. | None. |
+
+### Operational Notes and Remaining Risk
+
+- The 24-hour draft feature is local to the browser. It is designed for
+  refresh/session recovery, not cross-device recovery.
+- This release does not remove the duplicated vendor route surfaces. It
+  stabilizes the current routes and aligns their behavior, but a later
+  cleanup should consolidate the older `/vendor-onboarding` and newer
+  Vendor Studio paths.
+- Public visibility now depends on the vendor approval/verification status
+  already returned by the backend. Any production data with inconsistent
+  status values should be reviewed before relying on search visibility as
+  an approval audit.
+- The standalone TypeScript nullability issues noted below were not
+  broadened into this release because they are outside the vendor-flow
+  compatibility patch.
+- OTP bypass was intentionally not reviewed or refactored in this change,
+  per release constraint.
 
 ### Verification
 
