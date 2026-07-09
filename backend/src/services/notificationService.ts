@@ -39,6 +39,55 @@ export async function list(recipientType: Recipient, recipientId: number | strin
   );
 }
 
+function notificationData(value: any): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function intValue(value: any, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+export async function listLegacyMobile(recipientType: Recipient, recipientId: number | string, opts: { limit?: number } = {}) {
+  const rows = await query<any>(
+    `SELECT *
+       FROM notifications
+      WHERE recipient_type = :rt
+        AND recipient_id = :rid
+      ORDER BY COALESCE(id, notification_id) DESC
+      LIMIT :limit`,
+    { rt: recipientType, rid: recipientId, limit: opts.limit ?? 100 },
+  );
+  return rows.map((row) => {
+    const data = notificationData(row.data);
+    const receiverRole = row.receiver_role || data.receiver_role || recipientType;
+    const senderRole = row.sender_role || data.sender_role || (recipientType === 'vendor' ? 'customer' : 'vendor');
+    return {
+      id: intValue(row.id ?? row.notification_id),
+      title: row.title ?? '',
+      description: row.description ?? row.body ?? '',
+      customer_id: row.customer_id ?? data.customer_id ?? (recipientType === 'customer' ? recipientId : null),
+      vendor_id: row.vendor_id ?? data.vendor_id ?? (recipientType === 'vendor' ? recipientId : null),
+      service_id: row.service_id ?? data.service_id ?? null,
+      sender_role: senderRole,
+      receiver_role: receiverRole,
+      read_status: intValue(row.read_status ?? (row.is_read ? 1 : 0)),
+      created_at: row.created_at,
+    };
+  });
+}
+
 export async function markRead(notificationId: number | string, recipientType: Recipient, recipientId: number | string) {
   await exec(
     `UPDATE notifications SET is_read = true, read_at = NOW()

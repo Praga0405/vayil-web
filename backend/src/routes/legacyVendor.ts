@@ -2448,25 +2448,53 @@ legacyVendorRouter.post('/vendorPaymentSummary', async (req: AuthRequest, res, n
  * Compute once, splice into each handler's response. */
 async function loadVendorAggregates(vendorId: number | string) {
   const wallet = await vendorSvc.getVendorWallet(vendorId);
-  const payoutRow = await one<any>(
+  const payoutTx = await one<any>(
+    `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM vendor_transactions
+      WHERE vendor_id = :id
+        AND type = 'payout'`,
+    { id: vendorId },
+  ).catch(() => null);
+  const requestPayout = await one<any>(
     `SELECT COALESCE(SUM(amount), 0) AS total
        FROM payout_requests
-      WHERE vendor_id = :id AND status IN ('approved', 'paid', 'completed')`,
+      WHERE vendor_id = :id AND status IN ('approved', 'paid', 'completed', 'requested')`,
     { id: vendorId },
   ).catch(() => null);
   return {
     wallet,
     balance:       Number(wallet?.balance ?? 0),
     total_earning: Number(wallet?.total_earning ?? 0),
-    total_payout:  Number(payoutRow?.total ?? 0),
+    total_payout:  Number(wallet?.total_payout ?? payoutTx?.total ?? requestPayout?.total ?? 0),
+  };
+}
+
+function legacyBankStatus(row: any): number {
+  if (row?.status_int !== undefined && row?.status_int !== null) return Number(row.status_int) || 0;
+  return String(row?.status || '').toLowerCase() === 'active' ? 1
+    : String(row?.status || '').toLowerCase() === 'pending_edit' ? 2
+      : 0;
+}
+
+function legacyBankRow(row: any) {
+  return {
+    bank_id: row.bank_id,
+    vendor_id: row.vendor_id,
+    pan_number: row.pan_number ?? null,
+    account_number: row.account_number ?? null,
+    ifsc_code: row.ifsc_code ?? null,
+    swift_code: row.swift_code ?? null,
+    status: legacyBankStatus(row),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
 legacyVendorRouter.post('/vendorBalance', async (req: AuthRequest, res, next) => {
   try {
     const agg = await loadVendorAggregates(req.user!.id);
-    send(res, {
-      data: agg.wallet,
+    res.status(200).json({
+      success: true,
       balance:       agg.balance,
       total_earning: agg.total_earning,
       total_payout:  agg.total_payout,
@@ -2498,17 +2526,23 @@ legacyVendorRouter.get('/getVendorRevenueChart', async (req: AuthRequest, res, n
 legacyVendorRouter.post('/vendorTransactionHistory', async (req: AuthRequest, res, next) => {
   try {
     const [data, agg] = await Promise.all([
-      payoutSvc.getVendorTransactions(req.user!.id),
+      query<any>(
+        `SELECT id, order_id, type, amount, balance_after, description, created_at
+           FROM vendor_transactions
+          WHERE vendor_id = :id
+          ORDER BY id DESC
+          LIMIT 100`,
+        { id: req.user!.id },
+      ).catch(() => []),
       loadVendorAggregates(req.user!.id),
     ]);
-    // v4.5.35 — mobile bridge: Transaction_History_Model.dart reads
-    // balance, total_earning, total_payout, total at top level.
-    send(res, {
-      data,
+    res.status(200).json({
+      success: true,
       balance:       agg.balance,
       total_earning: agg.total_earning,
       total_payout:  agg.total_payout,
       total:         Array.isArray(data) ? data.length : 0,
+      data,
     });
   } catch (err) { next(err); }
 });
@@ -2516,20 +2550,27 @@ legacyVendorRouter.post('/vendorTransactionHistory', async (req: AuthRequest, re
 legacyVendorRouter.post('/vendorTransHistoryCurMon', async (req: AuthRequest, res, next) => {
   try {
     const [data, agg] = await Promise.all([
-      payoutSvc.getVendorTransactions(req.user!.id, { currentMonth: true }),
+      query<any>(
+        `SELECT id, order_id, type, amount, balance_after, description, created_at
+           FROM vendor_transactions
+          WHERE vendor_id = :id
+            AND YEAR(created_at) = YEAR(NOW())
+            AND MONTH(created_at) = MONTH(NOW())
+          ORDER BY id DESC
+          LIMIT 100`,
+        { id: req.user!.id },
+      ).catch(() => []),
       loadVendorAggregates(req.user!.id),
     ]);
-    // v4.5.35 — mobile bridge: Current_MonthEarning_History_List_Model.dart
-    // adds `month` to the same top-level aggregate set.
     const now = new Date();
-    const monthLabel = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
-    send(res, {
-      data,
+    res.status(200).json({
+      success: true,
       balance:       agg.balance,
       total_earning: agg.total_earning,
       total_payout:  agg.total_payout,
-      month:         monthLabel,
+      month:         now.getMonth() + 1,
       total:         Array.isArray(data) ? data.length : 0,
+      data,
     });
   } catch (err) { next(err); }
 });
@@ -2537,14 +2578,26 @@ legacyVendorRouter.post('/vendorTransHistoryCurMon', async (req: AuthRequest, re
 legacyVendorRouter.post('/vendorPayout', async (req: AuthRequest, res, next) => {
   try {
     const amount = num(req.body?.amount ?? req.body?.payout_amount ?? req.body?.payoutAmount);
-    const out = await payoutSvc.requestPayout(req.user!.id, amount, pickId(req.body, 'bank_id', 'bankId') || undefined, req.body?.note);
-    send(res, { message: 'Payout requested', data: out }, 201);
+    await payoutSvc.requestPayout(req.user!.id, amount, pickId(req.body, 'bank_id', 'bankId') || undefined, req.body?.note);
+    res.status(200).json({ success: true, message: 'Payout successfully' });
   } catch (err) { next(err); }
 });
 
 /* ───── Bank details ───── */
 legacyVendorRouter.post('/AddBankDetails', async (req: AuthRequest, res, next) => {
   try {
+    const accountNumber = req.body?.account_number ?? '';
+    const existing = await one<any>(
+      `SELECT bank_id
+         FROM bank_details
+        WHERE vendor_id = :vendorId
+          AND account_number = :accountNumber
+        LIMIT 1`,
+      { vendorId: req.user!.id, accountNumber },
+    ).catch(() => null);
+    if (existing) {
+      return res.status(200).json({ success: false, message: 'Bank account already exists' });
+    }
     const out = await bankSvc.addBankDetails(req.user!.id, {
       account_holder: req.body?.account_holder || req.body?.holder_name || req.body?.account_name || await defaultBankHolder(req.user!.id),
       account_number: req.body?.account_number,
@@ -2556,7 +2609,11 @@ legacyVendorRouter.post('/AddBankDetails', async (req: AuthRequest, res, next) =
       swift_code: req.body?.swift_code,
       is_primary: req.body?.is_primary === 'true' || req.body?.is_primary === true,
     });
-    send(res, { message: 'Bank added', data: out }, 201);
+    return res.status(200).json({
+      success: true,
+      message: 'Bank details added successfully',
+      bank_id: out?.bank_id,
+    });
   } catch (err) { next(err); }
 });
 
@@ -2570,14 +2627,23 @@ legacyVendorRouter.post('/EditBankDetails', async (req: AuthRequest, res, next) 
       branch: req.body?.branch, upi_id: req.body?.upi_id,
       pan_number: req.body?.pan_number, swift_code: req.body?.swift_code,
     });
-    send(res, { message: 'Bank updated', data: out });
+    void out;
+    return res.status(200).json({ success: true, message: 'Bank details updated successfully' });
   } catch (err) { next(err); }
 });
 
 legacyVendorRouter.post('/GetBankDetails', async (req: AuthRequest, res, next) => {
   try {
-    const data = await bankSvc.listBankDetails(req.user!.id);
-    send(res, { data });
+    const bankId = pickId(req.body, 'bank_id', 'bankId', 'id');
+    const data = await query<any>(
+      `SELECT *
+         FROM bank_details
+        WHERE vendor_id = :vendorId
+          AND (:bankId IS NULL OR bank_id = :bankId)
+        ORDER BY bank_id DESC`,
+      { vendorId: req.user!.id, bankId: bankId || null },
+    ).catch(() => []);
+    return res.status(200).json({ success: true, data: data.map(legacyBankRow) });
   } catch (err) { next(err); }
 });
 
@@ -2591,15 +2657,16 @@ legacyVendorRouter.post('/EditBankDetailsReq', async (req: AuthRequest, res, nex
       branch: req.body?.branch, upi_id: req.body?.upi_id,
       pan_number: req.body?.pan_number, swift_code: req.body?.swift_code,
     });
-    send(res, { message: 'Edit requested', data: out });
+    void out;
+    return res.status(200).json({ success: true, message: 'Bank update request sent to admin' });
   } catch (err) { next(err); }
 });
 
 /* ───── Notifications / Reviews ───── */
 legacyVendorRouter.post('/vendorNotificationList', async (req: AuthRequest, res, next) => {
   try {
-    const data = await notifSvc.list('vendor', req.user!.id);
-    send(res, { data });
+    const data = await notifSvc.listLegacyMobile('vendor', req.user!.id);
+    return res.status(200).json({ success: true, data });
   } catch (err) { next(err); }
 });
 

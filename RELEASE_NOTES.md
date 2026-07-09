@@ -1,5 +1,61 @@
 # Release Notes
 
+## v4.5.85 - Pending mobile API response parity pass (2026-07-09)
+
+### Why
+
+The mobile team shared `Vayil -Pending- July 8th.pdf` with the remaining
+vendor/customer endpoints whose responses still differed from the old
+app.vayil.in mobile API examples.
+
+### RCA
+
+The remaining issues were mostly response-envelope and data-source mismatches:
+
+- Bank endpoints were returning newer web messages such as `Bank added` plus a
+  nested `data` object, while Flutter expects old mobile messages and top-level
+  `bank_id`.
+- Notification list endpoints returned the generic `notifications` table shape
+  (`notification_id`, `recipient_type`, `body`, `is_read`) instead of the
+  mobile columns (`id`, `description`, `customer_id`, `vendor_id`,
+  `service_id`, `sender_role`, `receiver_role`, `read_status`).
+- Vendor transaction history still preferred `escrow_ledger`, but the mobile
+  screens expect `vendor_transactions` rows with `type`, `balance_after`, and
+  `description`.
+- Vendor payout debited wallet/payout request state, but did not mirror the old
+  mobile transaction row or update `vendor_wallet.total_payout`.
+
+### What Changed
+
+| API | Issue Identified | Fix Implemented |
+|---|---|---|
+| `POST /AddBankDetails` | Returned `Bank added` with nested `data`; duplicate account response did not match the PDF. | Added duplicate account guard and restored `{ success: false, message: "Bank account already exists" }` plus success `{ success: true, message: "Bank details added successfully", bank_id }`. |
+| `POST /EditBankDetails` | Returned `Bank updated` and nested bank row. | Restored `{ success: true, message: "Bank details updated successfully" }`. |
+| `POST /EditBankDetailsReq` | Returned `Edit requested` and nested row. | Restored `{ success: true, message: "Bank update request sent to admin" }`. |
+| `POST /GetBankDetails` | Returned raw bank table rows, including enum status fields. | Added mobile bank-row formatter returning `bank_id`, `vendor_id`, `pan_number`, `account_number`, `ifsc_code`, `swift_code`, numeric `status`, `created_at`, and `updated_at`. Supports optional `bank_id` filtering. |
+| `POST /vendorNotificationList` | Returned generic notification rows. | Added a legacy mobile notification formatter and now returns `id`, `title`, `description`, `customer_id`, `vendor_id`, `service_id`, `sender_role`, `receiver_role`, `read_status`, and `created_at`. |
+| `POST /customer/customerNotificationList` | Same generic notification-row mismatch as vendor. | Uses the same legacy mobile notification formatter for customer notifications. |
+| `POST /vendorTransactionHistory` | Used `escrow_ledger` first, producing `CREDIT` rows and escrow descriptions instead of the old transaction history. | Restored direct `vendor_transactions` reads ordered by `id DESC`, with top-level `balance`, `total_earning`, `total_payout`, `total`, and `data`. |
+| `POST /vendorTransHistoryCurMon` | Returned `month` as `MM-YYYY` and used `escrow_ledger`. | Restored `vendor_transactions` current-month query and numeric month value (`1`-`12`) matching the PDF. |
+| `POST /vendorBalance` | Added generic `message`/`data` wrapper. | Now returns only the legacy top-level balance fields: `success`, `balance`, `total_earning`, and `total_payout`. |
+| `POST /vendorPayout` | Returned `Payout requested` with nested payout request data, and payout did not write the old transaction row. | Response restored to `{ success: true, message: "Payout successfully" }`; payout now inserts a `vendor_transactions` row with `type='payout'`, debits wallet, and increments `vendor_wallet.total_payout`. |
+
+### Already Covered From v4.5.84
+
+The July 8 PDF also repeats these endpoints, which were already restored in the
+previous release:
+
+- `POST /vendorPaymentSummary`
+- `POST /customer/getPaymentDetails`
+- `POST /customer/NeedPaymentSummary`
+- `GET/POST /customer/enquiryList`
+- `POST /customer/addReview`
+
+### Validation
+
+- Backend TypeScript build passed:
+  - `npm run build --workspace backend`
+
 ## v4.5.84 - Customer/vendor API issue PDF parity pass (2026-07-07)
 
 ### Why

@@ -2191,8 +2191,8 @@ legacyCustomerRouter.post('/addReview', async (req: AuthRequest, res, next) => {
 /* ───── Notifications ───── */
 legacyCustomerRouter.post('/customerNotificationList', async (req: AuthRequest, res, next) => {
   try {
-    const data = await notifSvc.list('customer', req.user!.id);
-    send(res, { data });
+    const data = await notifSvc.listLegacyMobile('customer', req.user!.id);
+    return res.status(200).json({ success: true, data });
   } catch (err) { next(err); }
 });
 

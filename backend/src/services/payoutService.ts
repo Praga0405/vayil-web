@@ -20,11 +20,22 @@ export async function requestPayout(vendorId: number | string, amount: number, b
   if (!bank) throw new ApiError(400, 'No bank account on file');
 
   const payoutId = await transaction(async (conn) => {
+    const currentBalance = Number(wallet.balance ?? 0);
+    const nextBalance = Math.max(0, currentBalance - amount);
     // Hold the funds: debit wallet immediately so the same balance can't
     // be requested twice. If ops rejects, we credit it back.
     await conn.query(
-      `UPDATE vendor_wallet SET balance = balance - ? WHERE vendor_id = ?`,
-      [amount, vendorId],
+      `UPDATE vendor_wallet
+          SET balance = balance - ?,
+              total_payout = COALESCE(total_payout, 0) + ?
+        WHERE vendor_id = ?`,
+      [amount, amount, vendorId],
+    );
+    await conn.query(
+      `INSERT INTO vendor_transactions
+         (vendor_id, order_id, type, amount, balance_after, description, created_at)
+       VALUES (?, NULL, 'payout', ?, ?, 'Vendor payout', NOW())`,
+      [vendorId, amount, nextBalance],
     );
     const [ins]: any = await conn.query(
       `INSERT INTO payout_requests (vendor_id, bank_id, amount, status, note)
