@@ -8,6 +8,7 @@ import {
   WebSiteJsonLd,
   LocalBusinessJsonLd,
 } from '@/lib/seo/jsonld'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 /** v4.5.22 — Self-hosted Inter via next/font/google.
  *  Eliminates ~580 ms of render-blocking fetch to fonts.googleapis.com
@@ -234,6 +235,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             success: { iconTheme: { primary: '#E8943A', secondary: '#fff' } },
           }}
         />
+        <SpeedInsights />
       </body>
     </html>
   )
