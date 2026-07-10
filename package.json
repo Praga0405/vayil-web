@@ -13,6 +13,7 @@
     "vercel-build": "cd backend && (npx tsx scripts/migrate.ts || true) && (npx tsx scripts/seed-prod-settings.ts || true) && cd .. && next build"
   },
   "dependencies": {
+    "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.7.7",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
