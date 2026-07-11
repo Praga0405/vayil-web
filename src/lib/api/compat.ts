@@ -49,22 +49,42 @@ export function isActiveMaster(row: AnyRecord): boolean {
   return row.is_active !== 0 && row.is_deleted !== 1 && row.status !== 0 && row.status !== false
 }
 
+function urlList(value: any): string[] {
+  if (Array.isArray(value)) {
+    return value.flat(Infinity)
+      .map((item: any) => typeof item === 'string' ? item : item?.url ?? item?.location ?? item?.file_url)
+      .filter(Boolean)
+      .map(String)
+  }
+  const text = String(value ?? '').trim()
+  if (!text) return []
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) return urlList(parsed)
+  } catch { /* CSV fallback */ }
+  return text.split(',').map(item => item.trim()).filter(Boolean)
+}
+
 export function serviceImageUrls(service: AnyRecord): string[] {
-  const raw = service.images ?? service.image_urls ?? service.photos
-  const list = Array.isArray(raw) ? raw : []
-  const urls = list
-    .map((item: any) => typeof item === 'string' ? item : item?.url ?? item?.location ?? item?.file_url)
-    .filter(Boolean)
-  const primary = service.thumbnail ?? service.service_image ?? service.service_image_url ?? service.cover_image
-  return primary ? [String(primary), ...urls.filter(url => url !== primary)] : urls
+  const urls = [
+    ...urlList(service.service_image),
+    ...urlList(service.images),
+    ...urlList(service.image_urls),
+    ...urlList(service.photos),
+    ...urlList(service.thumbnail),
+    ...urlList(service.service_image_url),
+    ...urlList(service.cover_image),
+  ]
+  return uniqueBy(urls, url => String(url))
 }
 
 export function serviceImagePayload(urls: string[]): Record<string, unknown> {
-  const first = urls.find(Boolean)
+  const cleaned = uniqueBy(urls.filter(Boolean).map(String), url => url)
+  const first = cleaned[0]
   return {
-    images: urls,
+    images: cleaned,
     thumbnail: first,
-    service_image: first,
+    service_image: cleaned.join(','),
     service_image_url: first,
   }
 }
