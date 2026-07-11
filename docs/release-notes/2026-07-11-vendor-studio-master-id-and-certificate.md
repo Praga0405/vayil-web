@@ -85,3 +85,4 @@ Notes:
 - `e8eda62` - Business Profile Step 1 master ID/profile payload fix
 - `0c1755f` - Legacy service image payload preservation
 - `2aab9e8` - Edit Service certificate update support
+- `b842188` - Focused release-note document for this fix set
