@@ -86,3 +86,34 @@ Notes:
 - `0c1755f` - Legacy service image payload preservation
 - `2aab9e8` - Edit Service certificate update support
 - `b842188` - Focused release-note document for this fix set
+
+
+## VendorController onboarding contract alignment
+
+The mobile team reconfirmed that the Vercel routes must follow the existing
+`VendorController.ts` request contract exactly for these endpoints:
+
+- `POST /serviceTagStep`: `service_tag` remains a comma-separated string such
+  as `"1,2,3"`.
+- `POST /step2`: persists `service_category`, `sub_service`, numeric
+  `years_of_experience`, `certifications`, and `short_bio`.
+- `POST /step3`: persists `area_of_service`, `working_hours_from`,
+  `working_hours_to`, comma-separated `languages`, normalized
+  `willing_to_travel`, and comma-separated `tools_available`.
+- `POST /step4`: maps `id_type`, `id_number`, `id_image_url`, and `selfie_url`
+  to both the legacy proof columns and the KYC compatibility columns before
+  placing the vendor in the existing approval queue.
+
+Previously, steps 2-4 all passed through one broad partial-profile mapper. It
+accepted the fields, but it also allowed unrelated onboarding fields to be
+updated through the wrong step endpoint. The routes now use endpoint-specific
+controller payload maps. Canonical mobile field names have priority, while the
+already-used web aliases remain fallback inputs so existing website onboarding
+does not regress.
+
+The response contract is unchanged: HTTP 200 returns `success`, the existing
+step message, and `data` as the legacy vendor-row array expected by the mobile
+models. Demo OTP handling and vendor approval/authentication behavior were not
+changed.
+
+Published backend commit: `d029b98`.
