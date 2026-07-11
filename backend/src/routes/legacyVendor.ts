@@ -1366,9 +1366,49 @@ async function handleStep(step: number, req: AuthRequest, res: any, next: any) {
   } catch (err) { next(err); }
 }
 legacyVendorRouter.post('/step1', (req: AuthRequest, res, next) => handleStep(1, req, res, next));
-legacyVendorRouter.post('/step2', (req: AuthRequest, res, next) => handleStep(2, req, res, next));
-legacyVendorRouter.post('/step3', (req: AuthRequest, res, next) => handleStep(3, req, res, next));
-legacyVendorRouter.post('/step4', (req: AuthRequest, res, next) => handleStep(4, req, res, next));
+
+async function saveControllerStep(
+  step: number,
+  req: AuthRequest,
+  res: any,
+  next: any,
+  profile: vendorSvc.VendorProfileUpdate,
+) {
+  try {
+    await vendorSvc.onboardingStep(req.user!.id, step, profile);
+    send(res, { message: `Step ${step} saved`, data: await legacyVendorRowsById(req.user!.id) });
+  } catch (err) { next(err); }
+}
+
+legacyVendorRouter.post('/step2', (req: AuthRequest, res, next) => saveControllerStep(2, req, res, next, {
+  service_category: pickNullable(req.body, 'service_category', 'serviceCategory', 'category_id', 'categoryId'),
+  sub_service: pickNullable(req.body, 'sub_service', 'subService', 'service_subcategory', 'subcategory_id', 'subcategoryId'),
+  years_of_experience: hasBodyKey(req.body, 'years_of_experience', 'experience_years')
+    ? num(req.body?.years_of_experience ?? req.body?.experience_years)
+    : null,
+  certifications: pickCsv(req.body, 'certifications', 'certification_urls', 'certificationUrls'),
+  short_bio: pickNullable(req.body, 'short_bio', 'shortBio', 'about'),
+}));
+
+legacyVendorRouter.post('/step3', (req: AuthRequest, res, next) => saveControllerStep(3, req, res, next, {
+  area_of_service: pickCsv(req.body, 'area_of_service', 'areaOfService', 'service_area'),
+  working_hours_from: pickNullable(req.body, 'working_hours_from', 'workingHoursFrom', 'start_time'),
+  working_hours_to: pickNullable(req.body, 'working_hours_to', 'workingHoursTo', 'end_time'),
+  languages: pickCsv(req.body, 'languages'),
+  willing_to_travel: mobileFlag(req.body?.willing_to_travel ?? req.body?.willingToTravel),
+  tools_available: pickCsv(req.body, 'tools_available', 'toolsAvailable'),
+}));
+
+legacyVendorRouter.post('/step4', (req: AuthRequest, res, next) => saveControllerStep(4, req, res, next, {
+  proof_type: pickNullable(req.body, 'id_type', 'proof_type', 'kyc_id_type'),
+  proof_number: pickNullable(req.body, 'id_number', 'proof_number', 'kyc_id_number'),
+  kyc_document_url: pickNullable(req.body, 'id_image_url', 'kyc_document_url', 'kyc_id_image', 'document_url', 'documentUrl'),
+  kyc_id_type: pickNullable(req.body, 'id_type', 'kyc_id_type', 'proof_type'),
+  kyc_id_number: pickNullable(req.body, 'id_number', 'kyc_id_number', 'proof_number'),
+  kyc_id_image: pickNullable(req.body, 'id_image_url', 'kyc_id_image', 'kyc_document_url', 'document_url', 'documentUrl'),
+  kyc_selfie: pickNullable(req.body, 'selfie_url', 'kyc_selfie', 'selfieUrl', 'selfie'),
+  kyc_status: 'pending',
+}));
 
 legacyVendorRouter.post('/serviceTagStep', async (req: AuthRequest, res, next) => {
   try {
