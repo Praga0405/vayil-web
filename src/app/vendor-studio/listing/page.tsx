@@ -3,8 +3,8 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import axios from 'axios'
 import { useUserAuth } from '@/stores/auth'
-import { vendorApi, commonApi } from '@/lib/api/client'
-import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge } from '@/components/ui'
+import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge, FileUpload } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, StatGrid, FieldGrid } from '@/components/shared/PageLayout'
 import { Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight, Star } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
@@ -34,7 +34,18 @@ export default function VendorListingPage() {
   const [tab, setTab] = useState<Tab>('profile')
 
   /* ── Profile state ── */
-  const [form, setForm] = useState({ company_name: '', description: '', email_id: '', state_id: '', city_id: '' })
+  const [form, setForm] = useState({
+    company_name: '',
+    full_name: '',
+    description: '',
+    email_id: '',
+    state_id: '',
+    city_id: '',
+    pincode: '',
+    address: '',
+    profile_photo_url: '',
+    profile_photo_file: [] as File[],
+  })
   const [states, setStates] = useState<any[]>([])
   const [cities, setCities] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
@@ -67,10 +78,15 @@ export default function VendorListingPage() {
         const p = pr.data?.data || pr.data?.result || {}
         setForm({
           company_name: p.company_name || p.name || user?.name || '',
+          full_name:    p.full_name || p.owner_name || p.name || user?.name || '',
           description:  p.description || '',
           email_id:     p.email_id || p.email || user?.email || '',
           state_id:     optionValue(p.state, p.state_id),
           city_id:      optionValue(p.city, p.city_id),
+          pincode:      p.pincode || '',
+          address:      p.address || '',
+          profile_photo_url: p.profile_photo_url || p.profile_photo || p.profile_image || user?.profile_image || '',
+          profile_photo_file: [],
         })
         const s = asArray(sr.data?.states_list, sr.data?.data, sr.data?.result)
         setStates(Array.isArray(s) ? s : [])
@@ -116,12 +132,28 @@ export default function VendorListingPage() {
   const save = async () => {
     setSaving(true)
     try {
+      let profilePhotoUrl = form.profile_photo_url
+      if (form.profile_photo_file.length > 0) {
+        const fd = new FormData()
+        form.profile_photo_file.slice(0, 1).forEach(file => fd.append('files', file))
+        const uploaded = await vendorApi.uploadFiles(fd)
+        profilePhotoUrl = normalizeUploadedUrls(uploaded)[0] || profilePhotoUrl
+      }
       await vendorApi.saveStep1({
-        ...form,
+        company_name: form.company_name,
+        full_name: form.full_name,
+        email: form.email_id,
+        email_id: form.email_id,
+        description: form.description,
+        about: form.description,
+        address: form.address,
+        pincode: form.pincode,
+        profile_photo_url: profilePhotoUrl,
         state: form.state_id,
         city: form.city_id,
       })
-      if (user && token) setAuth({ ...user, name: form.company_name }, token)
+      setForm(f => ({ ...f, profile_photo_url: profilePhotoUrl, profile_photo_file: [] }))
+      if (user && token) setAuth({ ...user, name: form.company_name, profile_image: profilePhotoUrl }, token)
       toast.success('Profile updated!')
     } catch { toast.error('Failed to update') }
     finally { setSaving(false) }
@@ -166,8 +198,8 @@ export default function VendorListingPage() {
             <PageSection>
               <div className="flex flex-col items-center text-center">
                 <div className="relative">
-                  <Avatar name={user?.name} src={user?.profile_image} size={24} />
-                  <button className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-orange ring-4 ring-white flex items-center justify-center hover:bg-orange-600 transition">
+                  <Avatar name={user?.name} src={form.profile_photo_url || user?.profile_image} size={24} />
+                  <button type="button" className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-orange ring-4 ring-white flex items-center justify-center hover:bg-orange-600 transition">
                     <Camera className="w-4 h-4 text-white" />
                   </button>
                 </div>
@@ -205,6 +237,7 @@ export default function VendorListingPage() {
             >
               <div className="space-y-4">
                 <Input label="Company Name" value={form.company_name} onChange={set('company_name')} placeholder="e.g. Voltline Electricals" />
+                <Input label="Owner / Full Name" value={form.full_name} onChange={set('full_name')} placeholder="e.g. Blazingcoders" />
                 <Textarea label="Description" rows={4} value={form.description} onChange={set('description')}
                   placeholder="A short pitch — your specialities, years of experience, and what sets you apart." />
                 <FieldGrid columns={2}>
@@ -214,7 +247,17 @@ export default function VendorListingPage() {
                     options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
                   <Select label="City" value={form.city_id} onChange={set('city_id')}
                     options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
+                  <Input label="Pincode" value={form.pincode} onChange={set('pincode')} placeholder="e.g. 641301" />
                 </FieldGrid>
+                <Textarea label="Address" rows={3} value={form.address} onChange={set('address')}
+                  placeholder="Business address shown to customers." />
+                <FileUpload label="Profile photo" accept="image/*"
+                  onChange={files => setForm(f => ({ ...f, profile_photo_file: Array.from(files).slice(0, 1) }))} />
+                {form.profile_photo_file.length > 0 && (
+                  <p className="text-xs text-green-600 font-semibold">
+                    1 profile photo ready to upload
+                  </p>
+                )}
               </div>
             </PageSection>
           }
