@@ -1,5 +1,133 @@
 # Release Notes
 
+## v4.5.89 - VendorController onboarding contract parity (2026-07-11)
+
+### Why
+
+The mobile vendor onboarding flow must send and receive the same field names,
+value formats, persistence behavior, and response envelope as the established
+`VendorController.ts` implementation. The Vercel compatibility routes accepted
+many aliases through one broad profile mapper, but the implementation did not
+make each onboarding step's ownership boundary explicit. This created a risk
+that unrelated profile fields could be written through the wrong endpoint.
+
+### APIs Covered
+
+- `POST /serviceTagStep`
+- `POST /step2`
+- `POST /step3`
+- `POST /step4`
+
+### What Changed
+
+- Kept `service_tag` in the controller's comma-separated string format, for
+  example `"1,2,3"`.
+- Added an endpoint-specific Step 2 mapping for:
+  `service_category`, `sub_service`, `years_of_experience`,
+  `certifications`, and `short_bio`.
+- Added an endpoint-specific Step 3 mapping for:
+  `area_of_service`, `working_hours_from`, `working_hours_to`,
+  `languages`, `willing_to_travel`, and `tools_available`.
+- Added an endpoint-specific Step 4 mapping for:
+  `id_type`, `id_number`, `id_image_url`, and `selfie_url`.
+- Step 4 writes the identity values to both the legacy proof columns and the
+  mobile KYC compatibility columns before using the existing vendor review
+  queue.
+- Canonical mobile field names take priority. Existing web aliases remain
+  accepted only as compatibility fallbacks so current website onboarding
+  screens do not regress.
+- Each step now updates only the profile fields owned by that step.
+
+### Value Formats
+
+| Field group | Stored/request format |
+|---|---|
+| Service tags, languages, tools | Comma-separated strings |
+| Service category and sub-service | Existing controller ID string format |
+| Years of experience | Numeric database value |
+| Willing to travel | `"Yes"`/truthy mobile input normalized to TINYINT `1`; negative values normalize to `0` |
+| Certifications and KYC images | URL strings |
+| Working hours | Controller strings such as `"9 AM"` and `"5 AM"` |
+
+### Response and Compatibility Impact
+
+- The existing response envelope remains unchanged:
+  `{ success, message, data }`.
+- `data` remains the legacy vendor-row array expected by Flutter models.
+- No mobile response fields were renamed or removed.
+- Demo OTP behavior was not changed.
+- Vendor authentication and approval behavior were not changed.
+- The final KYC step continues to enter the existing admin approval process.
+
+### Verification
+
+- Backend TypeScript build passed with `npm run build --workspace backend`.
+- Published implementation commit: `d029b98`.
+- Detailed release-note commit: `8240960`.
+
+## v4.5.88 - Vendor Studio master IDs and certificate compatibility (2026-07-11)
+
+### Why
+
+Vendor Studio Business Profile was not consistently loading City options or
+persisting the selected State and City master IDs. The Customer app depends on
+those IDs to match vendors and service listings by location. Vendor service
+forms also lacked complete Certificate/License support even though the mobile
+service contract exposes `certificate_url`.
+
+### Root Cause
+
+- Business Profile parsed only a narrow state/city response shape.
+- The web form used UI fields named `state_id` and `city_id`, while the
+  established `/step1` contract persists master IDs through `state` and
+  `city`.
+- Step 1 did not submit all legacy fields required by the existing controller:
+  `full_name`, `pincode`, `address`, and `profile_photo_url`.
+- Add/Edit Service category, subcategory, and tag readers did not normalize
+  every currently deployed response envelope.
+- Edit Service had no Certificate/License replacement control and therefore
+  could not reliably update `certificate_url`.
+
+### What Changed
+
+- Business Profile now reads saved state/city values from both canonical and
+  compatibility fields and supports `states_list`, `city`, `data`, and
+  `result` response envelopes.
+- Selecting a state reloads cities using the selected State Master ID.
+- Business Profile saves the established Step 1 fields:
+  `company_name`, `full_name`, `state`, `city`, `pincode`, `address`,
+  and `profile_photo_url`.
+- `state` and `city` are submitted as master-table IDs, not display names.
+- Added profile-photo upload and upload-response URL normalization.
+- Add/Edit Service now normalize category, subcategory, and tag response
+  envelopes.
+- Add/Edit Service support Certificate/License upload and persist the result
+  through `certificate_url`.
+- Edit Service preserves the existing certificate until a replacement is
+  uploaded and continues to use `updateServiceListing` to avoid duplicates.
+- Service edit sends existing legacy aliases for category, subcategory,
+  pricing type, and unit name while preserving the current fields.
+
+### Functional Impact
+
+- Saved State and City selections can be hydrated again in Vendor Studio.
+- Location IDs required by Customer app service discovery are persisted in the
+  vendor profile.
+- Services created or edited on the website retain mobile-compatible category,
+  image, and certificate fields.
+- Vendors can add or replace a Certificate/License without recreating a
+  service listing.
+- No existing mobile API field was removed or renamed.
+
+### Verification and Commits
+
+- Backend build passed.
+- Next.js production build passed.
+- Business Profile implementation: `e8eda62`.
+- Service image compatibility helper: `0c1755f`.
+- Edit Service certificate support: `2aab9e8`.
+- Focused release-note creation/update: `b842188`, `8814113`.
+
 ## v4.5.87 - Vendor flow stabilization without API shape changes (2026-07-09)
 
 ### Why
