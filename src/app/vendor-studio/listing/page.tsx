@@ -4,8 +4,6 @@ import Link from 'next/link'
 import axios from 'axios'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
-import { apiArray, optionId, optionLabel, serviceImageUrls, uniqueMasterRows } from '@/lib/api/compat'
-import { loadDraft, saveDraft, clearDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, StatGrid, FieldGrid } from '@/components/shared/PageLayout'
 import { Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight, Star } from 'lucide-react'
@@ -13,7 +11,18 @@ import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 type Tab = 'profile' | 'services' | 'reviews'
-const PROFILE_DRAFT_KEY = 'vayil:draft:vendor-studio:listing-profile'
+
+const asArray = (...values: any[]) => {
+  for (const value of values) {
+    if (Array.isArray(value)) return value
+  }
+  return []
+}
+
+const optionValue = (...values: any[]) => {
+  const value = values.find(v => v !== undefined && v !== null && v !== '')
+  return value === undefined ? '' : String(value)
+}
 
 const serviceIsActive = (service: any) => {
   const value = service?.is_active ?? service?.status
@@ -55,28 +64,25 @@ export default function VendorListingPage() {
     if (!token) return
     Promise.all([vendorApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
-        const p = pr.data?.vendor || pr.data?.data || pr.data?.result || {}
-        const hydratedForm = {
-          company_name: p.company_name || '',
+        const p = pr.data?.data || pr.data?.result || {}
+        setForm({
+          company_name: p.company_name || p.name || user?.name || '',
           description:  p.description || '',
           email_id:     p.email_id || p.email || user?.email || '',
-          state_id:     p.state_id?.toString() || '',
-          city_id:      p.city_id?.toString() || '',
-        }
-        const draft = loadDraft<typeof hydratedForm>(PROFILE_DRAFT_KEY)
-        setForm(draft ? { ...hydratedForm, ...draft } : hydratedForm)
-        setStates(uniqueMasterRows(apiArray(sr, ['states_list', 'states'])))
-        if (p.state_id) {
-          commonApi.getCity(p.state_id).then(r => {
-            setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
+          state_id:     optionValue(p.state, p.state_id),
+          city_id:      optionValue(p.city, p.city_id),
+        })
+        const s = asArray(sr.data?.states_list, sr.data?.data, sr.data?.result)
+        setStates(Array.isArray(s) ? s : [])
+        const stateId = optionValue(p.state, p.state_id)
+        if (stateId) {
+          commonApi.getCity(Number(stateId)).then(r => {
+            const c = asArray(r.data?.city, r.data?.data, r.data?.result)
+            setCities(c)
           })
         }
       })
   }, [token])
-
-  useEffect(() => {
-    if (tab === 'profile') saveDraft(PROFILE_DRAFT_KEY, form)
-  }, [form, tab])
 
   const loadServices = () => {
     setSvcLoading(true)
@@ -101,7 +107,8 @@ export default function VendorListingPage() {
     if (k === 'state_id') {
       setForm(f => ({ ...f, state_id: e.target.value, city_id: '' }))
       commonApi.getCity(Number(e.target.value)).then(r => {
-        setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
+        const c = asArray(r.data?.city, r.data?.data, r.data?.result)
+        setCities(c)
       })
     }
   }
@@ -109,9 +116,12 @@ export default function VendorListingPage() {
   const save = async () => {
     setSaving(true)
     try {
-      await vendorApi.saveStep1(form)
-      if (user && token) setAuth({ ...user, email: form.email_id || user.email }, token)
-      clearDraft(PROFILE_DRAFT_KEY)
+      await vendorApi.saveStep1({
+        ...form,
+        state: form.state_id,
+        city: form.city_id,
+      })
+      if (user && token) setAuth({ ...user, name: form.company_name }, token)
       toast.success('Profile updated!')
     } catch { toast.error('Failed to update') }
     finally { setSaving(false) }
@@ -123,9 +133,7 @@ export default function VendorListingPage() {
       await vendorApi.updateServiceStatus({ service_id: serviceId, status: next })
       setServices(prev => prev.map(s => (s.id || s.service_id || s.vendor_service_id) === serviceId ? { ...s, status: next } : s))
       toast.success(`Service ${next}`)
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || err?.response?.data?.error || 'Failed to update status')
-    }
+    } catch { toast.error('Failed to update status') }
   }
 
   const activeCount   = services.filter(serviceIsActive).length
@@ -203,9 +211,9 @@ export default function VendorListingPage() {
                   <Input label="Email" type="email" value={form.email_id} onChange={set('email_id')} placeholder="you@company.com" />
                   <Input label="Mobile" value={`+91 ${user?.mobile || ''}`} disabled />
                   <Select label="State" value={form.state_id} onChange={set('state_id')}
-                    options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
+                    options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
                   <Select label="City" value={form.city_id} onChange={set('city_id')}
-                    options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
+                    options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
                 </FieldGrid>
               </div>
             </PageSection>
@@ -253,8 +261,8 @@ export default function VendorListingPage() {
                     <div key={sid} className="border border-gray-100 rounded-2xl p-4 hover:border-orange/30 hover:shadow-sm transition flex flex-col">
                       <div className="flex items-start gap-3">
                         <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden shrink-0">
-                          {serviceImageUrls(s)[0]
-                            ? <img src={serviceImageUrls(s)[0]} alt={s.title} className="w-full h-full object-cover" />
+                          {s.images?.[0]
+                            ? <img src={s.images[0]} alt={s.title} className="w-full h-full object-cover" />
                             : <div className="w-full h-full flex items-center justify-center"><Wrench className="w-5 h-5 text-gray-400" /></div>}
                         </div>
                         <div className="flex-1 min-w-0">
