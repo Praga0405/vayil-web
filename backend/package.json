@@ -17,7 +17,8 @@
     "smoke:web": "tsx scripts/smoke-web.ts",
     "smoke:mobile": "tsx scripts/smoke-mobile.ts",
     "smoke:admin": "tsx scripts/smoke-admin.ts",
-    "smoke:bridges": "tsx scripts/smoke-bridges.ts"
+    "smoke:bridges": "tsx scripts/smoke-bridges.ts",
+    "check:legacy-payments": "tsx scripts/check-legacy-payment-totals.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1053.0",
