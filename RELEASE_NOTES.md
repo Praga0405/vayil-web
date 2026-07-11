@@ -1,5 +1,109 @@
 # Release Notes
 
+## v4.5.90 - Mobile pending-list payment and enquiry parity (2026-07-11)
+
+### Why
+
+The mobile team supplied the 28-page VAYIL Pending Bg List-2.pdf audit.
+The document combines expected Node.js controller implementations, reported
+404 behavior, enquiry status errors, and incorrect customer/vendor payment
+summary totals. Every listed endpoint was compared with the current Vercel
+backend implementation before changing code.
+
+### Endpoint Audit Coverage
+
+| Endpoint | Audit result | Action |
+|---|---|---|
+| POST /GetBankDetails | Already implemented at both bare and /vendor paths. Uses authenticated vendor ownership, optional bank_id, legacy numeric status mapping, and the expected no data found response. | No response-contract change. |
+| POST /EditBankDetailsReq | Already implemented. Missing IDs return HTTP 200 with success:false; accepted requests map pending_edit to mobile status 2. | No response-contract change. |
+| POST /AcceptEnquiredStatusUpdate | Already implemented at both bare and /vendor paths. Supports accept_enquires=1/0 and returns the expected activation/inactivation message. | Deployment must include the current route table; no new payload fields. |
+| POST /customer/finalStep | Already updates only the existing step-4 row and does not insert an extra step. | Retained the existing 1:1 response. |
+| GET/POST /customer/enquiryList | A pending/unknown final-step value could be classified as Completed because every non-rejected value was treated as accepted. | Fixed status precedence and explicit accepted/rejected value handling. |
+| POST /customer/placeOrder | Legacy failed payments could continue into order/payment persistence instead of returning the old controller response immediately. | Added the exact HTTP 200 Payment failed short-circuit before writes. |
+| POST /customer/getPaymentDetails | TotalPlanAmount returned only the quotation/base amount; platform fee and SGST+CGST were omitted. TotalAmount inherited the same undercount. | Added shared gross-plan calculation. |
+| POST /vendorPaymentSummary | Duplicated the same undercount as the customer endpoint. | Uses the same shared calculation to prevent customer/vendor drift. |
+
+### Root Causes
+
+- Customer and vendor payment summary handlers independently returned
+  quotation.final_amount plus material m_final_amount. They queried neither
+  the current plan sum nor the configured platform/tax percentages.
+- The intended platform and tax calculations shown in the old controller
+  existed only as unused intermediate values; they were never included in the
+  returned TotalPlanAmount.
+- Customer enquiry derivation treated any final step except explicit rejection
+  as Completed. A pending value such as 0 therefore became a false completion.
+- Legacy placeOrder handled failed payment status after entering the newer
+  order flow, unlike the old controller's immediate success-envelope return.
+
+### Calculation Implemented
+
+Both payment-summary endpoints now use one shared calculation:
+
+1. Plan base = SUM(order_plan.amount); when no plan rows exist, use the
+   quotation final amount as the compatibility fallback.
+2. Platform cost = plan base x settings.platform_fee / 100.
+3. GST percentage = SGST + CGST percentages parsed from settings.tax_option.
+4. GST cost = (plan base + platform cost) x GST percentage / 100.
+5. TotalPlanAmount = plan base + platform cost + GST cost.
+6. TotalAmount = TotalPlanAmount + SUM(order_plan_materials.m_final_amount).
+
+For a plan base of 10000.00, platform fee of 5%, SGST+CGST of 18%, and gross
+materials of 3717.00, TotalPlanAmount is 12390.00 and TotalAmount is 16107.00.
+
+### Response Compatibility
+
+- Existing response keys remain unchanged: success, TotalAmount,
+  TotalPaidAmount, TotalMaterialAmount, TotalPlanAmount, servicePayment,
+  materialPayment, and invoice_url.
+- All four total fields remain two-decimal strings for Flutter parsing.
+- Bank API request and response fields were not renamed.
+- finalStep still returns HTTP 200 business responses and never creates a
+  missing step.
+- Enquiry statuses remain numeric with the established display names:
+  Pending, Rejected, Ongoing, Quote Received, and Completed.
+- No authentication, demo OTP, vendor approval, Razorpay credential, invoice
+  URL, wallet-credit, or escrow response contract was changed.
+
+### Files Changed
+
+- backend/src/services/legacyPaymentTotals.ts
+- backend/src/routes/legacyCustomer.ts
+- backend/src/routes/legacyVendor.ts
+- backend/scripts/check-legacy-payment-totals.ts
+- backend/package.json
+- RELEASE_NOTES.md
+
+### Verification
+
+- Rendered and visually reviewed representative pages from all sections of the
+  28-page PDF; extracted text was checked across all pages.
+- npm run build --workspace backend passed.
+- The compiled regression script passed through
+  node backend/dist/scripts/check-legacy-payment-totals.js.
+- npm run build passed for the full Next.js production build.
+- The direct tsx regression command could not open its temporary IPC socket in
+  the restricted Codex sandbox; compiling and executing the generated
+  JavaScript verified the same assertions without changing application logic.
+
+### Database and Deployment Notes
+
+- No database migration or production data mutation is required.
+- A read-only TiDB health check could not connect because this checkout does
+  not contain DB_HOST, DB_USER, DB_PASSWORD, or DB_NAME.
+- The reported AcceptEnquiredStatusUpdate 404 is consistent with an older
+  production deployment because the route exists in the current bare-mobile
+  and /vendor route tables. Production must deploy this release before the
+  mobile team retests it.
+
+### Commits
+
+- a7102fa - shared platform/GST/plan total calculator
+- 008d828 - deterministic calculation regression checks
+- 24d1488 - backend regression command
+- ad7bcb3 - customer payment, enquiry-status, and failed-payment parity
+- 0039966 - vendor payment-summary parity
+
 ## v4.5.89 - VendorController onboarding contract parity (2026-07-11)
 
 ### Why
