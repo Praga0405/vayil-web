@@ -28,6 +28,7 @@ import * as reviewSvc from '../services/reviewService';
 import * as bankSvc from '../services/bankService';
 import * as payoutSvc from '../services/payoutService';
 import { legacyStatusName, legacyStatusRows } from '../services/statusService';
+import { calculateLegacyPaymentTotals } from '../services/legacyPaymentTotals';
 
 export const legacyVendorRouter = Router();
 
@@ -626,15 +627,33 @@ async function legacyNodePaymentSummary(orderId: number | string) {
     { orderId },
   ).catch(() => null);
 
-  const finalQuotationAmount = moneyNumber(quote?.final_amount);
-  const totalMaterialAmount = moneyNumber(materialData?.TotalMaterialAmount);
+  const [planData, settings] = await Promise.all([
+    one<any>(
+      `SELECT COALESCE(SUM(amount), 0) AS TotalPlanAmount
+         FROM order_plan
+        WHERE order_id = :orderId`,
+      { orderId },
+    ).catch(() => null),
+    one<any>(
+      `SELECT platform_fee, tax_option
+         FROM settings
+        LIMIT 1`,
+    ).catch(() => null),
+  ]);
+  const totals = calculateLegacyPaymentTotals({
+    planBaseAmount: planData?.TotalPlanAmount,
+    quotationAmount: quote?.final_amount,
+    materialFinalAmount: materialData?.TotalMaterialAmount,
+    platformFeePercentage: settings?.platform_fee,
+    taxOption: settings?.tax_option,
+  });
   const invoiceBase = process.env.INVOICE_URL_BASE || 'https://app.vayil.in/admin/invoice/';
   return {
     success: true,
-    TotalAmount: (finalQuotationAmount + totalMaterialAmount).toFixed(2),
+    TotalAmount: totals.totalAmount.toFixed(2),
     TotalPaidAmount: moneyNumber(paidData?.total_paid_amount).toFixed(2),
-    TotalMaterialAmount: totalMaterialAmount.toFixed(2),
-    TotalPlanAmount: finalQuotationAmount.toFixed(2),
+    TotalMaterialAmount: totals.totalMaterialAmount.toFixed(2),
+    TotalPlanAmount: totals.totalPlanAmount.toFixed(2),
     servicePayment,
     materialPayment,
     invoice_url: invoiceBase,
