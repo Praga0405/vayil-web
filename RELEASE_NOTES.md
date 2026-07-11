@@ -1,5 +1,59 @@
 # Release Notes
 
+## v4.5.91 - Mobile-team MySQL cutover readiness (2026-07-11)
+
+### Why
+
+The Vercel deployment was repointed at the mobile team's MySQL-compatible
+database and failed during the migration step on this statement:
+
+```sql
+ALTER TABLE customers MODIFY COLUMN ph_code TEXT NOT NULL DEFAULT ('+91')
+```
+
+TiDB/MySQL do not allow defaults on TEXT/BLOB columns. The deployment also
+used mobile-team-style DB environment names such as DBHOST, DBPORT,
+DBUSERNAME, DBPASSWORD, and DBNAME, while the backend only read the canonical
+DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME names.
+
+### What Changed
+
+- backend/src/config.ts now accepts both canonical DB env vars and the
+  mobile-team deployment aliases:
+  - DB_HOST / DBHOST
+  - DB_PORT / DBPORT
+  - DB_USER / DB_USERNAME / DBUSERNAME
+  - DB_PASSWORD / DBPASSWORD
+  - DB_NAME / DBNAME
+  - DB_SSL / DBSSL
+- backend/migrations/006_full_mobile_parity.sql keeps ph_code as
+  VARCHAR(10) NOT NULL DEFAULT '+91' instead of converting it to TEXT with a
+  default.
+- backend/migrations/009_tidb_schema_align.sql documents the ph_code
+  compatibility reason.
+- backend/.env.example documents DB_SSL and the accepted DB env aliases.
+- package.json now fails the Vercel build when migrations fail. The
+  production settings seed remains non-blocking, but schema migration errors
+  can no longer be silently swallowed by `|| true`.
+
+### Deployment Notes
+
+- No database password or secret was committed.
+- The previously pasted DB password must be treated as exposed and rotated
+  before production use.
+- If the target database does not support TLS, leave DB_SSL/DBSSL unset or
+  false only for QA validation. Production should use TLS-capable connectivity
+  before STRICT_PROD_CONFIG is enabled.
+- The DB host uses a private address, so Vercel must have network reachability
+  to that private network for runtime and build-time migrations to work.
+
+### Verification
+
+- `cd backend && npm run build`
+- `npm run build`
+- Confirmed the invalid TEXT default pattern is gone from the touched
+  migration files.
+
 ## v4.5.90 - Mobile pending-list payment and enquiry parity (2026-07-11)
 
 ### Why

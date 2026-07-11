@@ -7,9 +7,8 @@
 --      ADD COLUMN throws errno 8200 ("TiDB unsupported feature"). The
 --      fix is to ADD COLUMN, then CREATE UNIQUE INDEX as separate
 --      statements.
---   2. `ALTER TABLE x MODIFY COLUMN ph_code TEXT NOT NULL DEFAULT('+91')`
---      — TiDB rejects expression-syntax defaults on TEXT columns.
---      Use a VARCHAR with a literal default instead.
+--   2. TiDB rejects defaults on TEXT/BLOB columns, so `ph_code`
+--      stays VARCHAR with a literal default.
 --
 -- This migration applies the same column shape additions on TiDB as
 -- 004 + 006 did on MySQL, split into TiDB-compatible statements. On a

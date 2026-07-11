@@ -49,13 +49,23 @@ function reportProdIssue(name: string, message: string): void {
   }
 }
 
-/** Returns the env value if set; otherwise the fallback. Reports an
- *  issue in production if the env was missing. */
-function requireInProd(name: string, fallback: string, reason: string): string {
-  const value = process.env[name];
+function firstEnv(names: string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function requireAnyInProd(names: string[], fallback: string, reason: string): string {
+  const value = firstEnv(names);
   if (value) return value;
-  reportProdIssue(name, `not set. ${reason}`);
+  reportProdIssue(names.join(' / '), `not set. ${reason}`);
   return fallback;
+}
+
+function isEnabledEnv(names: string[]): boolean {
+  return String(firstEnv(names) || '').toLowerCase() === 'true';
 }
 
 /** Returns a list of trimmed CORS origins. Dev defaults to "*".
@@ -82,32 +92,32 @@ export const config = {
   port: Number(process.env.PORT || 9090),
   corsOrigins: parseCorsOrigins(),
   db: {
-    host: requireInProd('DB_HOST', 'localhost',
+    host: requireAnyInProd(['DB_HOST', 'DBHOST'], 'localhost',
       'Production must point at a managed DB — TiDB Cloud, RDS, etc.'),
-    port: Number(process.env.DB_PORT || 3306),
-    user: requireInProd('DB_USER', 'root',
+    port: Number(firstEnv(['DB_PORT', 'DBPORT']) || 3306),
+    user: requireAnyInProd(['DB_USER', 'DB_USERNAME', 'DBUSERNAME'], 'root',
       'Production must use a dedicated DB user, not root.'),
     password: isProd
-      ? requireInProd('DB_PASSWORD', '',
+      ? requireAnyInProd(['DB_PASSWORD', 'DBPASSWORD'], '',
           'Production DB requires a password; refusing to connect blank.')
-      : (process.env.DB_PASSWORD || ''),
-    database: requireInProd('DB_NAME', 'vayil',
+      : (firstEnv(['DB_PASSWORD', 'DBPASSWORD']) || ''),
+    database: requireAnyInProd(['DB_NAME', 'DBNAME'], 'vayil',
       'Set DB_NAME to the production database, e.g. "vayil".'),
     // Enable TLS for managed providers (TiDB Cloud, PlanetScale, RDS).
     // Set DB_SSL=true to switch on; default off for local dev. Production
     // is asserted on TLS below in the post-config check.
-    ...(String(process.env.DB_SSL || '').toLowerCase() === 'true'
+    ...(isEnabledEnv(['DB_SSL', 'DBSSL'])
       ? { ssl: { minVersion: 'TLSv1.2' as const, rejectUnauthorized: true } }
       : {}),
   },
-  jwtSecret: requireInProd('JWT_SECRET', 'dev-secret-change-me',
+  jwtSecret: requireAnyInProd(['JWT_SECRET'], 'dev-secret-change-me',
     'Production must set JWT_SECRET to a strong random value (>= 32 bytes). ' +
     'Run: openssl rand -base64 32'),
   legacyJwtSecret:
     process.env.LEGACY_JWT_SECRET ||
     process.env.JWT_SECRET_KEY ||
     '',
-  staffJwtSecret: requireInProd('STAFF_JWT_SECRET', 'dev-staff-secret-change-me',
+  staffJwtSecret: requireAnyInProd(['STAFF_JWT_SECRET'], 'dev-staff-secret-change-me',
     'Production must set STAFF_JWT_SECRET separately from JWT_SECRET. ' +
     'Run: openssl rand -base64 32'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || (isProd ? '7d' : '30d'),
@@ -152,7 +162,7 @@ export const config = {
 /* ─── Post-config safety checks (warn or throw, per strictProd) ─── */
 if (isProd) {
   // TLS to DB is mandatory in production.
-  if (String(process.env.DB_SSL || '').toLowerCase() !== 'true') {
+  if (!isEnabledEnv(['DB_SSL', 'DBSSL'])) {
     reportProdIssue('DB_SSL',
       'not "true". Plaintext DB connections leak credentials over the network.');
   }

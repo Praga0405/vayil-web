@@ -195,14 +195,14 @@ ALTER TABLE platform_transactions MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMEN
 ALTER TABLE platform_transactions MODIFY COLUMN order_id BIGINT NOT NULL;
 
 /* ═══════════════════════════════════════════════════════════
- *  customers/vendors `phone` and `ph_code` — mobile uses TEXT.
- *  Our VARCHAR is functionally compatible but enlarge to TEXT
- *  for exact parity.
+ *  customers/vendors `phone` uses TEXT. Keep `ph_code` as VARCHAR:
+ *  TiDB/MySQL do not accept defaults on TEXT/BLOB columns, and the web
+ *  OTP flow needs a default country code for insert compatibility.
  * ═══════════════════════════════════════════════════════════ */
-ALTER TABLE customers MODIFY COLUMN ph_code TEXT NOT NULL;
+ALTER TABLE customers MODIFY COLUMN ph_code VARCHAR(10) NOT NULL DEFAULT '+91';
 ALTER TABLE customers MODIFY COLUMN phone TEXT NOT NULL;
 ALTER TABLE customers MODIFY COLUMN profile_photo LONGTEXT NULL;
-ALTER TABLE vendors   MODIFY COLUMN ph_code TEXT NOT NULL;
+ALTER TABLE vendors   MODIFY COLUMN ph_code VARCHAR(10) NOT NULL DEFAULT '+91';
 ALTER TABLE vendors   MODIFY COLUMN profile_photo VARCHAR(500) NULL;
 
 /* ═══════════════════════════════════════════════════════════
@@ -276,5 +276,5 @@ CREATE TRIGGER trg_bank_details_status_sync_upd BEFORE UPDATE ON bank_details FO
  *  (mobile dump declares NOT NULL with no default — we add a
  *  harmless default so web-side OTP flow doesn't violate.)
  * ═══════════════════════════════════════════════════════════ */
-ALTER TABLE customers MODIFY COLUMN ph_code TEXT NOT NULL DEFAULT ('+91');
-ALTER TABLE vendors   MODIFY COLUMN ph_code TEXT NOT NULL DEFAULT ('+91');
+ALTER TABLE customers MODIFY COLUMN ph_code VARCHAR(10) NOT NULL DEFAULT '+91';
+ALTER TABLE vendors   MODIFY COLUMN ph_code VARCHAR(10) NOT NULL DEFAULT '+91';
