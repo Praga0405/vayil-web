@@ -49,12 +49,14 @@ export default function EditServicePage() {
   const [toggling, setToggling] = useState(false)
   const [status,  setStatus]  = useState<string>('active')
   const [existingImages, setExistingImages] = useState<string[]>([])
+  const [existingCertificate, setExistingCertificate] = useState('')
 
   const [form, setForm] = useState({
     title: '', description: '',
     category_id: '', subcategory_id: '', tag_id: '',
     price_type: 'fixed', price: '', unit: 'sqft',
     images: [] as File[],
+    certificate: [] as File[],
   })
 
   useEffect(() => {
@@ -77,21 +79,24 @@ export default function EditServicePage() {
       setTags(uniqueMasterRows(apiArray(tr, ['tags'])))
       setStatus(serviceIsActive(s.is_active ?? s.status) ? 'active' : 'inactive')
       setExistingImages(serviceImageUrls(s))
+      setExistingCertificate(String(s.certificate_url || ''))
+      const categoryId = s.category_id || s.service_category
       const baseForm = {
         title:          s.title || s.service_title || '',
         description:    s.description || '',
-        category_id:    String(s.category_id || ''),
-        subcategory_id: String(s.subcategory_id || ''),
+        category_id:    String(categoryId || ''),
+        subcategory_id: String(s.subcategory_id || s.service_subcategory || ''),
         tag_id:         String(s.tag_id || ''),
-        price_type:     s.price_type || 'fixed',
+        price_type:     s.price_type || s.pricing_type || 'fixed',
         price:          String(s.price ?? ''),
-        unit:           s.unit || 'sqft',
-        images:         [],
+        unit:           s.unit || s.unit_name || 'sqft',
+        images:         [] as File[],
+        certificate:    [] as File[],
       }
-      const draft = loadDraft<Omit<typeof baseForm, 'images'>>(`vayil:draft:vendor-studio:service-${sid}`)
-      setForm(draft ? { ...baseForm, ...draft, images: [] } : baseForm)
-      if (s.category_id) {
-        commonApi.getSubcategories(Number(s.category_id)).then(r => {
+      const draft = loadDraft<Omit<typeof baseForm, 'images' | 'certificate'>>(`vayil:draft:vendor-studio:service-${sid}`)
+      setForm(draft ? { ...baseForm, ...draft, images: [], certificate: [] } : baseForm)
+      if (categoryId) {
+        commonApi.getSubcategories(Number(categoryId)).then(r => {
           setSubcats(uniqueMasterRows(apiArray(r, ['subcategories'])))
         }).catch(() => setSubcats([]))
       }
@@ -104,7 +109,7 @@ export default function EditServicePage() {
 
   useEffect(() => {
     if (!loaded || !sid) return
-    const { images, ...draft } = form
+    const { images, certificate, ...draft } = form
     saveDraft(`vayil:draft:vendor-studio:service-${sid}`, draft)
   }, [form, loaded, sid])
 
@@ -132,16 +137,30 @@ export default function EditServicePage() {
         const fresh = normalizeUploadedUrls(ur)
         imageUrls = [...existingImages, ...fresh]
       }
+
+      let certificateUrl = existingCertificate
+      if (form.certificate.length > 0) {
+        const fd = new FormData()
+        form.certificate.slice(0, 1).forEach(f => fd.append('files', f))
+        const ur = await vendorApi.uploadFiles(fd)
+        certificateUrl = normalizeUploadedUrls(ur)[0] || certificateUrl
+      }
+
       await vendorApi.updateServiceListing({
         service_id:     sid,
         title:          form.title.trim(),
         description:    form.description.trim(),
         category_id:    form.category_id,
+        service_category: form.category_id,
         subcategory_id: form.subcategory_id || undefined,
+        service_subcategory: form.subcategory_id || undefined,
         tag_id:         form.tag_id || undefined,
         price_type:     form.price_type,
+        pricing_type:   form.price_type,
         price:          form.price,
         unit:           form.unit,
+        unit_name:      form.unit,
+        certificate_url: certificateUrl || undefined,
         ...serviceImagePayload(imageUrls),
       })
       clearDraft(`vayil:draft:vendor-studio:service-${sid}`)
@@ -220,6 +239,10 @@ export default function EditServicePage() {
               <li className="flex items-start justify-between gap-3 text-gray-500">
                 <span>Photos on file</span>
                 <span className="font-semibold text-navy text-right">{existingImages.length}</span>
+              </li>
+              <li className="flex items-start justify-between gap-3 text-gray-500">
+                <span>Certificate</span>
+                <span className="font-semibold text-navy text-right">{existingCertificate ? 'Uploaded' : 'Not uploaded'}</span>
               </li>
               <li className="flex items-start justify-between gap-3 text-gray-500">
                 <span>Pricing</span>
@@ -303,6 +326,24 @@ export default function EditServicePage() {
               {form.images.length > 0 && (
                 <p className="text-xs text-green-600 font-semibold mt-2">
                   ✓ {form.images.length} new image{form.images.length > 1 ? 's' : ''} ready to upload
+                </p>
+              )}
+            </PageSection>
+
+            <PageSection title="Certificate / license" description="Upload a PDF or image that verifies this service.">
+              {existingCertificate && (
+                <a href={existingCertificate} target="_blank" rel="noreferrer"
+                  className="text-sm font-semibold text-orange hover:underline break-all">
+                  View current certificate
+                </a>
+              )}
+              <div className={existingCertificate ? 'mt-4' : ''}>
+                <FileUpload label={existingCertificate ? 'Replace certificate or license' : 'Certificate or license'} accept="application/pdf,image/*"
+                  onChange={files => setForm(f => ({ ...f, certificate: Array.from(files).slice(0, 1) }))} />
+              </div>
+              {form.certificate.length > 0 && (
+                <p className="text-xs text-green-600 font-semibold mt-2">
+                  ✓ {form.certificate[0].name} ready to upload
                 </p>
               )}
             </PageSection>
