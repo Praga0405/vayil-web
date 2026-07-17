@@ -1,5 +1,86 @@
 # Release Notes
 
+## v4.5.93 - Pending-vendor onboarding/listing continuity fixes (2026-07-17)
+
+### Why
+
+This release fixes the production Vendor Studio issues found after a
+vendor signs up, completes onboarding, and submits KYC for admin review:
+the vendor could land in My Listing and see random/stale profile details,
+zero services, or a misleading "Live" listing state even though the vendor
+was still pending approval. The onboarding stepper also had visible chip
+spacing problems at the current browser width.
+
+The change keeps the existing approval model intact: vendors may save and
+review their draft profile/services while approval is pending, but those
+services are still not publishable or searchable in the marketplace until
+admin verification is complete.
+
+### Root Cause Summary
+
+- Vendor Studio Business Profile used one shared local draft key for every
+  signed-in vendor. A stale 24-hour autosave from another test vendor could
+  override the current vendor's saved profile, which looked like random
+  profile data after KYC submission.
+- Vendor Studio only loaded services when the Services tab was opened, so
+  the profile summary could show `0 of 0` even when draft services existed.
+- The backend approval middleware blocked pending vendors from their own
+  draft service endpoints, even though the service create/update/status
+  handlers already prevent marketplace publication for unapproved vendors.
+- `/vendor-onboarding` saved professional/operational fields using local UI
+  names (`category`, `subcategory`, `years`, `hours`) instead of the
+  existing mobile-compatible backend aliases, so saved rows could fail to
+  hydrate correctly in later screens.
+- The onboarding stepper used connector spacers inside a horizontal flex
+  row, causing uneven chip spacing and crowding at tablet/browser widths.
+
+### What Changed
+
+- Scoped Vendor Studio Business Profile autosave to the current vendor using
+  `vendor_id`/mobile-derived draft keys while keeping the existing 24-hour
+  expiry behavior.
+- Hydrated Vendor Studio summary cards from the saved vendor profile
+  (`company_name`, `full_name`, profile photo, email/mobile) instead of only
+  the auth display name.
+- Loaded vendor services on page entry as well as when opening the Services
+  tab so My Listing counts reflect saved draft services immediately.
+- Changed pending-vendor summary copy from "Live" to "Pending approval" and
+  replaced the public profile link with "Hidden until verified" until the
+  vendor status is approved/verified/active.
+- Added a client-side publish guard so pending vendors get the clear
+  "Vendor approval is required before publishing services" message before a
+  service activation attempt.
+- Narrowly allowed pending vendors through authenticated legacy endpoints
+  required for their own draft service preparation:
+  `/saveServiceListing`, `/updateServiceListing`, `/getVendorServiceList`,
+  `/ServiceDetails`, `/ServiceStatusUpdate`,
+  `/ServiceReviewStatusUpdate`, and `/vendorlistReviews`.
+- Kept the server-side publish restriction unchanged: creating/updating
+  services for an unapproved vendor still forces inactive status, and
+  activation still returns 403 until approval.
+- Expanded `/vendor-onboarding` hydration to include professional and
+  operational details from the saved vendor row, including category,
+  subcategory, years of experience, bio, service area, working hours, and
+  languages.
+- Updated `/vendor-onboarding` Step 2/Step 3 saves to send the existing
+  backend/mobile aliases (`service_category`, `sub_service`,
+  `years_of_experience`, `short_bio`, `area_of_service`,
+  `working_hours_from`, `working_hours_to`, `languages`) without removing
+  or changing existing endpoint contracts.
+- Reworked the `/vendor-onboarding` stepper into a responsive grid so chips
+  keep consistent spacing and do not overflow or bunch up on the current
+  viewport.
+
+### Compatibility Notes
+
+- No OTP bypass flow files or login/OTP bypass behavior were changed.
+- No existing API response fields were removed or renamed.
+- No existing request body fields were removed; frontend payloads only add
+  aliases that the backend already accepts.
+- Pending-vendor service visibility remains vendor-only. Customer search
+  and public marketplace publication still require both an active service
+  and an approved vendor status.
+
 ## v4.5.92 - Vendor/customer workflow audit and profile persistence hardening (2026-07-17)
 
 ### Why

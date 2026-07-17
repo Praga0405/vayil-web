@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import axios from 'axios'
 import { useUserAuth } from '@/stores/auth'
@@ -23,10 +23,12 @@ const serviceIsActive = (service: any) => {
   const value = service?.is_active ?? service?.status
   return value === 'active' || value === 1 || value === true || value === '1'
 }
+const APPROVED_VENDOR_STATUSES = new Set(['verified', 'approved', 'active', 'kyc_approved'])
 
 export default function VendorListingPage() {
   const { user, setAuth, token } = useUserAuth()
   const [tab, setTab] = useState<Tab>('profile')
+  const profileDraftKey = `${PROFILE_DRAFT_KEY}:${user?.id || user?.mobile || 'anonymous'}`
 
   /* ── Profile state ── */
   const [form, setForm] = useState({
@@ -44,6 +46,8 @@ export default function VendorListingPage() {
   const [cities, setCities] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
   const [profileLoaded, setProfileLoaded] = useState(false)
+  const [vendorStatus, setVendorStatus] = useState('')
+  const [vendorId, setVendorId] = useState<string | number | null>(null)
 
   /* ── Services state ── */
   const [services, setServices] = useState<any[]>([])
@@ -52,7 +56,7 @@ export default function VendorListingPage() {
   /* ── Reviews state (mobile + web parity) ── */
   const [reviews, setReviews]       = useState<any[]>([])
   const [reviewsLoading, setReviewsLoading] = useState(false)
-  const loadReviews = () => {
+  const loadReviews = useCallback(() => {
     if (!token) return
     setReviewsLoading(true)
     // Hits the legacy mobile shim /vendor/vendorlistReviews — same data
@@ -63,8 +67,8 @@ export default function VendorListingPage() {
       .then(r => setReviews(Array.isArray(r.data?.data) ? r.data.data : []))
       .catch(() => setReviews([]))
       .finally(() => setReviewsLoading(false))
-  }
-  useEffect(() => { if (tab === 'reviews') loadReviews() }, [tab, token])
+  }, [token])
+  useEffect(() => { if (tab === 'reviews') loadReviews() }, [tab, loadReviews])
 
   useEffect(() => {
     if (!token) return
@@ -72,6 +76,8 @@ export default function VendorListingPage() {
       .then(([pr, sr]) => {
         const p = pr.data?.vendor || pr.data?.data || pr.data?.result || {}
         const stateRows = uniqueMasterRows(apiArray(sr, ['states_list', 'states']))
+        setVendorStatus(String(p.status || p.vendor_status || p.kyc_status || ''))
+        setVendorId(p.vendor_id || p.id || user?.id || null)
         const baseForm = {
           company_name: p.company_name || p.name || user?.name || '',
           full_name:    p.full_name || p.owner_name || p.name || user?.name || '',
@@ -83,7 +89,7 @@ export default function VendorListingPage() {
           address:      p.address || '',
           profile_image: p.profile_photo_url || p.profile_photo || p.profile_image || user?.profile_image || '',
         }
-        const draft = loadDraft<typeof baseForm>(PROFILE_DRAFT_KEY)
+        const draft = loadDraft<typeof baseForm>(profileDraftKey)
         const hasDraft = draft && Object.values(draft).some(value => String(value ?? '').trim() !== '')
         const nextForm = hasDraft ? { ...baseForm, ...draft } : baseForm
         setForm(nextForm)
@@ -100,11 +106,11 @@ export default function VendorListingPage() {
           })
         }
       })
-  }, [token])
+  }, [token, profileDraftKey, user?.email, user?.id, user?.mobile, user?.name, user?.profile_image])
 
   useEffect(() => {
-    if (tab === 'profile' && profileLoaded) saveDraft(PROFILE_DRAFT_KEY, form)
-  }, [form, tab, profileLoaded])
+    if (tab === 'profile' && profileLoaded) saveDraft(profileDraftKey, form)
+  }, [form, tab, profileLoaded, profileDraftKey])
 
   const loadServices = () => {
     setSvcLoading(true)
@@ -119,10 +125,12 @@ export default function VendorListingPage() {
           : (wrapper.listings || wrapper.services || r.data?.listings || [])
         setServices(Array.isArray(d) ? d : [])
       })
+      .catch(() => setServices([]))
       .finally(() => setSvcLoading(false))
   }
 
-  useEffect(() => { if (tab === 'services') loadServices() }, [tab])
+  useEffect(() => { if (token) loadServices() }, [token])
+  useEffect(() => { if (token && tab === 'services') loadServices() }, [tab, token])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -166,23 +174,33 @@ export default function VendorListingPage() {
         email: form.email_id || user.email,
         profile_image: form.profile_image || user.profile_image,
       }, token)
-      clearDraft(PROFILE_DRAFT_KEY)
+      clearDraft(profileDraftKey)
       toast.success('Profile updated!')
     } catch { toast.error('Failed to update') }
     finally { setSaving(false) }
   }
 
+  const vendorApproved = APPROVED_VENDOR_STATUSES.has(vendorStatus.toLowerCase())
+
   const toggleStatus = async (serviceId: number, currentActive: boolean) => {
     const next = currentActive ? 'inactive' : 'active'
+    if (!currentActive && !vendorApproved) {
+      toast.error('Vendor approval is required before publishing services')
+      return
+    }
     try {
       await vendorApi.updateServiceStatus({ service_id: serviceId, status: next })
       setServices(prev => prev.map(s => (s.id || s.service_id || s.vendor_service_id) === serviceId ? { ...s, status: next } : s))
       toast.success(`Service ${next}`)
-    } catch { toast.error('Failed to update status') }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.response?.data?.error || 'Failed to update status')
+    }
   }
 
-  const activeCount   = services.filter(serviceIsActive).length
+  const activeCount = services.filter(serviceIsActive).length
+  const publicActiveCount = vendorApproved ? activeCount : 0
   const inactiveCount = services.length - activeCount
+  const displayName = form.company_name || form.full_name || user?.name || 'Vendor'
 
   return (
     <div className="space-y-6 pb-10">
@@ -212,7 +230,7 @@ export default function VendorListingPage() {
               <div className="flex flex-col items-center text-center">
                 <ProfileImageUploader
                   currentUrl={form.profile_image || user?.profile_image}
-                  name={user?.name}
+                  name={displayName}
                   size={24}
                   uploadFn={vendorApi.uploadFiles}
                   onUploaded={async (url) => {
@@ -221,8 +239,10 @@ export default function VendorListingPage() {
                     if (user && token) setAuth({ ...user, profile_image: url }, token)
                   }}
                 />
-                <p className="font-bold text-navy text-lg mt-4">{user?.name || 'Vendor'}</p>
-                <p className="text-sm text-gray-500 mt-0.5">+91 {user?.mobile}</p>
+                <p className="font-bold text-navy text-lg mt-4">{displayName}</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {user?.mobile ? `+91 ${user.mobile}` : form.email_id}
+                </p>
                 <span className="inline-flex items-center gap-1 mt-3 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-orange/10 text-orange">
                   <Wrench className="w-3 h-3" /> Vendor
                 </span>
@@ -231,18 +251,26 @@ export default function VendorListingPage() {
               <ul className="space-y-2 text-xs">
                 <li className="flex items-start justify-between gap-3 text-gray-500">
                   <span>Listing visibility</span>
-                  <span className="font-semibold text-navy text-right">Live</span>
+                  <span className={`font-semibold text-right ${vendorApproved ? 'text-navy' : 'text-orange'}`}>
+                    {vendorApproved ? 'Live' : 'Pending approval'}
+                  </span>
                 </li>
                 <li className="flex items-start justify-between gap-3 text-gray-500">
-                  <span>Services live</span>
-                  <span className="font-semibold text-navy text-right">{activeCount} of {services.length}</span>
+                  <span>{vendorApproved ? 'Services live' : 'Draft services'}</span>
+                  <span className="font-semibold text-navy text-right">
+                    {vendorApproved ? `${publicActiveCount} of ${services.length}` : services.length}
+                  </span>
                 </li>
                 <li className="flex items-start justify-between gap-3 text-gray-500">
                   <span>Public profile</span>
-                  <Link href={user?.id ? `/vendors/${user.id}` : '/search'}
-                    className="font-semibold text-orange hover:underline text-right">
-                    View as customer
-                  </Link>
+                  {vendorApproved && vendorId ? (
+                    <Link href={`/vendors/${vendorId}`}
+                      className="font-semibold text-orange hover:underline text-right">
+                      View as customer
+                    </Link>
+                  ) : (
+                    <span className="font-semibold text-gray-400 text-right">Hidden until verified</span>
+                  )}
                 </li>
               </ul>
             </PageSection>
@@ -281,7 +309,7 @@ export default function VendorListingPage() {
             columns={3}
             items={[
               { label: 'Total services', value: services.length,   icon: Wrench,     accent: 'navy' },
-              { label: 'Active',         value: activeCount,        icon: ToggleRight, accent: 'orange' },
+              { label: vendorApproved ? 'Active' : 'Publicly live', value: publicActiveCount, icon: ToggleRight, accent: 'orange' },
               { label: 'Inactive',       value: inactiveCount,      icon: ToggleLeft,  accent: 'plain' },
             ]}
           />

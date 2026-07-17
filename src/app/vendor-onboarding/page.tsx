@@ -24,6 +24,11 @@ async function callWithFallback<T>(p: Promise<T>): Promise<{ ok: boolean }> {
   }
 }
 
+function splitHours(value: string) {
+  const [from = '', to = ''] = value.split('-').map(part => part.trim())
+  return { from, to }
+}
+
 const STEPS = [
   { key: 'business',     label: 'Business Profile',  icon: Building2 },
   { key: 'services',     label: 'Services',          icon: Wrench },
@@ -103,6 +108,13 @@ export default function VendorOnboardingWizard() {
     vendorApi.getProfile()
       .then(r => {
         const p = r.data?.vendor || r.data?.data || r.data?.result || {}
+        const savedHours = p.working_hours_from && p.working_hours_to
+          ? `${p.working_hours_from}-${p.working_hours_to}`
+          : ''
+        const savedLanguages = String(p.languages || '')
+          .split(',')
+          .map(lang => lang.trim())
+          .filter(Boolean)
         applyPrefill({
           company: p.company_name || p.company || p.name,
           owner: p.full_name || p.owner_name || p.name,
@@ -113,6 +125,19 @@ export default function VendorOnboardingWizard() {
           mobile: p.mobile || p.phone || user?.mobile,
           vendorId: p.vendor_id || p.id || user?.id,
         })
+        setProf(prev => ({
+          category: prev.category || String(p.service_category || ''),
+          subcategory: prev.subcategory || String(p.sub_service || ''),
+          years: prev.years || String(p.years_of_experience || p.experience_years || ''),
+          bio: prev.bio || p.short_bio || p.about || p.description || '',
+        }))
+        setOps(prev => ({
+          service_area: prev.service_area || p.area_of_service || p.city_name || p.city || '',
+          hours: prev.hours === '09:00-18:00' && savedHours ? savedHours : prev.hours,
+          languages: prev.languages.length === 1 && prev.languages[0] === 'English' && savedLanguages.length
+            ? savedLanguages
+            : prev.languages,
+        }))
       })
       .catch(() => {})
       .finally(finish)
@@ -173,11 +198,30 @@ export default function VendorOnboardingWizard() {
     else if (step === 'services')     req = svcTags.length
       ? Promise.all(svcTags.map(tag => vendorApi.addServiceTag({ name: tag })))
       : Promise.resolve()
-    else if (step === 'professional') req = vendorApi.saveStep2(prof)
-    else if (step === 'operational')  req = vendorApi.saveStep3({
-      ...ops,
-      languages: ops.languages.join(', '),
+    else if (step === 'professional') req = vendorApi.saveStep2({
+      service_category: prof.category,
+      category_id: prof.category,
+      sub_service: prof.subcategory,
+      subcategory_id: prof.subcategory,
+      years_of_experience: prof.years,
+      experience_years: prof.years,
+      short_bio: prof.bio,
+      about: prof.bio,
+      bio: prof.bio,
     })
+    else if (step === 'operational')  {
+      const { from, to } = splitHours(ops.hours)
+      req = vendorApi.saveStep3({
+        service_area: ops.service_area,
+        area_of_service: ops.service_area,
+        hours: ops.hours,
+        working_hours_from: from,
+        working_hours_to: to,
+        start_time: from,
+        end_time: to,
+        languages: ops.languages.join(', '),
+      })
+    }
 
     const { ok } = req ? await callWithFallback(req) : { ok: true }
     setSaving(false)
@@ -229,26 +273,25 @@ export default function VendorOnboardingWizard() {
         </div>
 
         {/* Stepper */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-3 sm:p-4 flex items-center gap-2 overflow-x-auto">
-          {STEPS.map((s, i) => {
-            const Icon = s.icon
-            const active = i === stepIdx
-            const done = i < stepIdx
-            return (
-              <React.Fragment key={s.key}>
-                <button onClick={() => setStep(s.key)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+        <div className="bg-white border border-gray-100 rounded-2xl p-2 sm:p-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+            {STEPS.map((s, i) => {
+              const Icon = s.icon
+              const active = i === stepIdx
+              const done = i < stepIdx
+              return (
+                <button key={s.key} onClick={() => setStep(s.key)}
+                  className={`min-h-11 w-full flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-[11px] sm:text-xs font-semibold transition ${
                     active ? 'bg-orange text-white' :
                     done ? 'bg-green-100 text-green-700' :
-                    'text-gray-400 hover:bg-gray-100'
+                    'text-gray-500 hover:bg-gray-100'
                   }`}>
-                  {done ? <CheckCircle className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
-                  {s.label}
+                  {done ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <Icon className="w-3.5 h-3.5 shrink-0" />}
+                  <span className="truncate">{s.label}</span>
                 </button>
-                {i < STEPS.length - 1 && <div className="w-4 h-px bg-gray-200 shrink-0" />}
-              </React.Fragment>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
 
         {/* Step content */}

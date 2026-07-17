@@ -1366,6 +1366,13 @@ legacyVendorRouter.use(requireApprovedVendor({
     '/VendorAddServiceTag',
     '/vendorInfo',
     '/upload_files',
+    '/saveServiceListing',
+    '/updateServiceListing',
+    '/getVendorServiceList',
+    '/ServiceDetails',
+    '/ServiceStatusUpdate',
+    '/ServiceReviewStatusUpdate',
+    '/vendorlistReviews',
   ],
 }));
 
