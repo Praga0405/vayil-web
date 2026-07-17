@@ -22,6 +22,8 @@ import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { authApi, customerApi, vendorApi } from '@/lib/api/client'
 import { IS_DEMO_MODE, OTP_BYPASS_ON, DEV_OTP_CODE, SHOW_DEV_OTP_BANNER } from '@/lib/demoMode'
+import { saveDraft } from '@/lib/formDrafts'
+import { VENDOR_ONBOARDING_PREFILL_KEY, type VendorOnboardingPrefill } from '@/lib/vendorOnboardingPrefill'
 import { VayilIcon } from '@/components/shared/VayilLogo'
 import { X, ArrowRight, ArrowLeft, RotateCw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -58,6 +60,10 @@ const rememberMobile = (mobile: string) => {
       localStorage.setItem(KNOWN_KEY, JSON.stringify(arr))
     }
   } catch {}
+}
+
+const rememberVendorOnboardingPrefill = (value: VendorOnboardingPrefill) => {
+  saveDraft(VENDOR_ONBOARDING_PREFILL_KEY, value)
 }
 
 export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, initialTab = 'customer' }: Props) {
@@ -219,6 +225,14 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
         })
         const body = res?.data?.data ?? res?.data ?? {}
         userRow = body?.vendor
+        rememberVendorOnboardingPrefill({
+          company: company.trim(),
+          owner: name.trim(),
+          email: email.trim(),
+          city: city.trim(),
+          mobile,
+          vendorId: userRow?.vendor_id ?? userRow?.id,
+        })
         // New vendors land in the admin review queue right away so the
         // Vayil admin panel can do manual KYC. Best-effort.
         try { await vendorApi.submitForReview() } catch { /* swallow */ }
@@ -273,6 +287,16 @@ export default function LoginModal({ isOpen, onClose, onSuccess, redirectTo, ini
       type: isVendor ? ('vendor' as const) : ('customer' as const),
     }
     const token = (isVendor ? 'dev_vendor_token_' : 'dev_customer_token_') + mobile
+    if (signedUp && isVendor) {
+      rememberVendorOnboardingPrefill({
+        company,
+        owner: name,
+        email,
+        city,
+        mobile,
+        vendorId: user.id,
+      })
+    }
     completeAuth(user, token)
 
     // First-time vendor signups: drop them into the onboarding wizard so

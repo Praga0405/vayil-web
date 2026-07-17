@@ -2,11 +2,14 @@
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import PublicHeader from '@/components/shared/PublicHeader'
+import { useUserAuth } from '@/stores/auth'
 import { Button, Input, Select, Textarea } from '@/components/ui'
 import { CheckCircle, ChevronLeft, ChevronRight, Building2, Wrench, Briefcase, MapPin, ShieldCheck, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { commonApi, vendorApi } from '@/lib/api/client'
 import { apiArray, isActiveMaster, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
+import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
+import { VENDOR_ONBOARDING_PREFILL_KEY, type VendorOnboardingPrefill } from '@/lib/vendorOnboardingPrefill'
 
 const TIMEOUT_MS = 5000
 async function callWithFallback<T>(p: Promise<T>): Promise<{ ok: boolean }> {
@@ -40,6 +43,7 @@ const WORKING_HOUR_OPTIONS = [
 
 export default function VendorOnboardingWizard() {
   const router = useRouter()
+  const { user, token } = useUserAuth()
   const [step, setStep] = useState<StepKey>('business')
   const stepIdx = STEPS.findIndex(s => s.key === step)
 
@@ -53,11 +57,84 @@ export default function VendorOnboardingWizard() {
   const [categories, setCategories] = useState<any[]>([])
   const [subcategories, setSubcategories] = useState<any[]>([])
   const [languages, setLanguages] = useState<any[]>([])
+  const [bizHydrated, setBizHydrated] = useState(false)
 
   useEffect(() => {
     commonApi.getCategories().then(r => setCategories(uniqueMasterRows(apiArray(r, ['categories'])))).catch(() => setCategories([]))
     commonApi.getLanguages().then(r => setLanguages(uniqueMasterRows(apiArray(r, ['languages'])))).catch(() => setLanguages([]))
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const applyPrefill = (source: VendorOnboardingPrefill) => {
+      if (!active) return
+      setBiz(prev => ({
+        company: prev.company || source.company || '',
+        owner:   prev.owner   || source.owner   || '',
+        email:   prev.email   || source.email   || '',
+        pincode: prev.pincode || source.pincode || '',
+        address: prev.address || source.address || '',
+      }))
+      if (source.city) {
+        setOps(prev => prev.service_area ? prev : { ...prev, service_area: source.city || '' })
+      }
+    }
+
+    const draft = loadDraft<VendorOnboardingPrefill>(VENDOR_ONBOARDING_PREFILL_KEY)
+    if (draft && (!draft.mobile || !user?.mobile || draft.mobile === user.mobile)) {
+      applyPrefill(draft)
+    }
+    if (user) {
+      applyPrefill({
+        owner: user.name,
+        email: user.email,
+        city: user.city,
+        mobile: user.mobile,
+        vendorId: user.id,
+      })
+    }
+
+    const finish = () => { if (active) setBizHydrated(true) }
+    if (!token) {
+      finish()
+      return () => { active = false }
+    }
+
+    vendorApi.getProfile()
+      .then(r => {
+        const p = r.data?.vendor || r.data?.data || r.data?.result || {}
+        applyPrefill({
+          company: p.company_name || p.company || p.name,
+          owner: p.full_name || p.owner_name || p.name,
+          email: p.email_id || p.email,
+          city: p.city_name || p.city,
+          pincode: p.pincode ? String(p.pincode) : '',
+          address: p.address || '',
+          mobile: p.mobile || p.phone || user?.mobile,
+          vendorId: p.vendor_id || p.id || user?.id,
+        })
+      })
+      .catch(() => {})
+      .finally(finish)
+
+    return () => { active = false }
+  }, [token, user])
+
+  useEffect(() => {
+    if (!bizHydrated) return
+    const hasValue = Object.values(biz).some(value => value.trim()) || ops.service_area.trim()
+    if (!hasValue) return
+    saveDraft<VendorOnboardingPrefill>(VENDOR_ONBOARDING_PREFILL_KEY, {
+      company: biz.company,
+      owner: biz.owner,
+      email: biz.email,
+      city: ops.service_area,
+      pincode: biz.pincode,
+      address: biz.address,
+      mobile: user?.mobile,
+      vendorId: user?.id,
+    })
+  }, [biz, ops.service_area, bizHydrated, user?.id, user?.mobile])
 
   useEffect(() => {
     if (!prof.category) {
@@ -86,7 +163,9 @@ export default function VendorOnboardingWizard() {
     let req: Promise<any> | null = null
     if (step === 'business')    req = vendorApi.saveStep1({
       company_name: biz.company,
+      full_name: biz.owner,
       owner_name: biz.owner,
+      email: biz.email,
       email_id: biz.email,
       pincode: biz.pincode,
       address: biz.address,
@@ -107,6 +186,7 @@ export default function VendorOnboardingWizard() {
       return
     }
     toast.success('Saved')
+    if (step === 'business') clearDraft(VENDOR_ONBOARDING_PREFILL_KEY)
     if (callNext) next()
   }
 

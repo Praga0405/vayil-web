@@ -18,6 +18,7 @@ profile and service flows.
 - Vendor Studio Business Profile at `/vendor-studio/listing`.
 - Vendor profile at `/vendor/profile`.
 - Vendor onboarding at `/vendor/onboarding`.
+- Vendor signup wizard at `/vendor-onboarding`.
 - Customer profile at `/customer/profile`.
 - Account profile at `/account/profile`.
 - Customer signup location picker at `/customer/signup`.
@@ -39,6 +40,9 @@ profile and service flows.
 - Several visible UI fields, especially pincode, address, and profile photo,
   were not always included in both the frontend save payload and the backend
   parser for that route.
+- The signup modal saved first-time vendor details, but `/vendor-onboarding`
+  started from empty local state instead of hydrating from the modal handoff
+  or saved vendor profile.
 - Some previous audit gaps were caused by route/nullability assumptions in
   Next dynamic pages and by public adapters not normalizing uploaded image
   fields consistently.
@@ -67,6 +71,10 @@ profile and service flows.
   included in the save payload and hydrated after refresh.
 - Hardened customer signup and vendor onboarding city loading to use the
   selected state plus compatibility aliases.
+- Added a 24-hour vendor signup handoff from the modal to
+  `/vendor-onboarding`, then merged it with the authenticated user and saved
+  vendor profile so company name, owner name, email, city, pincode, and
+  address prefill correctly after redirect or refresh.
 - Widened canonical `PUT /vendors/me` additively for `email_id`,
   `state_id`, `city_id`, `pincode`, `address`, `description`,
   `profile_image`, and `profile_photo`.
