@@ -24,6 +24,7 @@ profile and service flows.
 - Vendor service add/edit, public search, vendor profile cards, quote
   attachments, project/enquiry dynamic routes, and shared customer/vendor
   layouts from the broader audit.
+- Home/marketplace/public header account dropdowns.
 
 ### Root Cause Summary
 
@@ -75,6 +76,9 @@ profile and service flows.
 - Preserved broader audit fixes for service tag/pricing aliases, uploaded
   service images, public avatar fallbacks, search count filtering, quote
   attachment persistence, and dynamic route nullability.
+- Removed the desktop hover gap between the signed-in account trigger and
+  dropdown menu, preventing the menu from hiding while moving the cursor
+  from "Demo" into the menu.
 
 ### Compatibility Guardrails
 

@@ -106,7 +106,7 @@ export default function PublicHeader({ defaultQuery = '' }: Props) {
               </button>
 
               {/* Dropdown */}
-              <div data-account-menu className="hidden group-hover:block fixed inset-x-3 top-[98px] z-50 w-auto max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-xl sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-56 sm:max-w-none">
+              <div data-account-menu className="hidden group-hover:block fixed inset-x-3 top-[98px] z-50 w-auto max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-xl sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-0 sm:w-56 sm:max-w-none">
                 {/* User info */}
                 <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                   <p className="text-sm font-bold text-navy truncate">{user.name}</p>

@@ -106,7 +106,7 @@ export default function MarketplaceHeader({ defaultQuery = '' }: Props) {
                 <Avatar name={user.name} src={user.profile_image} size={8} />
                 <span className="text-sm font-medium text-navy">{user.name.split(' ')[0]}</span>
               </button>
-              <div className="hidden group-hover:block absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 z-50">
+              <div className="hidden group-hover:block absolute right-0 top-full w-52 bg-white rounded-2xl shadow-lg border border-gray-100 z-50">
                 <div className="p-2">
                   {user.type === 'vendor' ? (
                     <>
