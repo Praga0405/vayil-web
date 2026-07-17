@@ -29,7 +29,11 @@ export function uniqueBy<T>(rows: T[], keyFn: (row: T) => string): T[] {
 
 export function uniqueMasterRows(rows: any[]): any[] {
   return uniqueBy(rows, row =>
-    String(row.name ?? row.category_name ?? row.sub_category_name ?? row.language_name ?? row.tag_name ?? row.id ?? ''),
+    String(
+      row.name ?? row.category_name ?? row.sub_category_name ?? row.language_name ??
+      row.tag_name ?? row.city_name ?? row.state_name ?? row.id ?? row.city_id ??
+      row.state_id ?? '',
+    ),
   )
 }
 
@@ -43,6 +47,34 @@ export function optionLabel(row: AnyRecord): string {
     row.name ?? row.category_name ?? row.sub_category_name ?? row.subcategory_name ??
     row.city_name ?? row.state_name ?? row.tag_name ?? row.language_name ?? row.label ?? '',
   )
+}
+
+export function optionByValue(rows: AnyRecord[], value: unknown): AnyRecord | undefined {
+  const raw = String(value ?? '').trim()
+  if (!raw) return undefined
+  const lower = raw.toLowerCase()
+  return rows.find(row => String(optionId(row)) === raw) ||
+    rows.find(row => optionLabel(row).trim().toLowerCase() === lower)
+}
+
+export function normalizedOptionId(rows: AnyRecord[], value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const row = optionByValue(rows, raw)
+  return row ? String(optionId(row)) : raw
+}
+
+export function cityLookupPayload(stateRows: AnyRecord[], value: unknown): Record<string, unknown> {
+  const raw = String(value ?? '').trim()
+  const row = optionByValue(stateRows, raw)
+  const id = row ? optionId(row) : raw
+  const label = row ? optionLabel(row) : raw
+  return {
+    state_id: id,
+    city_state_id: id,
+    state_name: label,
+    city_state: label,
+  }
 }
 
 export function isActiveMaster(row: AnyRecord): boolean {
@@ -87,4 +119,19 @@ export function serviceImagePayload(urls: string[]): Record<string, unknown> {
     service_image: cleaned.join(','),
     service_image_url: first,
   }
+}
+
+export function firstIdValue(value: any): string {
+  if (value === undefined || value === null || value === '') return ''
+  if (Array.isArray(value)) return value[0] == null ? '' : String(value[0])
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return parsed[0] == null ? '' : String(parsed[0])
+    } catch { /* plain CSV */ }
+    return trimmed.split(',').map(part => part.trim()).filter(Boolean)[0] ?? ''
+  }
+  return String(value)
 }

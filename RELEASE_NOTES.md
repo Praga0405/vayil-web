@@ -1,5 +1,114 @@
 # Release Notes
 
+## v4.5.92 - Vendor/customer workflow audit and profile persistence hardening (2026-07-17)
+
+### Why
+
+This release completes the latest vendor/customer web workflow audit and
+fixes the production issue reported from Vendor Studio Business Profile:
+state/city options could be empty and pincode/address/profile fields could
+appear saved in the UI but fail to persist and hydrate after refresh.
+
+The fix was applied across the related web surfaces instead of only the
+clicked field because the same compatibility gap existed in multiple
+profile and service flows.
+
+### Scope Covered
+
+- Vendor Studio Business Profile at `/vendor-studio/listing`.
+- Vendor profile at `/vendor/profile`.
+- Vendor onboarding at `/vendor/onboarding`.
+- Customer profile at `/customer/profile`.
+- Account profile at `/account/profile`.
+- Customer signup location picker at `/customer/signup`.
+- Vendor service add/edit, public search, vendor profile cards, quote
+  attachments, project/enquiry dynamic routes, and shared customer/vendor
+  layouts from the broader audit.
+
+### Root Cause Summary
+
+- City rows from the backend can arrive as `city`, `cities`, `data`, or
+  `result`, and can use `city_name/city_id` instead of `name/id`. Some web
+  readers were de-duping or mapping those rows as empty values.
+- Saved vendor/customer rows can contain either display names or master IDs
+  for state and city. Dropdowns expected a single normalized option value.
+- Vendor Studio listing saves through the legacy mobile-compatible
+  `/vendor/step1` route, while other profile pages save through canonical
+  `/vendors/me` or `/customers/me`; the accepted aliases were inconsistent.
+- Several visible UI fields, especially pincode, address, and profile photo,
+  were not always included in both the frontend save payload and the backend
+  parser for that route.
+- Some previous audit gaps were caused by route/nullability assumptions in
+  Next dynamic pages and by public adapters not normalizing uploaded image
+  fields consistently.
+
+### What Changed
+
+- Added shared master-data normalization helpers for state/city rows:
+  `optionByValue`, `normalizedOptionId`, and `cityLookupPayload`.
+- Expanded master-row uniqueness to include `city_name`, `city_id`,
+  `state_name`, and `state_id`, preventing valid city dropdown rows from
+  being filtered out.
+- Updated `commonApi.getCity` to send the existing `state_id` contract plus
+  additive mobile-compatible aliases: `city_state_id`, `state_name`, and
+  `city_state`.
+- Added common public `/get_states_by_country_id` and `/get_city` handlers
+  that preserve existing response envelopes while also returning `data`.
+- Hardened Vendor Studio Business Profile so company name, owner/full name,
+  description, email, state, city, pincode, address, and profile image
+  hydrate from existing backend shapes and save through the legacy Step 1
+  contract.
+- Kept state/city values persisted as master IDs when selected from the
+  dropdown, while still tolerating rows already saved as labels.
+- Made profile image upload persist immediately through `profile_image`,
+  `profile_photo`, and `profile_photo_url` aliases.
+- Hardened vendor/customer/account profile saves so pincode and address are
+  included in the save payload and hydrated after refresh.
+- Hardened customer signup and vendor onboarding city loading to use the
+  selected state plus compatibility aliases.
+- Widened canonical `PUT /vendors/me` additively for `email_id`,
+  `state_id`, `city_id`, `pincode`, `address`, `description`,
+  `profile_image`, and `profile_photo`.
+- Kept canonical `PUT /customers/me` additive support for
+  `customer_name`, `email_id`, `state_id`, `city_id`, `pincode`,
+  `address`, `profile_image`, and `profile_photo`.
+- Preserved broader audit fixes for service tag/pricing aliases, uploaded
+  service images, public avatar fallbacks, search count filtering, quote
+  attachment persistence, and dynamic route nullability.
+
+### Compatibility Guardrails
+
+- OTP bypass code, bypass constants, login screens, OTP verification routes,
+  and OTP configuration were not modified.
+- API request/response changes are additive only. Existing mobile/web
+  request fields remain accepted.
+- Existing response envelopes remain intact. New mirrors such as `data`
+  are added beside existing keys like `city` and `states_list`.
+- Database writes use existing columns already covered by migrations:
+  `state`, `city`, `address`, `pincode`, `profile_image`, and
+  `profile_photo`.
+- No destructive migration, response-field removal, request-field removal,
+  or DB backfill was introduced.
+
+### Verification
+
+- `npm run build --workspace backend` passed.
+- `npx tsc --noEmit` passed.
+- `npm run lint` passed with existing warnings only.
+- `npm run build` passed and generated all 50 app routes.
+- `git diff --check` passed.
+- Read-only Vayil DB health check was attempted, but this workspace has no
+  active `DB_HOST`, `DB_USER`, `DB_PASSWORD`, or `DB_NAME`, so a live
+  database write/read round trip could not be run from here.
+- Fresh production preview started on `http://localhost:3002`.
+- Preview route smoke returned HTTP 200 for:
+  `/`, `/search?q=painting`, `/customer/signup`, `/customer/profile`,
+  `/account/profile`, `/vendor/profile`, `/vendor/onboarding`, and
+  `/vendor-studio/listing`.
+- Preview HTML was scanned for `Server Error`, `Cannot find module`,
+  `Application error`, `Unhandled Runtime`, and `Internal Server Error`;
+  no matches were found.
+
 ## v4.5.91 - Mobile-team MySQL cutover readiness (2026-07-11)
 
 ### Why

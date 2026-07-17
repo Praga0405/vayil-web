@@ -20,7 +20,7 @@ const NAV = [
 ]
 
 export default function VendorStudioLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+  const pathname = usePathname() || ''
   const router = useRouter()
   const { user, token } = useUserAuth()
   const [hydrated, setHydrated] = useState(false)

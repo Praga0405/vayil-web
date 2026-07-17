@@ -25,7 +25,8 @@ async function loadRazorpay(): Promise<void> {
 }
 
 export default function PaymentOptionSheetPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
 
   const [option, setOption] = useState<Option>('full')

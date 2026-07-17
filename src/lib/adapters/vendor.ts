@@ -21,6 +21,7 @@ type BackendVendor = {
   mobile?: string | null
   email?: string | null
   city?: string | null
+  city_name?: string | null
   status?: string | null
   proof_type?: string | null
   proof_number?: string | null
@@ -36,15 +37,24 @@ type BackendVendor = {
 type BackendListing = {
   vendor_service_id: number
   vendor_id: number
-  category_id?: number | null
+  category_id?: number | string | null
+  service_category?: number | string | null
+  subcategory_id?: number | string | null
+  service_subcategory?: number | string | null
   category_name?: string | null
   category_slug?: string | null
   title?: string | null
   service_title?: string | null
   description?: string | null
   price?: number | string | null
+  pricing_type?: string | null
+  price_type?: string | null
   unit?: string | null
   unit_name?: string | null
+  thumbnail?: string | null
+  service_image?: string | null
+  service_image_url?: string | null
+  cover_image?: string | null
   status?: boolean | number | null
 }
 
@@ -60,16 +70,32 @@ function yearsFromOnboarded(date?: string | null): number {
   return Math.max(1, Math.round((Date.now() - onboarded) / (365 * 86400_000)))
 }
 
-function priceTypeFromUnit(unit?: string | null): DummyService['price_type'] {
-  switch ((unit ?? '').toLowerCase()) {
+function priceTypeFromValue(value?: string | null): DummyService['price_type'] {
+  switch ((value ?? '').toLowerCase()) {
+    case 'quote':
+    case 'quote_based':
+    case 'quote-based': return 'quote_based'
+    case 'per_unit':
+    case 'per-unit':
+    case 'unit':      return 'per_unit'
+    case 'per_rft':
+    case 'per-rft':
+    case 'rft':       return 'per_rft'
     case 'per_hour':
-    case 'per-hour':  return 'per_hour'
+    case 'per-hour':
+    case 'hour':      return 'per_hour'
     case 'per_visit':
-    case 'per-visit': return 'per_visit'
+    case 'per-visit':
+    case 'visit':     return 'per_visit'
     case 'per_sqft':
-    case 'per-sqft':  return 'per_sqft'
+    case 'per-sqft':
+    case 'sqft':      return 'per_sqft'
     default:          return 'fixed'
   }
+}
+
+function priceTypeFromListing(row: BackendListing): DummyService['price_type'] {
+  return priceTypeFromValue(row.price_type ?? row.pricing_type ?? row.unit_name ?? row.unit)
 }
 
 const slugify = (value?: string | null) =>
@@ -84,14 +110,23 @@ function resolveCategory(row?: BackendListing | null) {
   if (!row) return null
   const rawSlug = slugify(row.category_slug)
   const rawName = row.category_name ?? ''
-  const rawCategory = row.category_id ? `category-${row.category_id}` : ''
+  const categoryValue = row.category_id ?? row.service_category
+  const rawCategory = categoryValue ? `category-${categoryValue}` : ''
+  const categoryText = categoryValue == null ? '' : String(categoryValue)
   return (
     SERVICE_CATEGORIES.find(c => c.slug === rawSlug) ||
     SERVICE_CATEGORIES.find(c => c.label.toLowerCase() === rawName.toLowerCase()) ||
     SERVICE_CATEGORIES.find(c => c.slug === slugify(rawName)) ||
+    SERVICE_CATEGORIES.find(c => c.slug === slugify(categoryText)) ||
+    SERVICE_CATEGORIES.find(c => c.label.toLowerCase() === categoryText.toLowerCase()) ||
     SERVICE_CATEGORIES.find(c => c.slug === rawCategory) ||
     null
   )
+}
+
+function listingImage(row: BackendListing, category: ReturnType<typeof resolveCategory>) {
+  return row.service_image || row.service_image_url || row.thumbnail || row.cover_image ||
+    category?.hero_image || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=400&fit=crop'
 }
 
 export function adaptListingToService(row: BackendListing): DummyService {
@@ -101,9 +136,9 @@ export function adaptListingToService(row: BackendListing): DummyService {
     id:          String(row.vendor_service_id),
     title:       row.service_title ?? row.title ?? 'Untitled service',
     price:       Number(row.price ?? 0),
-    price_type:  priceTypeFromUnit(row.unit_name ?? row.unit),
+    price_type:  priceTypeFromListing(row),
     description: row.description ?? '',
-    image:       category?.hero_image ?? 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=400&fit=crop',
+    image:       listingImage(row, category),
   }
   return Object.assign(service, {
     category_slug: categorySlug || undefined,
@@ -138,6 +173,7 @@ export function adaptVendorDetail(
     : 0
 
   const firstCategory = resolveCategory(listings[0])
+  const cityName = vendor.city_name || vendor.city || 'Coimbatore'
 
   return {
     id:              String(vId),
@@ -147,12 +183,12 @@ export function adaptVendorDetail(
     owner_name:      owner,
     avatar:          photo || placeholderAvatar(company),
     cover_image:     firstCategory?.hero_image ?? placeholderCover,
-    city:            vendor.city ?? 'Coimbatore',
-    area:            vendor.city ?? 'Coimbatore',
+    city:            cityName,
+    area:            cityName,
     pincode:         '641001',
     phone:           vendor.mobile ?? vendor.phone ?? '',
     email:           vendor.email ?? '',
-    description:     `${company} delivers quality home services across ${vendor.city ?? 'the city'}.`,
+    description:     `${company} delivers quality home services across ${cityName}.`,
     tagline:         `Trusted by customers since ${new Date().getFullYear() - years}`,
     years_experience: years,
     completed_jobs:  Math.max(5, Math.round(years * 12)),
@@ -176,7 +212,7 @@ export function adaptVendorDetail(
     portfolio:       [],
     reviews,
     languages:       ['English', 'Tamil'],
-    service_areas:   [vendor.city ?? 'Coimbatore'],
+    service_areas:   [cityName],
   }
 }
 
@@ -192,6 +228,7 @@ type BackendVendorListRow = {
   name?: string | null
   company_name?: string | null
   city?: string | null
+  city_name?: string | null
   rating?: number | string | null
   status?: string | null
   listings?: BackendListing[]
@@ -203,6 +240,7 @@ export function adaptVendorListRow(row: BackendVendorListRow): DummyVendor {
     name:         row.name ?? undefined,
     company_name: row.company_name ?? undefined,
     city:         row.city ?? undefined,
+    city_name:    row.city_name ?? undefined,
     rating:       row.rating ?? undefined,
     status:       row.status ?? undefined,
   }, row.listings ?? [], [])

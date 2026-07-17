@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi } from '@/lib/api/client'
-import { apiArray, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
+import { apiArray, cityLookupPayload, normalizedOptionId, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
 import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea } from '@/components/ui'
 import { ProfileImageUploader } from '@/components/shared/ProfileImageUploader'
@@ -18,11 +18,13 @@ export default function VendorProfilePage() {
 
   const [form, setForm] = useState({
     company_name: '', description: '', email_id: '', state_id: '', city_id: '',
+    pincode: '', address: '',
   })
   const draftKey = user?.id ? `vayil:draft:vendor-profile:${user.id}` : 'vayil:draft:vendor-profile'
   const [states,  setStates]  = useState<any[]>([])
   const [cities,  setCities]  = useState<any[]>([])
   const [saving,  setSaving]  = useState(false)
+  const [profileLoaded, setProfileLoaded] = useState(false)
 
   useEffect(() => {
     if (!hydrated) return
@@ -33,32 +35,45 @@ export default function VendorProfilePage() {
     Promise.all([vendorApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
         const p = pr.data?.vendor || pr.data?.data || pr.data?.result || {}
+        const stateRows = uniqueMasterRows(apiArray(sr, ['states_list', 'states']))
         const hydratedForm = {
           company_name: p.company_name || '',
           description:  p.description || '',
           email_id:     p.email_id || p.email || user?.email || '',
-          state_id:     p.state_id?.toString() || '',
-          city_id:      p.city_id?.toString() || '',
+          state_id:     normalizedOptionId(stateRows, p.state_id ?? p.state),
+          city_id:      (p.city_id ?? p.city)?.toString() || '',
+          pincode:      p.pincode ? String(p.pincode) : '',
+          address:      p.address || '',
         }
         const draft = loadDraft<typeof hydratedForm>(draftKey)
-        setForm(draft ? { ...hydratedForm, ...draft } : hydratedForm)
-        setStates(uniqueMasterRows(apiArray(sr, ['states_list', 'states'])))
-        if (p.state_id) {
-          commonApi.getCity(Number(p.state_id)).then(r => {
-            setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
+        const hasDraft = draft && Object.values(draft).some(value => String(value ?? '').trim() !== '')
+        const nextForm = hasDraft ? { ...hydratedForm, ...draft } : hydratedForm
+        setForm(nextForm)
+        setStates(stateRows)
+        setProfileLoaded(true)
+        if (nextForm.state_id) {
+          commonApi.getCity(cityLookupPayload(stateRows, nextForm.state_id)).then(r => {
+            const cityRows = uniqueMasterRows(apiArray(r, ['city', 'cities']))
+            setCities(cityRows)
+            setForm(current => ({
+              ...current,
+              city_id: normalizedOptionId(cityRows, current.city_id || hydratedForm.city_id),
+            }))
           }).catch(() => setCities([]))
         }
       })
   }, [token, hydrated, user?.type])
 
   useEffect(() => {
-    if (hydrated && token) saveDraft(draftKey, form)
-  }, [form, hydrated, token, draftKey])
+    if (hydrated && token && profileLoaded) saveDraft(draftKey, form)
+  }, [form, hydrated, token, draftKey, profileLoaded])
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
     if (k === 'state_id') {
-      commonApi.getCity(Number(e.target.value)).then(r => {
+      setForm(f => ({ ...f, state_id: e.target.value, city_id: '' }))
+      if (!e.target.value) { setCities([]); return }
+      commonApi.getCity(cityLookupPayload(states, e.target.value)).then(r => {
         setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
       })
     }
@@ -67,7 +82,14 @@ export default function VendorProfilePage() {
   const save = async () => {
     setSaving(true)
     try {
-      await vendorApi.saveStep1(form)
+      await vendorApi.saveStep1({
+        ...form,
+        email: form.email_id,
+        state: form.state_id,
+        city: form.city_id,
+        about: form.description,
+        short_bio: form.description,
+      })
       if (user && token) setAuth({ ...user, email: form.email_id || user.email }, token)
       clearDraft(draftKey)
       toast.success('Profile updated!')
@@ -111,7 +133,9 @@ export default function VendorProfilePage() {
             options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
           <Select label="City" value={form.city_id} onChange={set('city_id')}
             options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
+          <Input label="Pincode" value={form.pincode} onChange={set('pincode')} maxLength={6} />
         </div>
+        <Textarea label="Address" rows={3} value={form.address} onChange={set('address')} />
         <Button full loading={saving} onClick={save}>Save Changes</Button>
       </div>
 

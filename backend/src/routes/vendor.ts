@@ -10,25 +10,60 @@ export const vendorRouter = Router();
 vendorRouter.use(requireAuth(['vendor']));
 vendorRouter.use(requireApprovedVendor({ allowPaths: ['/me', '/kyc', '/submit-for-review'] }));
 
+function blankToNull(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
 vendorRouter.get('/me', async (req: AuthRequest, res, next) => {
   try { ok(res, { vendor: await one<any>('SELECT * FROM vendors WHERE vendor_id = :id', { id: req.user!.id }) }); } catch (err) { next(err); }
 });
 
 vendorRouter.put('/me', async (req: AuthRequest, res, next) => {
   try {
-    const body = z.object({ name: z.string().optional(), company_name: z.string().optional(), email: z.string().email().optional(), city: z.string().optional(), gst_number: z.string().optional(), is_gst_registered: z.boolean().optional() }).parse(req.body);
-    // mysql2 rejects bound `undefined` — normalise every optional to null.
-    const params = {
-      id:                req.user!.id,
-      name:              body.name              ?? null,
-      company_name:      body.company_name      ?? null,
-      email:             body.email             ?? null,
-      city:              body.city              ?? null,
-      gst_number:        body.gst_number        ?? null,
+    const body = z.object({
+      name: z.string().optional(),
+      full_name: z.string().optional(),
+      owner_name: z.string().optional(),
+      company_name: z.string().optional(),
+      email: z.string().optional(),
+      email_id: z.string().optional(),
+      state: z.union([z.string(), z.number()]).optional(),
+      state_id: z.union([z.string(), z.number()]).optional(),
+      city: z.union([z.string(), z.number()]).optional(),
+      city_id: z.union([z.string(), z.number()]).optional(),
+      address: z.string().optional(),
+      pincode: z.union([z.string(), z.number()]).optional(),
+      description: z.string().optional(),
+      about: z.string().optional(),
+      short_bio: z.string().optional(),
+      profile_image: z.string().optional(),
+      profile_photo: z.string().optional(),
+      gst_number: z.string().optional(),
+      is_gst_registered: z.boolean().optional(),
+      fcm_token: z.string().optional(),
+    }).parse(req.body);
+
+    const vendor = await vendorSvc.updateVendor(req.user!.id, {
+      name: blankToNull(body.name),
+      full_name: blankToNull(body.full_name ?? body.owner_name),
+      owner_name: blankToNull(body.owner_name ?? body.full_name),
+      company_name: blankToNull(body.company_name),
+      email: blankToNull(body.email ?? body.email_id),
+      state: blankToNull(body.state ?? body.state_id),
+      city: blankToNull(body.city ?? body.city_id),
+      address: blankToNull(body.address),
+      pincode: blankToNull(body.pincode),
+      about: blankToNull(body.about ?? body.description ?? body.short_bio),
+      short_bio: blankToNull(body.short_bio ?? body.description ?? body.about),
+      profile_image: blankToNull(body.profile_image ?? body.profile_photo),
+      profile_photo: blankToNull(body.profile_photo ?? body.profile_image),
+      gst_number: blankToNull(body.gst_number),
       is_gst_registered: body.is_gst_registered ?? null,
-    };
-    await exec(`UPDATE vendors SET name = COALESCE(:name, name), company_name = COALESCE(:company_name, company_name), email = COALESCE(:email, email), city = COALESCE(:city, city), gst_number = COALESCE(:gst_number, gst_number), is_gst_registered = COALESCE(:is_gst_registered, is_gst_registered) WHERE vendor_id = :id`, params);
-    ok(res, { vendor: await one<any>('SELECT * FROM vendors WHERE vendor_id = :id', { id: req.user!.id }) });
+      fcm_token: blankToNull(body.fcm_token),
+    });
+    ok(res, { vendor });
   } catch (err) { next(err); }
 });
 
@@ -82,6 +117,7 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
       message: z.string().optional(),
       estimatedDays: z.number().optional(),
       validUntil: z.string().optional(),
+      files: z.string().optional(),
     }).parse(req.body);
 
     // v4.5.23 — Ownership check. Previously this INSERT only used the
@@ -102,8 +138,8 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
     // Coerce undefined → null so mysql2 named-placeholders don't blow up.
     const result = await exec(
       `INSERT INTO quotation
-         (enquiry_id, vendor_id, amount, message, estimated_days, valid_until, status, created_at)
-       VALUES (:enquiryId, :vendorId, :amount, :message, :estimatedDays, :validUntil, 'sent', NOW())`,
+         (enquiry_id, vendor_id, amount, message, estimated_days, valid_until, files, status, created_at)
+       VALUES (:enquiryId, :vendorId, :amount, :message, :estimatedDays, :validUntil, :files, 'sent', NOW())`,
       {
         enquiryId:     req.params.id,
         vendorId:      req.user!.id,
@@ -111,6 +147,7 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
         message:       body.message       ?? null,
         estimatedDays: body.estimatedDays ?? null,
         validUntil:    body.validUntil    ?? null,
+        files:         body.files         ?? null,
       },
     );
     await exec(`UPDATE enquiries SET status = 'quoted' WHERE enquiry_id = :id`, { id: req.params.id });
@@ -125,6 +162,7 @@ vendorRouter.put('/enquiries/:id/quotes/:quoteId', async (req: AuthRequest, res,
       message: z.string().optional(),
       estimatedDays: z.number().optional(),
       validUntil: z.string().optional(),
+      files: z.string().optional(),
     }).parse(req.body);
 
     const quote = await one<any>(
@@ -149,6 +187,7 @@ vendorRouter.put('/enquiries/:id/quotes/:quoteId', async (req: AuthRequest, res,
               message = COALESCE(:message, message),
               estimated_days = COALESCE(:estimatedDays, estimated_days),
               valid_until = COALESCE(:validUntil, valid_until),
+              files = COALESCE(:files, files),
               status = 'sent'
         WHERE quotation_id = :quoteId`,
       {
@@ -157,6 +196,7 @@ vendorRouter.put('/enquiries/:id/quotes/:quoteId', async (req: AuthRequest, res,
         message: body.message ?? null,
         estimatedDays: body.estimatedDays ?? null,
         validUntil: body.validUntil ?? null,
+        files: body.files ?? null,
       },
     );
     await exec(`UPDATE enquiries SET status = 'quoted' WHERE enquiry_id = :id`, { id: req.params.id });

@@ -401,7 +401,8 @@ export const commonApi = {
   getTags:          () => commonClient.get('/service-tags'),
   getTools:         () => commonClient.get('/getTools'),
   getLanguages:     () => commonClient.get('/getLanguages'),
-  getCity:          (state_id: number) => commonClient.post('/get_city', { state_id }),
+  getCity:          (state: number | string | Record<string, unknown>) =>
+                      commonClient.post('/get_city', typeof state === 'object' ? state : { state_id: state }),
   getStates:        () => commonClient.get('/get_states_by_country_id', { params: { country_id: 101 } }),
   listProofTypes:   () => commonClient.post('/listProofTypes', {}),
   listStatuses:     () => commonClient.get('/listStatus'),

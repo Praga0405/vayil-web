@@ -9,7 +9,8 @@ import { formatCurrency } from '@/lib/utils'
 import { FileText, Package, Wallet, ChevronRight, Briefcase, CheckCircle2, Clock, IndianRupee } from 'lucide-react'
 
 export default function VendorJobDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
 

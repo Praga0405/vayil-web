@@ -9,7 +9,7 @@ export interface DummyService {
   id: string
   title: string
   price: number
-  price_type: 'fixed' | 'per_hour' | 'per_visit' | 'per_sqft'
+  price_type: 'fixed' | 'per_hour' | 'per_visit' | 'per_sqft' | 'per_rft' | 'per_unit' | 'quote_based'
   description: string
   image: string
 }

@@ -3,7 +3,10 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
-import { apiArray, isActiveMaster, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
+import {
+  apiArray, cityLookupPayload, isActiveMaster, normalizedOptionId,
+  optionId, optionLabel, uniqueMasterRows,
+} from '@/lib/api/compat'
 import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload } from '@/components/ui'
 import { cn } from '@/lib/utils'
@@ -67,27 +70,36 @@ export default function VendorOnboardingPage() {
     if (draft?.selectedCat) setSelectedCat(draft.selectedCat)
     if (draft?.selectedSubcat) setSelectedSubcat(draft.selectedSubcat)
     if (Array.isArray(draft?.selectedTags)) setSelectedTags(draft.selectedTags)
-    vendorApi.getProfile().then(r => {
+    Promise.all([
+      vendorApi.getProfile().catch(() => ({ data: {} })),
+      commonApi.getStates(),
+    ]).then(([r, sr]) => {
       const p = r.data?.vendor || r.data?.data || r.data?.result || {}
+      const stateRows = uniqueMasterRows(apiArray(sr, ['states_list', 'states']))
+      const stateId = normalizedOptionId(stateRows, p.state_id ?? p.state)
       setCompany(c => ({
         ...c,
         company_name: c.company_name || p.company_name || '',
         description: c.description || p.description || p.about || p.short_bio || '',
         email_id: c.email_id || p.email_id || p.email || user?.email || '',
-        state_id: c.state_id || String(p.state_id || ''),
+        state_id: c.state_id || stateId,
         city_id: c.city_id || String(p.city_id || ''),
       }))
-      if (p.state_id) {
-        commonApi.getCity(Number(p.state_id)).then(cr => {
-          setCities(uniqueMasterRows(apiArray(cr, ['city', 'cities'])))
+      setStates(stateRows)
+      const lookupState = stateId || String(p.state_id || '')
+      if (lookupState) {
+        commonApi.getCity(cityLookupPayload(stateRows, lookupState)).then(cr => {
+          const cityRows = uniqueMasterRows(apiArray(cr, ['city', 'cities']))
+          setCities(cityRows)
+          setCompany(c => ({
+            ...c,
+            city_id: normalizedOptionId(cityRows, c.city_id || p.city_id || p.city),
+          }))
         }).catch(() => setCities([]))
       }
     }).catch(() => {})
     commonApi.getCategories().then(r => {
       setCats(uniqueMasterRows(apiArray(r, ['categories'])))
-    })
-    commonApi.getStates().then(r => {
-      setStates(uniqueMasterRows(apiArray(r, ['states_list', 'states'])))
     })
     commonApi.getLanguages().then(r => {
       setLanguages(uniqueMasterRows(apiArray(r, ['languages'])))
@@ -110,8 +122,13 @@ export default function VendorOnboardingPage() {
         await vendorApi.saveStep1({
           company_name: company.company_name,
           description:  company.description,
+          about:        company.description,
+          short_bio:    company.description,
           email_id:     company.email_id,
+          email:        company.email_id,
+          state:        company.state_id,
           state_id:     company.state_id,
+          city:         company.city_id,
           city_id:      company.city_id,
         })
         if (user && token) setAuth({ ...user, email: company.email_id || user.email }, token)
@@ -221,7 +238,7 @@ export default function VendorOnboardingPage() {
                 <Select label="State" value={company.state_id}
                   onChange={e => {
                     setCompany(c => ({ ...c, state_id: e.target.value, city_id: '' }))
-                    commonApi.getCity(Number(e.target.value)).then(r => {
+                    commonApi.getCity(cityLookupPayload(states, e.target.value)).then(r => {
                       setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
                     })
                   }}

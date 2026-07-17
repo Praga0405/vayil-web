@@ -15,7 +15,8 @@ import { vendorApi, normalizeUploadedUrls } from '@/lib/api/client'
 import { demoOrLive, IS_DEMO_MODE } from '@/lib/demoMode'
 
 export default function MilestoneUpdatePage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const [comment, setComment] = useState('')
   const [files, setFiles] = useState<File[]>([])

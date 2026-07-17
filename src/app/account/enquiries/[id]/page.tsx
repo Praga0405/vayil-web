@@ -34,7 +34,8 @@ async function loadRazorpay(): Promise<void> {
 }
 
 export default function EnquiryDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
 
   /* ── All hooks up-front (PRD audit P0-1) ── */

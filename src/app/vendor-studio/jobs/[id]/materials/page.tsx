@@ -13,7 +13,8 @@ import { demoOrLive } from '@/lib/demoMode'
 type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'> & { id?: number }
 
 export default function MaterialsManagerPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
 

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import PublicHeader from '@/components/shared/PublicHeader'
+import { Avatar } from '@/components/ui'
 import {
   Star, MapPin, Shield, Clock, ChevronRight, Filter, X, ArrowUpDown,
   Sparkles, CheckCircle2, ChevronDown,
@@ -52,6 +53,16 @@ function vendorMatchesCategories(vendor: DummyVendor, selectedCategories: string
   return selectedCategories.some(slug => categorySlugs.includes(slug))
 }
 
+function normalizeCityName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function vendorMatchesCity(vendor: DummyVendor, selectedCity: string): boolean {
+  if (!selectedCity) return true
+  if (!vendor.city) return true
+  return normalizeCityName(vendor.city) === normalizeCityName(selectedCity)
+}
+
 /* ─── Wrapper for Suspense (required for useSearchParams in Next 14) ─── */
 export default function SearchPage() {
   return (
@@ -66,8 +77,8 @@ type SortKey = 'relevance' | 'rating' | 'price_low' | 'price_high' | 'experience
 function SearchInner() {
   const router = useRouter()
   const params = useSearchParams()
-  const queryParam = params.get('q') || ''
-  const categoryParam = params.get('category') || ''
+  const queryParam = params?.get('q') || ''
+  const categoryParam = params?.get('category') || ''
 
   /* Filters */
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
@@ -102,9 +113,7 @@ function SearchInner() {
     // carries `city`, so this needs no API change). If a vendor's city
     // is missing/empty, keep them in the list so partial data doesn't
     // disappear silently.
-    if (selectedCity) {
-      v = v.filter(x => !x.city || x.city.toLowerCase() === selectedCity.toLowerCase())
-    }
+    if (selectedCity) v = v.filter(x => vendorMatchesCity(x, selectedCity))
 
     if (selectedCategories.length > 0) {
       v = v.filter(x => vendorMatchesCategories(x, selectedCategories))
@@ -128,7 +137,8 @@ function SearchInner() {
 
   /* Category counts */
   const counts = useMemo(() => {
-    const base = queryParam ? searchInList(allVendors, queryParam) : allVendors
+    const base = (queryParam ? searchInList(allVendors, queryParam) : allVendors)
+      .filter(v => vendorMatchesCity(v, selectedCity))
     const map: Record<string, number> = {}
     base.forEach(v => {
       vendorCategorySlugs(v).forEach(slug => {
@@ -136,7 +146,7 @@ function SearchInner() {
       })
     })
     return map
-  }, [allVendors, queryParam])
+  }, [allVendors, queryParam, selectedCity])
 
   const activeCategory: ServiceCategory | undefined = selectedCategories.length === 1
     ? SERVICE_CATEGORIES.find(c => c.slug === selectedCategories[0])
@@ -552,8 +562,9 @@ function VendorCard({ v }: { v: DummyVendor }) {
           )}
         </div>
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between">
-          <img src={v.avatar} alt={v.owner_name}
-            className="w-12 h-12 rounded-full border-2 border-white object-cover shadow" />
+          <div className="rounded-full border-2 border-white shadow bg-white">
+            <Avatar name={v.owner_name || v.company_name} src={v.avatar} size={12} />
+          </div>
           <span className="bg-white/95 text-navy text-[11px] font-semibold px-2 py-1 rounded">
             {v.service_label}
           </span>

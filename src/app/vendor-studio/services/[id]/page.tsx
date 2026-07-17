@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
 import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
-import { apiArray, isActiveMaster, optionId, optionLabel, serviceImagePayload, serviceImageUrls, uniqueMasterRows } from '@/lib/api/compat'
+import { apiArray, firstIdValue, isActiveMaster, optionId, optionLabel, serviceImagePayload, serviceImageUrls, uniqueMasterRows } from '@/lib/api/compat'
 import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload, PageLoader, StatusBadge } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
@@ -86,7 +86,7 @@ export default function EditServicePage() {
         description:    s.description || '',
         category_id:    String(categoryId || ''),
         subcategory_id: String(s.subcategory_id || s.service_subcategory || ''),
-        tag_id:         String(s.tag_id || ''),
+        tag_id:         firstIdValue(s.tag_id ?? s.tag_ids ?? s.service_tag),
         price_type:     s.price_type || s.pricing_type || 'fixed',
         price:          String(s.price ?? ''),
         unit:           s.unit || s.unit_name || 'sqft',
@@ -155,6 +155,7 @@ export default function EditServicePage() {
         subcategory_id: form.subcategory_id || undefined,
         service_subcategory: form.subcategory_id || undefined,
         tag_id:         form.tag_id || undefined,
+        tag_ids:        form.tag_id ? [form.tag_id] : undefined,
         price_type:     form.price_type,
         pricing_type:   form.price_type,
         price:          form.price,

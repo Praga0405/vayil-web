@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useLiveEnquiry } from '@/hooks/useVendorStudio'
 import { Button, Input, Textarea, PageLoader } from '@/components/ui'
-import { vendorApi } from '@/lib/api/client'
+import { normalizeUploadedUrls, vendorApi } from '@/lib/api/client'
 import { demoOrLive } from '@/lib/demoMode'
 import { ChevronLeft, FileText, Paperclip } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
@@ -45,10 +45,18 @@ export default function SendQuotePage() {
     if (Number(form.price) <= 0) { toast.error('Price must be greater than 0'); return }
     setSubmitting(true)
     try {
+      let uploadedFiles: string[] = []
+      if (files.length > 0) {
+        const fd = new FormData()
+        files.forEach(file => fd.append('files', file))
+        const uploadRes = await vendorApi.uploadFiles(fd)
+        uploadedFiles = normalizeUploadedUrls(uploadRes)
+      }
       const payload = {
         amount:        Number(form.price),
         message:       form.description.trim(),
         estimatedDays: form.days ? Number(form.days) : undefined,
+        files:         uploadedFiles.length ? uploadedFiles.join(',') : undefined,
       }
       await demoOrLive(() => Promise.race([
         quoteId ? vendorApi.updateQuote(id, quoteId, payload) : vendorApi.postQuote(id, payload),

@@ -69,6 +69,7 @@ export default function AddServicePage() {
         category_id:    form.category_id,
         subcategory_id: form.subcategory_id,
         price_type:     form.price_type,
+        pricing_type:   form.price_type,
         price:          form.price,
         unit:           form.unit,
         ...serviceImagePayload(imageUrls),

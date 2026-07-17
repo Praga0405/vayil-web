@@ -166,6 +166,39 @@ async function legacyVendorIdByPhone(phone: string) {
   return row?.id ?? null;
 }
 
+async function ensureVendorForRegister(body: any, phone: string) {
+  const existingId = await legacyVendorIdByPhone(phone);
+  const name = pickNullable(body, 'name', 'full_name', 'owner_name') || 'Vendor';
+  const email = pickNullable(body, 'email', 'email_id');
+  const phCode = pickNullable(body, 'ph_code', 'phone_code') || '+91';
+
+  if (existingId) {
+    await exec(
+      `UPDATE vendors
+          SET name = COALESCE(NULLIF(:name, ''), name),
+              full_name = COALESCE(NULLIF(:name, ''), full_name),
+              email = COALESCE(:email, email),
+              ph_code = COALESCE(:phCode, ph_code),
+              updated_at = NOW()
+        WHERE vendor_id = :id OR id = :id`,
+      { id: existingId, name, email, phCode },
+    ).catch(() => undefined);
+    return existingId;
+  }
+
+  const result: any = await exec(
+    `INSERT INTO vendors
+       (name, full_name, phone, mobile, ph_code, email, status, terms_accept, created_at)
+     VALUES (:name, :name, :phone, :phone, :phCode, :email, 'pending', 1, NOW())`,
+    { name, phone, phCode, email },
+  );
+  await exec(
+    `UPDATE vendors SET id = vendor_id WHERE vendor_id = :id AND (id IS NULL OR id = 0)`,
+    { id: result.insertId },
+  ).catch(() => undefined);
+  return result.insertId;
+}
+
 function legacyVendorServiceSelect(includeAggregates: boolean) {
   return `
     SELECT
@@ -971,8 +1004,9 @@ function legacyVendorJwt(vendorId: number | string) {
 legacyVendorRouter.post('/register', async (req, res, next) => {
   try {
     const phone = pickPhone(req.body);
+    if (!phone || phone.length < 8) throw new ApiError(400, 'Phone is required');
+    const vendorId = await ensureVendorForRegister(req.body, phone);
     await authService.requestOtp(phone, 'vendor');
-    const vendorId = await legacyVendorIdByPhone(phone);
     res.status(200).json({
       success: true,
       message: 'OTP sent successfully',
@@ -1045,6 +1079,13 @@ legacyVendorRouter.post('/vendor-login-otp', async (req, res, next) => {
     const phone = pickPhone(req.body);
     const out = await authService.requestLoginOtp(phone, 'vendor');
     const vendorId = out.user?.vendor_id ?? out.user?.id;
+    const deviceId = pickNullable(req.body, 'device_id', 'deviceId');
+    if (deviceId) {
+      await exec(
+        `UPDATE vendors SET device_id = :deviceId WHERE vendor_id = :id OR id = :id`,
+        { id: vendorId, deviceId },
+      ).catch(() => undefined);
+    }
     res.status(200).json({
       success: true,
       message: 'OTP sent for login',
@@ -1464,10 +1505,10 @@ legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, nex
       category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
       thumbnail: firstUploadedUrl(req.body),
-      pricing_type: req.body?.pricing_type,
+      pricing_type: req.body?.pricing_type ?? req.body?.price_type,
       certificate_url: req.body?.certificate_url || req.body?.certificate,
       minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
-      tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds'),
+      tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds', 'tag_id', 'tagId', 'service_tag', 'serviceTag'),
       status: approved ? active : false,
     });
     const rows = await legacyVendorServiceRows(req.user!.id, String(out?.vendor_service_id ?? out?.id));
@@ -1492,10 +1533,10 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
       category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
       thumbnail: firstUploadedUrl(req.body),
-      pricing_type: req.body?.pricing_type,
+      pricing_type: req.body?.pricing_type ?? req.body?.price_type,
       certificate_url: req.body?.certificate_url || req.body?.certificate,
       minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
-      tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds'),
+      tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds', 'tag_id', 'tagId', 'service_tag', 'serviceTag'),
       status: approved ? active : false,
     });
     const rows = await legacyVendorServiceRows(req.user!.id, serviceId);

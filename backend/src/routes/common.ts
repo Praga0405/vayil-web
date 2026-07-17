@@ -1,9 +1,74 @@
 import { Router } from 'express';
 import { one, query } from '../db';
 import { ApiError, ok } from '../utils/http';
+import { uniqueCityRows } from '../utils/city';
 
 export const commonRouter = Router();
 commonRouter.get('/health', (_req, res) => ok(res, { status: 'ok', service: 'vayil-backend', timestamp: new Date().toISOString() }));
+
+commonRouter.get('/get_states_by_country_id', async (req, res, next) => {
+  try {
+    const cid = Number((req.query as any)?.country_id ?? 101);
+    const rows = await query<any>(
+      `SELECT id, name, country_id, country_code,
+              NULL AS fips_code, NULL AS iso2, state_code, NULL AS type,
+              NULL AS latitude, NULL AS longitude,
+              created_at, updated_at, NULL AS flag, NULL AS wikiDataId,
+              COALESCE(status, 1) AS status, created_at AS created_on,
+              updated_at AS updated_on, COALESCE(is_deleted, 0) AS is_deleted
+         FROM states
+        WHERE country_id = :cid AND COALESCE(is_deleted,0)=0 AND status=1 ORDER BY name`,
+      { cid },
+    );
+    res.status(200).json({ success: true, states_list: rows, data: rows });
+  } catch (err) { next(err); }
+});
+
+commonRouter.post('/get_city', async (req, res, next) => {
+  try {
+    const sid = (req.body as any)?.state_id ?? (req.body as any)?.city_state_id;
+    const stateName = String((req.body as any)?.state_name || (req.body as any)?.city_state || '').trim();
+    const state = sid
+      ? await one<any>(
+          `SELECT name, state_code FROM states
+            WHERE id = :sid AND COALESCE(is_deleted,0)=0 LIMIT 1`,
+          { sid },
+        ).catch(() => null)
+      : null;
+    const resolvedStateName = stateName || state?.name || '';
+    const rows = sid
+      ? await query<any>(
+          `SELECT city_id, city_name, city_state, city_state_id,
+                  COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+             FROM city
+            WHERE COALESCE(is_deleted,0)=0 AND status=1
+              AND (
+                city_state_id = :sid
+                OR (:stateName <> '' AND LOWER(city_state) = LOWER(:stateName))
+                OR (:stateCode <> '' AND LOWER(city_state) = LOWER(:stateCode))
+              )
+            ORDER BY city_name`,
+          { sid, stateName: resolvedStateName, stateCode: state?.state_code || '' },
+        )
+      : resolvedStateName
+        ? await query<any>(
+            `SELECT city_id, city_name, city_state, city_state_id,
+                    COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+               FROM city
+              WHERE LOWER(city_state) = LOWER(:stateName)
+                AND COALESCE(is_deleted,0)=0 AND status=1
+              ORDER BY city_name`,
+            { stateName: resolvedStateName },
+          )
+        : await query<any>(
+            `SELECT city_id, city_name, city_state, city_state_id,
+                    COALESCE(status, 1) AS status, COALESCE(is_deleted, 0) AS is_deleted
+               FROM city
+              WHERE COALESCE(is_deleted,0)=0 AND status=1 ORDER BY city_name`,
+          );
+    res.status(200).json({ success: true, city: uniqueCityRows(rows), data: uniqueCityRows(rows) });
+  } catch (err) { next(err); }
+});
 
 // Public marketplace endpoints — vendor browsing must work for
 // signed-out visitors so the /search page can populate before login.
@@ -54,12 +119,17 @@ async function activeListingsForVendors(vendorIds: Array<number | string>) {
 async function publicVendorList(_req: any, res: any, next: any) {
   try {
     const rows = await query<any>(
-      `SELECT vendor_id AS id, vendor_id, name, company_name, city, rating, status,
+      `SELECT vendors.vendor_id AS id, vendors.vendor_id, vendors.name, vendors.company_name,
+              vendors.city, COALESCE(city.city_name, vendors.city) AS city_name,
+              vendors.rating, vendors.status,
               profile_image, profile_photo, onboarded_date, years_of_experience,
               mobile, phone, email
          FROM vendors
-        WHERE COALESCE(is_deleted, 0) = 0
-          AND COALESCE(accept_enquires, 1) = 1
+         LEFT JOIN city
+                ON city.city_id = CAST(vendors.city AS UNSIGNED)
+                OR LOWER(city.city_name) = LOWER(CAST(vendors.city AS CHAR))
+        WHERE COALESCE(vendors.is_deleted, 0) = 0
+          AND COALESCE(vendors.accept_enquires, 1) = 1
           AND ${approvedVendorWhere('vendors')}
           AND EXISTS (
             SELECT 1
@@ -67,7 +137,7 @@ async function publicVendorList(_req: any, res: any, next: any) {
              WHERE vs_check.vendor_id = vendors.vendor_id
                AND ${activeListingWhere('vs_check')}
           )
-        ORDER BY vendor_id DESC LIMIT 100`,
+        ORDER BY vendors.vendor_id DESC LIMIT 100`,
     );
     const listings = await activeListingsForVendors(rows.map((v: any) => v.vendor_id || v.id));
     const byVendor = new Map<number, any[]>();
@@ -86,10 +156,15 @@ async function publicVendorList(_req: any, res: any, next: any) {
 async function publicVendorDetail(req: any, res: any, next: any) {
   try {
     const vendor = await one<any>(
-      `SELECT vendor_id, name, company_name, city, rating, status, proof_type
+      `SELECT vendors.vendor_id, vendors.name, vendors.company_name,
+              vendors.city, COALESCE(city.city_name, vendors.city) AS city_name,
+              vendors.rating, vendors.status, vendors.proof_type
          FROM vendors
-        WHERE vendor_id = :id
-          AND COALESCE(is_deleted, 0) = 0
+         LEFT JOIN city
+                ON city.city_id = CAST(vendors.city AS UNSIGNED)
+                OR LOWER(city.city_name) = LOWER(CAST(vendors.city AS CHAR))
+        WHERE vendors.vendor_id = :id
+          AND COALESCE(vendors.is_deleted, 0) = 0
           AND ${approvedVendorWhere('vendors')}`,
       { id: req.params.id },
     );

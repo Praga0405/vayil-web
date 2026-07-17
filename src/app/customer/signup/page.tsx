@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { customerApi, commonApi } from '@/lib/api/client'
+import { apiArray, cityLookupPayload, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
 import { Button, Input, Select } from '@/components/ui'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
@@ -28,17 +29,15 @@ export default function CustomerSignupPage() {
     if (!hydrated) return
     if (!token) { router.replace('/customer/login'); return }
     commonApi.getStates().then(r => {
-      const data = r.data?.data || r.data?.result || []
-      setStates(Array.isArray(data) ? data : [])
+      setStates(uniqueMasterRows(apiArray(r, ['states_list', 'states'])))
     })
   }, [token])
 
   const loadCities = async (stateId: string) => {
     if (!stateId) return
     try {
-      const r = await commonApi.getCity(Number(stateId))
-      const data = r.data?.data || r.data?.result || []
-      setCities(Array.isArray(data) ? data : [])
+      const r = await commonApi.getCity(cityLookupPayload(states, stateId))
+      setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
     } catch { /* ignore */ }
   }
 
@@ -92,9 +91,9 @@ export default function CustomerSignupPage() {
             <Input label="Email (optional)" type="email" placeholder="you@email.com"
               value={form.email} onChange={set('email')} />
             <Select label="State" value={form.state_id} onChange={set('state_id')}
-              options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
+              options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
             <Select label="City" value={form.city_id} onChange={set('city_id')}
-              options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
+              options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
           </div>
 
           <Button full loading={loading} onClick={save} className="mt-6">

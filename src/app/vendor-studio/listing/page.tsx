@@ -3,26 +3,21 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import axios from 'axios'
 import { useUserAuth } from '@/stores/auth'
-import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
-import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge, FileUpload } from '@/components/ui'
+import { vendorApi, commonApi } from '@/lib/api/client'
+import {
+  apiArray, cityLookupPayload, normalizedOptionId, optionId, optionLabel,
+  serviceImageUrls, uniqueMasterRows,
+} from '@/lib/api/compat'
+import { loadDraft, saveDraft, clearDraft } from '@/lib/formDrafts'
+import { Button, Input, Select, Textarea, Avatar, PageLoader, EmptyState, StatusBadge } from '@/components/ui'
+import { ProfileImageUploader } from '@/components/shared/ProfileImageUploader'
 import { PageHero, PageSection, TwoColumn, StatGrid, FieldGrid } from '@/components/shared/PageLayout'
-import { Camera, Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight, Star } from 'lucide-react'
+import { Wrench, Plus, ToggleLeft, ToggleRight, ChevronRight, Star } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 type Tab = 'profile' | 'services' | 'reviews'
-
-const asArray = (...values: any[]) => {
-  for (const value of values) {
-    if (Array.isArray(value)) return value
-  }
-  return []
-}
-
-const optionValue = (...values: any[]) => {
-  const value = values.find(v => v !== undefined && v !== null && v !== '')
-  return value === undefined ? '' : String(value)
-}
+const PROFILE_DRAFT_KEY = 'vayil:draft:vendor-studio:listing-profile'
 
 const serviceIsActive = (service: any) => {
   const value = service?.is_active ?? service?.status
@@ -43,12 +38,12 @@ export default function VendorListingPage() {
     city_id: '',
     pincode: '',
     address: '',
-    profile_photo_url: '',
-    profile_photo_file: [] as File[],
+    profile_image: '',
   })
   const [states, setStates] = useState<any[]>([])
   const [cities, setCities] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
+  const [profileLoaded, setProfileLoaded] = useState(false)
 
   /* ── Services state ── */
   const [services, setServices] = useState<any[]>([])
@@ -75,30 +70,41 @@ export default function VendorListingPage() {
     if (!token) return
     Promise.all([vendorApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
-        const p = pr.data?.data || pr.data?.result || {}
-        setForm({
+        const p = pr.data?.vendor || pr.data?.data || pr.data?.result || {}
+        const stateRows = uniqueMasterRows(apiArray(sr, ['states_list', 'states']))
+        const baseForm = {
           company_name: p.company_name || p.name || user?.name || '',
           full_name:    p.full_name || p.owner_name || p.name || user?.name || '',
           description:  p.description || '',
           email_id:     p.email_id || p.email || user?.email || '',
-          state_id:     optionValue(p.state, p.state_id),
-          city_id:      optionValue(p.city, p.city_id),
-          pincode:      p.pincode || '',
+          state_id:     normalizedOptionId(stateRows, p.state_id ?? p.state),
+          city_id:      (p.city_id ?? p.city)?.toString() || '',
+          pincode:      p.pincode ? String(p.pincode) : '',
           address:      p.address || '',
-          profile_photo_url: p.profile_photo_url || p.profile_photo || p.profile_image || user?.profile_image || '',
-          profile_photo_file: [],
-        })
-        const s = asArray(sr.data?.states_list, sr.data?.data, sr.data?.result)
-        setStates(Array.isArray(s) ? s : [])
-        const stateId = optionValue(p.state, p.state_id)
-        if (stateId) {
-          commonApi.getCity(Number(stateId)).then(r => {
-            const c = asArray(r.data?.city, r.data?.data, r.data?.result)
-            setCities(c)
+          profile_image: p.profile_photo_url || p.profile_photo || p.profile_image || user?.profile_image || '',
+        }
+        const draft = loadDraft<typeof baseForm>(PROFILE_DRAFT_KEY)
+        const hasDraft = draft && Object.values(draft).some(value => String(value ?? '').trim() !== '')
+        const nextForm = hasDraft ? { ...baseForm, ...draft } : baseForm
+        setForm(nextForm)
+        setStates(stateRows)
+        setProfileLoaded(true)
+        if (nextForm.state_id) {
+          commonApi.getCity(cityLookupPayload(stateRows, nextForm.state_id)).then(r => {
+            const cityRows = uniqueMasterRows(apiArray(r, ['city', 'cities']))
+            setCities(cityRows)
+            setForm(current => ({
+              ...current,
+              city_id: normalizedOptionId(cityRows, current.city_id || baseForm.city_id),
+            }))
           })
         }
       })
   }, [token])
+
+  useEffect(() => {
+    if (tab === 'profile' && profileLoaded) saveDraft(PROFILE_DRAFT_KEY, form)
+  }, [form, tab, profileLoaded])
 
   const loadServices = () => {
     setSvcLoading(true)
@@ -121,10 +127,13 @@ export default function VendorListingPage() {
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
     if (k === 'state_id') {
+      if (!e.target.value) {
+        setCities([])
+        return
+      }
       setForm(f => ({ ...f, state_id: e.target.value, city_id: '' }))
-      commonApi.getCity(Number(e.target.value)).then(r => {
-        const c = asArray(r.data?.city, r.data?.data, r.data?.result)
-        setCities(c)
+      commonApi.getCity(cityLookupPayload(states, e.target.value)).then(r => {
+        setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
       })
     }
   }
@@ -132,28 +141,32 @@ export default function VendorListingPage() {
   const save = async () => {
     setSaving(true)
     try {
-      let profilePhotoUrl = form.profile_photo_url
-      if (form.profile_photo_file.length > 0) {
-        const fd = new FormData()
-        form.profile_photo_file.slice(0, 1).forEach(file => fd.append('files', file))
-        const uploaded = await vendorApi.uploadFiles(fd)
-        profilePhotoUrl = normalizeUploadedUrls(uploaded)[0] || profilePhotoUrl
-      }
       await vendorApi.saveStep1({
         company_name: form.company_name,
         full_name: form.full_name,
+        owner_name: form.full_name,
         email: form.email_id,
         email_id: form.email_id,
         description: form.description,
         about: form.description,
+        short_bio: form.description,
         address: form.address,
         pincode: form.pincode,
-        profile_photo_url: profilePhotoUrl,
+        profile_image: form.profile_image || undefined,
+        profile_photo: form.profile_image || undefined,
+        profile_photo_url: form.profile_image || undefined,
         state: form.state_id,
+        state_id: form.state_id,
         city: form.city_id,
+        city_id: form.city_id,
       })
-      setForm(f => ({ ...f, profile_photo_url: profilePhotoUrl, profile_photo_file: [] }))
-      if (user && token) setAuth({ ...user, name: form.company_name, profile_image: profilePhotoUrl }, token)
+      if (user && token) setAuth({
+        ...user,
+        name: form.full_name || form.company_name || user.name,
+        email: form.email_id || user.email,
+        profile_image: form.profile_image || user.profile_image,
+      }, token)
+      clearDraft(PROFILE_DRAFT_KEY)
       toast.success('Profile updated!')
     } catch { toast.error('Failed to update') }
     finally { setSaving(false) }
@@ -197,12 +210,17 @@ export default function VendorListingPage() {
           left={
             <PageSection>
               <div className="flex flex-col items-center text-center">
-                <div className="relative">
-                  <Avatar name={user?.name} src={form.profile_photo_url || user?.profile_image} size={24} />
-                  <button type="button" className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-orange ring-4 ring-white flex items-center justify-center hover:bg-orange-600 transition">
-                    <Camera className="w-4 h-4 text-white" />
-                  </button>
-                </div>
+                <ProfileImageUploader
+                  currentUrl={form.profile_image || user?.profile_image}
+                  name={user?.name}
+                  size={24}
+                  uploadFn={vendorApi.uploadFiles}
+                  onUploaded={async (url) => {
+                    setForm(current => ({ ...current, profile_image: url }))
+                    await vendorApi.saveStep1({ profile_image: url, profile_photo: url })
+                    if (user && token) setAuth({ ...user, profile_image: url }, token)
+                  }}
+                />
                 <p className="font-bold text-navy text-lg mt-4">{user?.name || 'Vendor'}</p>
                 <p className="text-sm text-gray-500 mt-0.5">+91 {user?.mobile}</p>
                 <span className="inline-flex items-center gap-1 mt-3 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-orange/10 text-orange">
@@ -244,20 +262,13 @@ export default function VendorListingPage() {
                   <Input label="Email" type="email" value={form.email_id} onChange={set('email_id')} placeholder="you@company.com" />
                   <Input label="Mobile" value={`+91 ${user?.mobile || ''}`} disabled />
                   <Select label="State" value={form.state_id} onChange={set('state_id')}
-                    options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
+                    options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
                   <Select label="City" value={form.city_id} onChange={set('city_id')}
-                    options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
-                  <Input label="Pincode" value={form.pincode} onChange={set('pincode')} placeholder="e.g. 641301" />
+                    options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
+                  <Input label="Pincode" value={form.pincode} onChange={set('pincode')} placeholder="e.g. 641301" maxLength={6} />
                 </FieldGrid>
                 <Textarea label="Address" rows={3} value={form.address} onChange={set('address')}
                   placeholder="Business address shown to customers." />
-                <FileUpload label="Profile photo" accept="image/*"
-                  onChange={files => setForm(f => ({ ...f, profile_photo_file: Array.from(files).slice(0, 1) }))} />
-                {form.profile_photo_file.length > 0 && (
-                  <p className="text-xs text-green-600 font-semibold">
-                    1 profile photo ready to upload
-                  </p>
-                )}
               </div>
             </PageSection>
           }
@@ -300,12 +311,13 @@ export default function VendorListingPage() {
                 {services.map((s: any) => {
                   const sid = s.id || s.service_id || s.vendor_service_id
                   const active = serviceIsActive(s)
+                  const imageUrls = serviceImageUrls(s)
                   return (
                     <div key={sid} className="border border-gray-100 rounded-2xl p-4 hover:border-orange/30 hover:shadow-sm transition flex flex-col">
                       <div className="flex items-start gap-3">
                         <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden shrink-0">
-                          {s.images?.[0]
-                            ? <img src={s.images[0]} alt={s.title} className="w-full h-full object-cover" />
+                          {imageUrls[0]
+                            ? <img src={imageUrls[0]} alt={s.title || s.service_title || 'Service'} className="w-full h-full object-cover" />
                             : <div className="w-full h-full flex items-center justify-center"><Wrench className="w-5 h-5 text-gray-400" /></div>}
                         </div>
                         <div className="flex-1 min-w-0">

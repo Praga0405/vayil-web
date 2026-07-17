@@ -20,7 +20,7 @@ const NAV = [
 ]
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+  const pathname = usePathname() || ''
   const router   = useRouter()
   const { user, clearAuth } = useUserAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)

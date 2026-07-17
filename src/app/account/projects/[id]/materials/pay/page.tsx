@@ -50,7 +50,8 @@ async function loadRazorpay(): Promise<void> {
 }
 
 export default function MaterialsPaymentPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const { job, loading } = useCustomerJob(id)
   // All hooks declared up-front — never after any conditional return,

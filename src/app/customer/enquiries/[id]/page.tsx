@@ -10,7 +10,8 @@ import toast from 'react-hot-toast'
 declare global { interface Window { Razorpay: any } }
 
 export default function EnquiryDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router  = useRouter()
 
   const [enquiry,  setEnquiry]  = useState<any>(null)

@@ -7,9 +7,16 @@ import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
 import { calculateTax } from '../services/tax';
 import { releaseEscrow } from './payments';
+import * as customerSvc from '../services/customerService';
 
 export const customerRouter = Router();
 customerRouter.use(requireAuth(['customer']));
+
+function blankToNull(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
 
 customerRouter.get('/me', async (req: AuthRequest, res, next) => {
   try {
@@ -20,18 +27,35 @@ customerRouter.get('/me', async (req: AuthRequest, res, next) => {
 
 customerRouter.put('/me', async (req: AuthRequest, res, next) => {
   try {
-    const body = z.object({ name: z.string().optional(), email: z.string().email().optional(), city: z.string().optional(), address: z.string().optional() }).parse(req.body);
-    // mysql2 rejects bound `undefined` — normalise every optional field to
-    // null so the COALESCE keeps the existing column value.
-    const params = {
-      id:      req.user!.id,
-      name:    body.name    ?? null,
-      email:   body.email   ?? null,
-      city:    body.city    ?? null,
-      address: body.address ?? null,
-    };
-    await exec(`UPDATE customers SET name = COALESCE(:name, name), email = COALESCE(:email, email), city = COALESCE(:city, city), address = COALESCE(:address, address) WHERE customer_id = :id`, params);
-    const customer = await one<any>('SELECT * FROM customers WHERE customer_id = :id', { id: req.user!.id });
+    const body = z.object({
+      name: z.string().optional(),
+      customer_name: z.string().optional(),
+      email: z.string().optional(),
+      email_id: z.string().optional(),
+      state: z.union([z.string(), z.number()]).optional(),
+      state_id: z.union([z.string(), z.number()]).optional(),
+      city: z.union([z.string(), z.number()]).optional(),
+      city_id: z.union([z.string(), z.number()]).optional(),
+      address: z.string().optional(),
+      pincode: z.union([z.string(), z.number()]).optional(),
+      profile_image: z.string().optional(),
+      profile_photo: z.string().optional(),
+      fcm_token: z.string().optional(),
+    }).parse(req.body);
+    const stateValue = body.state ?? body.state_id;
+    const cityValue = body.city ?? body.city_id;
+
+    const customer = await customerSvc.updateCustomer(req.user!.id, {
+      name: blankToNull(body.name ?? body.customer_name),
+      email: blankToNull(body.email ?? body.email_id),
+      state: blankToNull(stateValue),
+      city: blankToNull(cityValue),
+      address: blankToNull(body.address),
+      pincode: blankToNull(body.pincode),
+      profile_image: blankToNull(body.profile_image ?? body.profile_photo),
+      profile_photo: blankToNull(body.profile_photo ?? body.profile_image),
+      fcm_token: blankToNull(body.fcm_token),
+    });
     ok(res, { customer });
   } catch (err) { next(err); }
 });

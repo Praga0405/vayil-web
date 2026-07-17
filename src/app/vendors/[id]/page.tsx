@@ -7,7 +7,7 @@ import LoginModal from '@/components/shared/LoginModal'
 import { useUserAuth } from '@/stores/auth'
 import { getVendorsByService, type DummyService } from '@/lib/dummyData'
 import { useLiveVendor } from '@/hooks/useLiveVendor'
-import { PageLoader } from '@/components/ui'
+import { Avatar, PageLoader } from '@/components/ui'
 import { customerApi } from '@/lib/api/client'
 import { demoOrLive } from '@/lib/demoMode'
 import toast from 'react-hot-toast'
@@ -19,7 +19,8 @@ import {
 } from 'lucide-react'
 
 export default function VendorProfilePage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const { user } = useUserAuth()
   const { vendor, loading, error, reload } = useLiveVendor(id ? String(id) : undefined)
@@ -128,8 +129,9 @@ export default function VendorProfilePage() {
           {/* Identity card */}
           <div className="bg-white border border-gray-100 rounded-2xl p-5 lg:p-7 shadow-sm">
             <div className="flex flex-col sm:flex-row items-start gap-5">
-              <img src={vendor.avatar} alt={vendor.owner_name}
-                className="w-24 h-24 rounded-2xl border-4 border-white shadow-md object-cover -mt-12" />
+              <div className="-mt-12 rounded-full border-4 border-white shadow-md bg-white">
+                <Avatar name={vendor.owner_name || vendor.company_name} src={vendor.avatar} size={24} />
+              </div>
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap gap-2 mb-2">
                   {vendor.badges.map(b => (
@@ -404,7 +406,7 @@ export default function VendorProfilePage() {
                 </div>
                 <div className="p-4">
                   <div className="flex items-center gap-2 mb-1">
-                    <img src={v.avatar} alt={v.owner_name} className="w-7 h-7 rounded-full object-cover" />
+                    <Avatar name={v.owner_name || v.company_name} src={v.avatar} size={7} />
                     <h3 className="font-bold text-navy text-sm truncate group-hover:text-orange transition">{v.company_name}</h3>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-xs">

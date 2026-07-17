@@ -12,7 +12,8 @@ import { demoOrLive } from '@/lib/demoMode'
 type Selection = { type: 'milestone' | 'material'; id: number; title: string; amount: number }
 
 export default function AskPaymentPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
   // All hooks declared up-front — never after a conditional return.

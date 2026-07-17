@@ -36,7 +36,8 @@ function adaptProject(payload: any) {
 }
 
 export default function CustomerPlanApprovalPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const [job, setJob]         = useState<ReturnType<typeof adaptProject> | null>(null)
   const [loading, setLoading] = useState(true)

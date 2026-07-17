@@ -2,8 +2,9 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { customerApi } from '@/lib/api/client'
+import { serviceImageUrls } from '@/lib/api/compat'
 import {
-  PageLoader, EmptyState, RatingStars, Button, Modal, Textarea, FileUpload, Amount
+  PageLoader, EmptyState, RatingStars, Button, Modal, Textarea, FileUpload, Amount, Avatar
 } from '@/components/ui'
 import { formatCurrency } from '@/lib/utils'
 import { MapPin, Phone, Star, Shield, ChevronLeft, Send, Image as ImgIcon } from 'lucide-react'
@@ -11,7 +12,8 @@ import toast from 'react-hot-toast'
 import { useUserAuth } from '@/stores/auth'
 
 export default function VendorProfilePage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router  = useRouter()
   const { token } = useUserAuth()
   const [hydrated, setHydrated] = useState(false)
@@ -93,13 +95,11 @@ export default function VendorProfilePage() {
       <div className="card">
         <div className="flex flex-col xs:flex-row xs:items-start gap-4">
           <div className="w-16 h-16 rounded-2xl bg-navy-50 overflow-hidden shrink-0 flex items-center justify-center">
-            {vendor.logo || vendor.profile_image ? (
-              <img src={vendor.logo || vendor.profile_image} alt={vendor.company_name} className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-2xl font-bold text-navy">
-                {(vendor.company_name || vendor.name || 'V')[0]}
-              </span>
-            )}
+            <Avatar
+              name={vendor.company_name || vendor.name}
+              src={vendor.logo || vendor.profile_image || vendor.profile_photo}
+              size={16}
+            />
           </div>
           <div className="flex-1 min-w-0">
             <h1 className="heading-md truncate">{vendor.company_name || vendor.name}</h1>
@@ -146,25 +146,28 @@ export default function VendorProfilePage() {
         <div className="space-y-3">
           {services.length === 0 ? (
             <EmptyState icon={Shield} title="No services listed yet" />
-          ) : services.map((s: any) => (
-            <div key={s.id || s.service_id} className="card flex flex-col xs:flex-row xs:items-center gap-4">
-              <div className="w-14 h-14 bg-navy-50 rounded-xl overflow-hidden shrink-0">
-                {s.images?.[0] ? (
-                  <img src={s.images[0]} className="w-full h-full object-cover" alt={s.title} />
-                ) : <div className="w-full h-full flex items-center justify-center text-2xl">🔧</div>}
+          ) : services.map((s: any) => {
+            const image = serviceImageUrls(s)[0]
+            return (
+              <div key={s.id || s.service_id} className="card flex flex-col xs:flex-row xs:items-center gap-4">
+                <div className="w-14 h-14 bg-navy-50 rounded-xl overflow-hidden shrink-0">
+                  {image ? (
+                    <img src={image} className="w-full h-full object-cover" alt={s.title} />
+                  ) : <div className="w-full h-full flex items-center justify-center text-2xl">🔧</div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-navy text-sm">{s.title || s.service_name}</p>
+                  {s.price && (
+                    <p className="text-xs text-orange font-semibold mt-0.5">
+                      {formatCurrency(s.price)}
+                      {s.price_type && s.price_type !== 'fixed' && ` / ${s.price_type.replace('per_','').replace('_',' ')}`}
+                    </p>
+                  )}
+                </div>
+                <Button size="sm" variant="outline" className="w-full xs:w-auto" onClick={() => openEnquiry(s)}>Enquire</Button>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-navy text-sm">{s.title || s.service_name}</p>
-                {s.price && (
-                  <p className="text-xs text-orange font-semibold mt-0.5">
-                    {formatCurrency(s.price)}
-                    {s.price_type && s.price_type !== 'fixed' && ` / ${s.price_type.replace('per_','').replace('_',' ')}`}
-                  </p>
-                )}
-              </div>
-              <Button size="sm" variant="outline" className="w-full xs:w-auto" onClick={() => openEnquiry(s)}>Enquire</Button>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

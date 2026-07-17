@@ -19,7 +19,8 @@ import toast from 'react-hot-toast'
 // Replaces an older mobile-first page that depended on the legacy
 // /customer/orderDetails shape (returned ₹0 for everything).
 export default function ProjectDetailPage() {
-  const { id }     = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router     = useRouter()
   const [order, setOrder]       = useState<any>(null)
   const [plan,  setPlan]        = useState<any[]>([])

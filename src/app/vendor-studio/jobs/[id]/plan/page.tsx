@@ -13,7 +13,8 @@ import toast from 'react-hot-toast'
 type Draft = Pick<MockMilestone, 'title' | 'days' | 'percentage'> & { mandatory: boolean }
 
 export default function PlanBuilderPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
 

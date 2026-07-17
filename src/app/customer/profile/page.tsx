@@ -3,7 +3,8 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserAuth } from '@/stores/auth'
 import { customerApi, commonApi } from '@/lib/api/client'
-import { Button, Input, Select, Avatar } from '@/components/ui'
+import { apiArray, cityLookupPayload, normalizedOptionId, optionId, optionLabel, uniqueMasterRows } from '@/lib/api/compat'
+import { Button, Input, Select, Avatar, Textarea } from '@/components/ui'
 import { LogOut } from 'lucide-react'
 import { ProfileImageUploader } from '@/components/shared/ProfileImageUploader'
 import toast from 'react-hot-toast'
@@ -15,7 +16,7 @@ export default function CustomerProfilePage() {
   useEffect(() => { setHydrated(true) }, [])
 
   const [form, setForm] = useState({
-    name: '', email: '', city: '', state_id: '', city_id: '',
+    name: '', email: '', city: '', state_id: '', city_id: '', pincode: '', address: '',
   })
   const [states,  setStates]  = useState<any[]>([])
   const [cities,  setCities]  = useState<any[]>([])
@@ -30,20 +31,27 @@ export default function CustomerProfilePage() {
     setLoading(true)
     Promise.all([customerApi.getProfile(), commonApi.getStates()])
       .then(([pr, sr]) => {
-        const p = pr.data?.data || pr.data?.result || {}
+        const p = pr.data?.customer || pr.data?.data?.customer || pr.data?.data || pr.data?.result || {}
+        const stateRows = uniqueMasterRows(apiArray(sr, ['states_list', 'states']))
         setForm({
           name:     p.customer_name || p.name || user?.name || '',
           email:    p.email_id || p.email || user?.email || '',
           city:     p.city || '',
-          state_id: p.state_id?.toString() || '',
-          city_id:  p.city_id?.toString() || '',
+          state_id: normalizedOptionId(stateRows, p.state_id ?? p.state),
+          city_id:  (p.city_id  ?? p.city)?.toString() || '',
+          pincode:  p.pincode ? String(p.pincode) : '',
+          address:  p.address || '',
         })
-        const s = sr.data?.data || sr.data?.result || []
-        setStates(Array.isArray(s) ? s : [])
-        if (p.state_id) {
-          commonApi.getCity(p.state_id).then(cr => {
-            const c = cr.data?.data || cr.data?.result || []
-            setCities(Array.isArray(c) ? c : [])
+        setStates(stateRows)
+        const stateId = p.state_id ?? p.state
+        if (stateId) {
+          commonApi.getCity(cityLookupPayload(stateRows, stateId)).then(cr => {
+            const cityRows = uniqueMasterRows(apiArray(cr, ['city', 'cities']))
+            setCities(cityRows)
+            setForm(current => ({
+              ...current,
+              city_id: normalizedOptionId(cityRows, current.city_id),
+            }))
           })
         }
       })
@@ -58,6 +66,8 @@ export default function CustomerProfilePage() {
         email_id:      form.email,
         state_id:      form.state_id,
         city_id:       form.city_id,
+        pincode:       form.pincode,
+        address:       form.address,
       })
       // Update store WITHOUT changing the token
       if (user && token) {
@@ -73,13 +83,13 @@ export default function CustomerProfilePage() {
 
   const logout = () => { clearAuth(); router.push('/customer/login') }
 
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
     if (k === 'state_id') {
       setForm(f => ({ ...f, state_id: e.target.value, city_id: '' }))
-      commonApi.getCity(Number(e.target.value)).then(r => {
-        const c = r.data?.data || r.data?.result || []
-        setCities(Array.isArray(c) ? c : [])
+      if (!e.target.value) { setCities([]); return }
+      commonApi.getCity(cityLookupPayload(states, e.target.value)).then(r => {
+        setCities(uniqueMasterRows(apiArray(r, ['city', 'cities'])))
       })
     }
   }
@@ -116,10 +126,12 @@ export default function CustomerProfilePage() {
         <Input label="Email"        value={form.email}   onChange={set('email')}   placeholder="you@email.com" type="email" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Select label="State" value={form.state_id} onChange={set('state_id')}
-            options={states.map(s => ({ value: s.id || s.state_id, label: s.name || s.state_name }))} />
+            options={states.map(s => ({ value: optionId(s), label: optionLabel(s) }))} />
           <Select label="City" value={form.city_id} onChange={set('city_id')}
-            options={cities.map(c => ({ value: c.id || c.city_id, label: c.name || c.city_name }))} />
+            options={cities.map(c => ({ value: optionId(c), label: optionLabel(c) }))} />
+          <Input label="Pincode" value={form.pincode} onChange={set('pincode')} placeholder="6 digits" maxLength={6} />
         </div>
+        <Textarea label="Address" rows={3} value={form.address} onChange={set('address')} placeholder="Saved address" />
         <Button full loading={saving} onClick={save}>Save Changes</Button>
       </div>
 

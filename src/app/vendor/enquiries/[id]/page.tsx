@@ -4,7 +4,8 @@ import { useParams, useRouter } from 'next/navigation'
 
 export default function LegacyVendorEnquiryDetailRedirect() {
   const router = useRouter()
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = params?.id ?? ""
   useEffect(() => { router.replace(`/vendor-studio/enquiries/${id}`) }, [id])
   return null
 }

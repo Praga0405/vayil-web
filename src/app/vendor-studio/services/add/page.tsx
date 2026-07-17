@@ -116,6 +116,7 @@ export default function AddServicePage() {
         subcategory_id: form.subcategory_id || undefined,
         service_subcategory: form.subcategory_id || undefined,
         tag_id:         form.tag_id || undefined,
+        tag_ids:        form.tag_id ? [form.tag_id] : undefined,
         price_type:     form.price_type,
         pricing_type:   form.price_type,
         price:          form.price,
