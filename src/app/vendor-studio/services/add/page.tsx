@@ -3,6 +3,12 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
+import {
+  mobileServicePayload,
+  SERVICE_PRICING_TYPES,
+  SERVICE_UNIT_OPTIONS,
+  serviceMoney,
+} from '@/lib/vendorServiceContract'
 import { Button, Input, Select, Textarea, FileUpload } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
 import { ChevronLeft, Wrench } from 'lucide-react'
@@ -22,22 +28,6 @@ import toast from 'react-hot-toast'
  * 007_seed_taxonomy.sql.
  */
 
-const PRICE_TYPES = [
-  { value: 'fixed',       label: 'Fixed price' },
-  { value: 'per_sqft',    label: 'Per square foot' },
-  { value: 'per_rft',     label: 'Per running foot' },
-  { value: 'per_unit',    label: 'Per unit' },
-  { value: 'quote_based', label: 'Quote based (custom)' },
-]
-
-const UNIT_OPTIONS = [
-  { value: 'sqft', label: 'Square foot (sq.ft)' },
-  { value: 'rft',  label: 'Running foot (r.ft)' },
-  { value: 'unit', label: 'Unit / piece' },
-  { value: 'hour', label: 'Per hour' },
-  { value: 'day',  label: 'Per day' },
-]
-
 const asArray = (...values: any[]) => {
   for (const value of values) {
     if (Array.isArray(value)) return value
@@ -55,7 +45,7 @@ export default function AddServicePage() {
   const [form, setForm] = useState({
     title: '', description: '',
     category_id: '', subcategory_id: '', tag_id: '',
-    price_type: 'fixed', price: '', unit: 'sqft',
+    price_type: 'fixed', price: '', unit: 'unit', minimum_fee: '', is_active: '1',
     images: [] as File[],
     certificate: [] as File[],
   })
@@ -86,8 +76,11 @@ export default function AddServicePage() {
   const save = async () => {
     if (!form.title.trim())          { toast.error('Enter a service title'); return }
     if (!form.category_id)           { toast.error('Pick a category');       return }
-    if (form.price_type !== 'quote_based' && !form.price) {
-      toast.error('Enter a price or switch to "Quote based"'); return
+    if (form.price_type !== 'quote' && !serviceMoney(form.price)) {
+      toast.error('Enter a valid price with no more than 2 decimal places'); return
+    }
+    if (form.minimum_fee && !serviceMoney(form.minimum_fee)) {
+      toast.error('Minimum fee must have no more than 2 decimal places'); return
     }
 
     setLoading(true)
@@ -108,25 +101,20 @@ export default function AddServicePage() {
         certificateUrl = normalizeUploadedUrls(ur)[0] || ''
       }
 
-      await vendorApi.saveServiceListing({
-        title:          form.title.trim(),
-        description:    form.description.trim(),
-        category_id:    form.category_id,
-        service_category: form.category_id,
-        subcategory_id: form.subcategory_id || undefined,
-        service_subcategory: form.subcategory_id || undefined,
-        tag_id:         form.tag_id || undefined,
-        tag_ids:        form.tag_id ? [form.tag_id] : undefined,
-        price_type:     form.price_type,
-        pricing_type:   form.price_type,
-        price:          form.price,
-        unit:           form.unit,
-        unit_name:      form.unit,
-        images:         imageUrls,
-        service_image:  imageUrls.join(','),
-        thumbnail:      imageUrls[0] || undefined,
-        certificate_url: certificateUrl || undefined,
-      })
+      await vendorApi.saveServiceListing(mobileServicePayload({
+        title: form.title.trim(),
+        description: form.description.trim(),
+        categoryId: form.category_id,
+        subcategoryId: form.subcategory_id,
+        tagId: form.tag_id,
+        pricingType: form.price_type,
+        price: form.price,
+        unitName: form.unit,
+        minimumFee: form.minimum_fee,
+        imageUrls,
+        certificateUrl,
+        isActive: form.is_active === '1',
+      }))
       toast.success('Service added')
       router.push('/vendor-studio/listing')
     } catch (e: any) {
@@ -223,19 +211,23 @@ export default function AddServicePage() {
             >
               <FieldGrid columns={2}>
                 <Select label="Pricing type" value={form.price_type} onChange={set('price_type')}
-                        options={PRICE_TYPES} />
-                {form.price_type === 'quote_based' ? (
+                        options={SERVICE_PRICING_TYPES} />
+                {form.price_type === 'quote' ? (
                   <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-xs text-gray-500">
                     Customers will send you an enquiry. You quote per job.
                   </div>
                 ) : (
                   <Input label={form.price_type === 'fixed' ? 'Price (₹)' : 'Price per unit (₹)'}
-                         type="number" inputMode="numeric" value={form.price} onChange={set('price')}
-                         placeholder="e.g. 1500" />
+                         type="number" inputMode="decimal" step="0.01" min="0"
+                         value={form.price} onChange={set('price')} placeholder="e.g. 1500" />
                 )}
-                {form.price_type !== 'fixed' && form.price_type !== 'quote_based' && (
-                  <Select label="Unit" value={form.unit} onChange={set('unit')} options={UNIT_OPTIONS} />
+                {form.price_type === 'per_unit' && (
+                  <Select label="Unit name" value={form.unit} onChange={set('unit')} options={SERVICE_UNIT_OPTIONS} />
                 )}
+                <Input label="Minimum fee (₹)" type="number" inputMode="decimal" step="0.01" min="0"
+                       value={form.minimum_fee} onChange={set('minimum_fee')} placeholder="e.g. 100" />
+                <Select label="Listing status" value={form.is_active} onChange={set('is_active')}
+                  options={[{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }]} />
               </FieldGrid>
             </PageSection>
 
