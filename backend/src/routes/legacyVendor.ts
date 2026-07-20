@@ -1517,7 +1517,9 @@ legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, nex
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
       thumbnail: firstUploadedUrl(req.body),
       pricing_type: pricingType === 'quote_based' ? 'quote' : pricingType,
-      certificate_url: optionalBodyString(req.body, 'certificate_url', 'certificate'),
+      certificate_url: hasBodyKey(req.body, 'certificate_url', 'certificate')
+        ? String(req.body?.certificate_url ?? req.body?.certificate ?? '')
+        : undefined,
       minimum_fee: hasBodyKey(req.body, 'minimum_fee')
         ? (req.body?.minimum_fee === null || req.body?.minimum_fee === ''
           ? null
@@ -1552,7 +1554,9 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
       thumbnail: firstUploadedUrl(req.body),
       pricing_type: pricingType === 'quote_based' ? 'quote' : pricingType,
-      certificate_url: optionalBodyString(req.body, 'certificate_url', 'certificate'),
+      certificate_url: hasBodyKey(req.body, 'certificate_url', 'certificate')
+        ? String(req.body?.certificate_url ?? req.body?.certificate ?? '')
+        : undefined,
       minimum_fee: hasBodyKey(req.body, 'minimum_fee')
         ? (req.body?.minimum_fee === null || req.body?.minimum_fee === ''
           ? null
