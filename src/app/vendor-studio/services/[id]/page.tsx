@@ -3,7 +3,15 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
 import { vendorApi, commonApi, normalizeUploadedUrls } from '@/lib/api/client'
-import { apiArray, firstIdValue, isActiveMaster, optionId, optionLabel, serviceImagePayload, serviceImageUrls, uniqueMasterRows } from '@/lib/api/compat'
+import {
+  mobileServicePayload,
+  normalizeServicePricingType,
+  normalizeServiceUnit,
+  SERVICE_PRICING_TYPES,
+  SERVICE_UNIT_OPTIONS,
+  serviceMoney,
+} from '@/lib/vendorServiceContract'
+import { apiArray, firstIdValue, isActiveMaster, optionId, optionLabel, serviceImageUrls, uniqueMasterRows } from '@/lib/api/compat'
 import { clearDraft, loadDraft, saveDraft } from '@/lib/formDrafts'
 import { Button, Input, Select, Textarea, FileUpload, PageLoader, StatusBadge } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, FieldGrid } from '@/components/shared/PageLayout'
@@ -17,22 +25,6 @@ import toast from 'react-hot-toast'
  * the existing service data and exposes an active/inactive toggle
  * alongside Save.
  */
-
-const PRICE_TYPES = [
-  { value: 'fixed',       label: 'Fixed price' },
-  { value: 'per_sqft',    label: 'Per square foot' },
-  { value: 'per_rft',     label: 'Per running foot' },
-  { value: 'per_unit',    label: 'Per unit' },
-  { value: 'quote_based', label: 'Quote based (custom)' },
-]
-
-const UNIT_OPTIONS = [
-  { value: 'sqft', label: 'Square foot (sq.ft)' },
-  { value: 'rft',  label: 'Running foot (r.ft)' },
-  { value: 'unit', label: 'Unit / piece' },
-  { value: 'hour', label: 'Per hour' },
-  { value: 'day',  label: 'Per day' },
-]
 
 const serviceIsActive = (status: unknown) =>
   status === 'active' || status === 1 || status === true || status === '1'
@@ -54,7 +46,7 @@ export default function EditServicePage() {
   const [form, setForm] = useState({
     title: '', description: '',
     category_id: '', subcategory_id: '', tag_id: '',
-    price_type: 'fixed', price: '', unit: 'sqft',
+    price_type: 'fixed', price: '', unit: 'unit', minimum_fee: '',
     images: [] as File[],
     certificate: [] as File[],
   })
@@ -87,9 +79,10 @@ export default function EditServicePage() {
         category_id:    String(categoryId || ''),
         subcategory_id: String(s.subcategory_id || s.service_subcategory || ''),
         tag_id:         firstIdValue(s.tag_id ?? s.tag_ids ?? s.service_tag),
-        price_type:     s.price_type || s.pricing_type || 'fixed',
+        price_type:     normalizeServicePricingType(s.pricing_type || s.price_type),
         price:          String(s.price ?? ''),
-        unit:           s.unit || s.unit_name || 'sqft',
+        unit:           normalizeServiceUnit(s.pricing_type || s.price_type, s.unit_name || s.unit),
+        minimum_fee:    String(s.minimum_fee ?? ''),
         images:         [] as File[],
         certificate:    [] as File[],
       }
@@ -127,6 +120,12 @@ export default function EditServicePage() {
   const save = async () => {
     if (!form.title.trim())  { toast.error('Enter a service title'); return }
     if (!form.category_id)   { toast.error('Pick a category');       return }
+    if (form.price_type !== 'quote' && !serviceMoney(form.price)) {
+      toast.error('Enter a valid price with no more than 2 decimal places'); return
+    }
+    if (form.minimum_fee && !serviceMoney(form.minimum_fee)) {
+      toast.error('Minimum fee must have no more than 2 decimal places'); return
+    }
     setSaving(true)
     try {
       let imageUrls = existingImages
@@ -146,24 +145,21 @@ export default function EditServicePage() {
         certificateUrl = normalizeUploadedUrls(ur)[0] || certificateUrl
       }
 
-      await vendorApi.updateServiceListing({
-        service_id:     sid,
-        title:          form.title.trim(),
-        description:    form.description.trim(),
-        category_id:    form.category_id,
-        service_category: form.category_id,
-        subcategory_id: form.subcategory_id || undefined,
-        service_subcategory: form.subcategory_id || undefined,
-        tag_id:         form.tag_id || undefined,
-        tag_ids:        form.tag_id ? [form.tag_id] : undefined,
-        price_type:     form.price_type,
-        pricing_type:   form.price_type,
-        price:          form.price,
-        unit:           form.unit,
-        unit_name:      form.unit,
-        certificate_url: certificateUrl || undefined,
-        ...serviceImagePayload(imageUrls),
-      })
+      await vendorApi.updateServiceListing(mobileServicePayload({
+        serviceId: sid,
+        title: form.title.trim(),
+        description: form.description.trim(),
+        categoryId: form.category_id,
+        subcategoryId: form.subcategory_id,
+        tagId: form.tag_id,
+        pricingType: form.price_type,
+        price: form.price,
+        unitName: form.unit,
+        minimumFee: form.minimum_fee,
+        imageUrls,
+        certificateUrl,
+        isActive: serviceIsActive(status),
+      }))
       clearDraft(`vayil:draft:vendor-studio:service-${sid}`)
       toast.success('Service updated')
       router.push('/vendor-studio/listing')
@@ -248,7 +244,7 @@ export default function EditServicePage() {
               <li className="flex items-start justify-between gap-3 text-gray-500">
                 <span>Pricing</span>
                 <span className="font-semibold text-navy text-right">
-                  {form.price_type === 'quote_based' ? 'Quote based' : `₹${form.price || '—'}`}
+                  {form.price_type === 'quote' ? 'Quote based' : `₹${form.price || '—'}`}
                 </span>
               </li>
             </ul>
@@ -286,18 +282,21 @@ export default function EditServicePage() {
             <PageSection title="Pricing" description="Set a fixed price, a per-unit rate, or accept quote requests.">
               <FieldGrid columns={2}>
                 <Select label="Pricing type" value={form.price_type} onChange={set('price_type')}
-                        options={PRICE_TYPES} />
-                {form.price_type === 'quote_based' ? (
+                        options={SERVICE_PRICING_TYPES} />
+                {form.price_type === 'quote' ? (
                   <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-xs text-gray-500">
                     Customers will send you an enquiry. You quote per job.
                   </div>
                 ) : (
                   <Input label={form.price_type === 'fixed' ? 'Price (₹)' : 'Price per unit (₹)'}
-                         type="number" inputMode="numeric" value={form.price} onChange={set('price')} />
+                         type="number" inputMode="decimal" step="0.01" min="0"
+                         value={form.price} onChange={set('price')} />
                 )}
-                {form.price_type !== 'fixed' && form.price_type !== 'quote_based' && (
-                  <Select label="Unit" value={form.unit} onChange={set('unit')} options={UNIT_OPTIONS} />
+                {form.price_type === 'per_unit' && (
+                  <Select label="Unit name" value={form.unit} onChange={set('unit')} options={SERVICE_UNIT_OPTIONS} />
                 )}
+                <Input label="Minimum fee (₹)" type="number" inputMode="decimal" step="0.01" min="0"
+                       value={form.minimum_fee} onChange={set('minimum_fee')} placeholder="e.g. 100" />
               </FieldGrid>
             </PageSection>
 
