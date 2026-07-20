@@ -1,5 +1,114 @@
 # Release Notes
 
+## v4.5.94 - Vendor service price integrity and mobile form parity (2026-07-20)
+
+### Why
+
+The Vendor Studio service editor at `/vendor-studio/services/:id` was reported
+to show `1499.00` after a vendor entered and saved `1500`. The mobile team also
+required the website Add/Edit Service forms to submit the same service fields
+and value formats as the existing mobile `saveServiceListing` and
+`updateServiceListing` contract.
+
+### Root Cause Analysis
+
+- No frontend or backend code was subtracting `1` from the entered amount. The
+  edit page displays `vendor_services.price` exactly as returned by
+  `getVendorServiceList`, so a displayed `1499.00` means that value was already
+  returned by the API/database for that row.
+- The web form sent the browser input string directly and the compatibility
+  route converted it through JavaScript `Number` before writing the DECIMAL
+  column. Although `1500` is exactly representable, this path did not enforce
+  the database's two-decimal contract and allowed invalid or over-precision
+  values to reach generic coercion logic.
+- Web pricing values had drifted from the mobile contract. The website used
+  `quote_based`, `per_sqft`, and `per_rft`, while the mobile-compatible API uses
+  `fixed`, `per_unit`, and `quote`, with the measurement stored separately in
+  `unit_name`.
+- The Add/Edit forms omitted `minimum_fee` and Add Service did not expose
+  `is_active`, even though both fields are part of the mobile service payload
+  and response.
+- The web payload relied on aliases such as `title`, `price_type`, and
+  `certificate_url` instead of explicitly including the mobile names
+  `service_title`, `pricing_type`, and `certificate`.
+- The Category & Tag selector sent `tag_id`, but the service persistence layer
+  stores `tag_ids`; consequently a selected web tag could be lost and was not
+  reliably restored on edit.
+
+The exact production value for service `270001` could not be queried during
+this audit: the Vendor Studio URL redirects without an authenticated vendor
+session, and this checkout has no `DB_HOST`, `DB_USER`, `DB_PASSWORD`, or
+`DB_NAME`. No claim is made that the existing row was changed by this code
+release. After deployment, saving that service again with `1500` will persist
+the normalized value `1500.00`; an authorized DB check is still required if
+the historical row must be corrected without a vendor resave.
+
+### What Changed
+
+| Area | Previous behavior | New behavior |
+|---|---|---|
+| Price submission | Raw browser string was converted through JavaScript `Number`. | Price is validated as a non-negative decimal with at most two fractional digits and sent/stored as an exact two-decimal string. `1500` becomes `1500.00`. |
+| Minimum fee | Missing from web Add/Edit forms and ignored when empty. | Add/Edit expose `minimum_fee`, validate it with the same decimal rules, persist `0.00` correctly, and allow an existing value to be cleared. |
+| Pricing type | Web-only values could reach the mobile database contract. | Web options now use `fixed`, `per_unit`, and `quote`; existing `quote_based`, `per_sqft`, and `per_rft` records are normalized when edited. |
+| Unit | Per-square-foot and per-running-foot were encoded in `price_type`. | Measurement is sent through `unit_name` using mobile-compatible values such as `sq ft`, `running ft`, `unit`, `hour`, and `day`. |
+| Mobile request fields | Payload depended mainly on web aliases. | Both forms explicitly send `service_title`, `service_category`, `service_subcategory`, `description`, `pricing_type`, `unit_name`, `price`, `service_image_url`, `service_image`, `certificate`, `minimum_fee`, and `is_active`. |
+| Backward compatibility | Existing web handlers consumed aliases. | Existing aliases remain additive (`title`, `category_id`, `price_type`, `unit`, `thumbnail`, `certificate_url`) so no current web consumer is removed. |
+| Listing status | Add Service always depended on backend default status. | Add Service exposes Active/Inactive and sends mobile `is_active` as `1` or `0`; Edit Service sends the current toggle state during save. The existing backend approval guard still forces pending-vendor services inactive. |
+| Service tags | Selected `tag_id` did not match backend `tag_ids`. | Web sends `tag_ids` and Edit Service restores the first stored tag while retaining `tag_id` as an additive alias. |
+| Quote services | Switching to quote mode could retain a prior numeric price on update. | `quote` explicitly persists `price = NULL`; the API no longer silently carries the old fixed/per-unit amount. |
+
+### API Compatibility
+
+The affected authenticated endpoints remain unchanged:
+
+- `POST /saveServiceListing`
+- `POST /updateServiceListing`
+- `GET|POST /getVendorServiceList`
+
+Successful response envelopes and messages are unchanged. DECIMAL fields
+continue to be returned by MySQL/TiDB as two-decimal strings, matching the
+mobile response contract. Invalid price or minimum-fee input now returns a
+JSON HTTP 400 validation error instead of being silently coerced to another
+number.
+
+### Files Changed
+
+- `src/lib/vendorServiceContract.ts`
+- `src/app/vendor-studio/services/add/page.tsx`
+- `src/app/vendor-studio/services/[id]/page.tsx`
+- `backend/src/utils/decimal.ts`
+- `backend/src/routes/legacyVendor.ts`
+- `backend/src/services/vendorService.ts`
+- `backend/scripts/check-service-decimals.ts`
+- `backend/package.json`
+- `RELEASE_NOTES.md`
+
+### Verification
+
+- `npm run build --workspace backend` passed.
+- The compiled decimal contract regression passed and verifies `1500` ->
+  `1500.00`, fractional padding, zero handling, empty optional values, excess
+  precision rejection, and negative-value rejection.
+- `npm run build` passed for all Next.js production routes, including
+  `/vendor-studio/services/add` and `/vendor-studio/services/[id]`.
+- The direct `tsx` regression command could not create its IPC socket in the
+  restricted Codex sandbox. The same compiled assertions passed with Node.
+- The current main-branch draft preservation, master-data compatibility
+  helpers, and pending-vendor publication guards were retained while applying
+  this contract fix.
+
+### Database and Deployment Notes
+
+- No schema migration is required; `vendor_services.price` is already
+  `DECIMAL(12,2)` and `minimum_fee` is already `DECIMAL(10,2)`.
+- No production database row was mutated during this release.
+- Deploy this release before retesting service `270001`. On the Edit screen,
+  enter `1500`, save, reopen the service, and confirm the API/UI returns
+  `1500.00`.
+- For a direct historical-data correction, run an authorized read-only query
+  first and update only service `270001` after confirming its current value and
+  vendor ownership.
+
 ## v4.5.93 - Pending-vendor onboarding/listing continuity fixes (2026-07-17)
 
 ### Why
