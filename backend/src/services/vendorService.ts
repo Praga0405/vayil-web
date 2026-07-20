@@ -229,14 +229,14 @@ export async function onboardingStep(vendorId: number | string, step: number, b:
 export interface ListingInput {
   title: string;
   description?: string;
-  price?: number;
+  price?: number | string | null;
   unit?: string;
   category_id?: number | string;
   subcategory_id?: number | string;
   thumbnail?: string;
   pricing_type?: string;
   certificate_url?: string;
-  minimum_fee?: number;
+  minimum_fee?: number | string | null;
   tag_ids?: number[];
   status?: boolean | number;
 }
