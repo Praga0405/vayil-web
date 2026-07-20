@@ -16,6 +16,7 @@ import { AuthRequest } from '../types';
 import { exec, one, query } from '../db';
 import { publicSettingsSafe } from './common';
 import { uniqueCityRows } from '../utils/city';
+import { optionalDecimal } from '../utils/decimal';
 
 import * as authService from '../services/authService';
 import * as vendorSvc from '../services/vendorService';
@@ -1504,17 +1505,24 @@ legacyVendorRouter.post('/saveServiceListing', async (req: AuthRequest, res, nex
   try {
     const active = activeFlag(req.body?.is_active ?? req.body?.status);
     const approved = await vendorIsApproved(req.user!.id);
+    const pricingType = String(req.body?.pricing_type ?? req.body?.price_type ?? '').trim() || undefined;
     const out = await vendorSvc.createListing(req.user!.id, {
       title: req.body?.title || req.body?.service_title,
       description: req.body?.description,
-      price: req.body?.price ? num(req.body.price) : undefined,
+      price: pricingType === 'quote' || pricingType === 'quote_based'
+        ? null
+        : optionalDecimal(req.body?.price, 'price'),
       unit: req.body?.unit || req.body?.unit_name,
       category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
       thumbnail: firstUploadedUrl(req.body),
-      pricing_type: req.body?.pricing_type ?? req.body?.price_type,
-      certificate_url: req.body?.certificate_url || req.body?.certificate,
-      minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
+      pricing_type: pricingType === 'quote_based' ? 'quote' : pricingType,
+      certificate_url: optionalBodyString(req.body, 'certificate_url', 'certificate'),
+      minimum_fee: hasBodyKey(req.body, 'minimum_fee')
+        ? (req.body?.minimum_fee === null || req.body?.minimum_fee === ''
+          ? null
+          : optionalDecimal(req.body?.minimum_fee, 'minimum_fee'))
+        : undefined,
       tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds', 'tag_id', 'tagId', 'service_tag', 'serviceTag'),
       status: approved ? active : false,
     });
@@ -1533,16 +1541,23 @@ legacyVendorRouter.post('/updateServiceListing', async (req: AuthRequest, res, n
     if (!serviceId) throw new ApiError(400, 'vendor_service_id required');
     const active = activeFlag(req.body?.is_active ?? req.body?.status);
     const approved = await vendorIsApproved(req.user!.id);
+    const pricingType = String(req.body?.pricing_type ?? req.body?.price_type ?? '').trim() || undefined;
     const out = await vendorSvc.updateListing(req.user!.id, serviceId, {
       title: req.body?.title || req.body?.service_title, description: req.body?.description,
-      price: req.body?.price ? num(req.body.price) : undefined,
+      price: pricingType === 'quote' || pricingType === 'quote_based'
+        ? null
+        : optionalDecimal(req.body?.price, 'price'),
       unit: req.body?.unit || req.body?.unit_name,
       category_id: pickId(req.body, 'category_id', 'categoryId', 'service_category') || undefined,
       subcategory_id: pickId(req.body, 'subcategory_id', 'subcategoryId', 'service_subcategory') || undefined,
       thumbnail: firstUploadedUrl(req.body),
-      pricing_type: req.body?.pricing_type ?? req.body?.price_type,
-      certificate_url: req.body?.certificate_url || req.body?.certificate,
-      minimum_fee: req.body?.minimum_fee ? num(req.body.minimum_fee) : undefined,
+      pricing_type: pricingType === 'quote_based' ? 'quote' : pricingType,
+      certificate_url: optionalBodyString(req.body, 'certificate_url', 'certificate'),
+      minimum_fee: hasBodyKey(req.body, 'minimum_fee')
+        ? (req.body?.minimum_fee === null || req.body?.minimum_fee === ''
+          ? null
+          : optionalDecimal(req.body?.minimum_fee, 'minimum_fee'))
+        : undefined,
       tag_ids: numberListFromBody(req.body, 'tag_ids', 'tagIds', 'tag_id', 'tagId', 'service_tag', 'serviceTag'),
       status: approved ? active : false,
     });
