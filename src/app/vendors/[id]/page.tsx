@@ -458,11 +458,20 @@ function EnquiryModal({ open, onClose, vendor, service }: {
   const [location, setLocation] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
+  const [serviceId, setServiceId] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setServiceId(String(service?.id || vendor?.services?.[0]?.id || ''))
+  }, [open, service, vendor])
+
+  const selectedService = vendor?.services?.find(item => String(item.id) === serviceId) || service || null
 
   const [error, setError] = useState<string | null>(null)
   const submit = async () => {
     if (!desc.trim()) { toast.error('Please describe what you need'); return }
     if (!vendor)      { toast.error('Vendor not loaded'); return }
+    if (!selectedService) { toast.error('Select a service'); return }
 
     setSubmitting(true)
     setError(null)
@@ -470,7 +479,8 @@ function EnquiryModal({ open, onClose, vendor, service }: {
       await demoOrLive(() => Promise.race([
         customerApi.createEnquiry({
           vendorId:    Number(vendor.id) || undefined,
-          category:    service?.title || vendor.service_label,
+          serviceId:   Number(selectedService.id),
+          category:    selectedService.title,
           description: desc.trim(),
           location:    location.trim() || vendor.area,
         }),
@@ -493,7 +503,7 @@ function EnquiryModal({ open, onClose, vendor, service }: {
     }
   }
 
-  const reset = () => { setDesc(''); setLocation(''); setDone(false); onClose() }
+  const reset = () => { setDesc(''); setLocation(''); setServiceId(''); setDone(false); onClose() }
 
   if (!open) return null
   return (
@@ -528,16 +538,27 @@ function EnquiryModal({ open, onClose, vendor, service }: {
             <div className="bg-[#183954] px-6 pt-7 pb-5 text-white">
               <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Send Enquiry to</p>
               <h3 className="text-lg font-bold">{vendor?.company_name}</h3>
-              {service && <p className="text-xs text-orange mt-0.5">Re: {service.title}</p>}
+              {selectedService && <p className="text-xs text-orange mt-0.5">Re: {selectedService.title}</p>}
             </div>
             <div className="p-4 sm:p-6 space-y-4">
-              {service && (
+              {selectedService && (
                 <div className="flex items-center gap-3 bg-orange/5 border border-orange/20 rounded-xl p-3">
-                  <img src={service.image} alt={service.title} className="w-12 h-12 rounded-lg object-cover shrink-0" />
+                  <img src={selectedService.image} alt={selectedService.title} className="w-12 h-12 rounded-lg object-cover shrink-0" />
                   <div>
-                    <p className="font-semibold text-navy text-sm">{service.title}</p>
-                    <p className="text-xs text-orange">₹{service.price.toLocaleString('en-IN')} / {service.price_type.replace('per_','').replace('_',' ')}</p>
+                    <p className="font-semibold text-navy text-sm">{selectedService.title}</p>
+                    <p className="text-xs text-orange">₹{selectedService.price.toLocaleString('en-IN')} / {selectedService.price_type.replace('per_','').replace('_',' ')}</p>
                   </div>
+                </div>
+              )}
+              {!service && (vendor?.services?.length || 0) > 1 && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Service *</label>
+                  <select value={serviceId} onChange={e => setServiceId(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange/30 focus:border-orange transition">
+                    {vendor?.services?.map(item => (
+                      <option key={item.id} value={item.id}>{item.title}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               <div>

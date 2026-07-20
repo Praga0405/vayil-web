@@ -8,6 +8,7 @@ import { ApiError, ok } from '../utils/http';
 import { calculateTax } from '../services/tax';
 import { releaseEscrow } from './payments';
 import * as customerSvc from '../services/customerService';
+import * as enquirySvc from '../services/enquiryService';
 
 export const customerRouter = Router();
 customerRouter.use(requireAuth(['customer']));
@@ -89,24 +90,52 @@ customerRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
 
 customerRouter.post('/enquiries', async (req: AuthRequest, res, next) => {
   try {
-    const body = z.object({ vendorId: z.any().optional(), serviceId: z.any().optional(), category: z.string().optional(), description: z.string().min(5), location: z.string().optional(), email: z.string().email().optional() }).parse(req.body);
-    // mysql2 rejects bound `undefined` — coerce every optional to null.
-    const params = {
-      customerId:  req.user!.id,
-      vendorId:    body.vendorId    ?? null,
-      serviceId:   body.serviceId   ?? null,
-      category:    body.category    ?? null,
-      description: body.description,
-      location:    body.location    ?? null,
-      email:       body.email       ?? null,
-    };
-    const result = await exec(
-      `INSERT INTO enquiries (customer_id, vendor_id, service_id, category, description, location, email, status, created_at)
-       VALUES (:customerId, :vendorId, :serviceId, :category, :description, :location, :email, 'new', NOW())`,
-      params,
+    const body = z.object({
+      vendorId: z.any().optional(), vendor_id: z.any().optional(),
+      serviceId: z.any().optional(), service_id: z.any().optional(),
+      category: z.string().optional(), description: z.string().min(5),
+      location: z.string().optional(), email: z.string().email().optional(),
+      files: z.string().optional(), preferred_date: z.string().optional(),
+    }).parse(req.body);
+    const requestedVendorId = body.vendorId ?? body.vendor_id ?? null;
+    const requestedServiceId = body.serviceId ?? body.service_id ?? null;
+    if (!requestedVendorId) throw new ApiError(400, 'vendor_id required');
+    if (!requestedServiceId) throw new ApiError(400, 'service_id required');
+    const listing = requestedServiceId
+      ? await one<any>(
+          `SELECT vendor_id, COALESCE(NULLIF(service_title, ''), NULLIF(title, ''), 'Home Service') AS service_title
+             FROM vendor_services
+            WHERE (vendor_service_id = :id OR id = :id)
+              AND COALESCE(is_deleted, 0) = 0
+            LIMIT 1`,
+          { id: requestedServiceId },
+        )
+      : null;
+    if (!listing) throw new ApiError(404, 'Service not found');
+    if (listing && requestedVendorId && Number(listing.vendor_id) !== Number(requestedVendorId)) {
+      throw new ApiError(400, 'Service does not belong to the selected vendor');
+    }
+    const customer = await one<any>(
+      `SELECT name, email, COALESCE(phone, mobile) AS phone
+         FROM customers WHERE customer_id = :id LIMIT 1`,
+      { id: req.user!.id },
     );
-    const enquiry = await one<any>('SELECT * FROM enquiries WHERE enquiry_id = :id', { id: result.insertId });
-    ok(res, { enquiry }, 201);
+    const saved = await enquirySvc.createEnquiry({
+      customer_id: req.user!.id,
+      vendor_id: listing?.vendor_id ?? requestedVendorId,
+      service_id: requestedServiceId,
+      category: listing?.service_title ?? body.category ?? null,
+      description: body.description,
+      location: body.location ?? null,
+      email: body.email ?? customer?.email ?? null,
+      preferred_date: body.preferred_date ?? null,
+      first_name: customer?.name ?? 'Customer',
+      last_name: '',
+      phone: customer?.phone ?? '',
+      message: body.description,
+      files: body.files ?? '',
+    });
+    ok(res, { enquiry: saved }, 201);
   } catch (err) { next(err); }
 });
 

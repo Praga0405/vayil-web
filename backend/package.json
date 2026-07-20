@@ -19,7 +19,8 @@
     "smoke:admin": "tsx scripts/smoke-admin.ts",
     "smoke:bridges": "tsx scripts/smoke-bridges.ts",
     "check:legacy-payments": "tsx scripts/check-legacy-payment-totals.ts",
-    "check:service-decimals": "tsx scripts/check-service-decimals.ts"
+    "check:service-decimals": "tsx scripts/check-service-decimals.ts",
+    "check:july17-parity": "tsx scripts/check-july17-mobile-parity.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1053.0",

@@ -19,6 +19,11 @@ export interface CreateEnquiryInput {
   location_lat?: number | null;
   location_lng?: number | null;
   preferred_date?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  message?: string | null;
+  files?: string | null;
 }
 
 export async function createEnquiry(b: CreateEnquiryInput) {
@@ -28,15 +33,20 @@ export async function createEnquiry(b: CreateEnquiryInput) {
   const result: any = await exec(
     `INSERT INTO enquiries
        (customer_id, vendor_id, service_id, category, description, location, email,
-        budget, location_lat, location_lng, preferred_date, status, created_at)
+        budget, location_lat, location_lng, preferred_date, first_name, last_name,
+        phone, message, files, status, status_int, created_at)
      VALUES (:cid, :vid, :sid, :cat, :desc, :loc, :email,
-             :budget, :lat, :lng, :pdate, 'new', NOW())`,
+             :budget, :lat, :lng, :pdate, :firstName, :lastName,
+             :phone, :message, :files, 'new', 1, NOW())`,
     {
       cid: b.customer_id, vid: b.vendor_id ?? null, sid: b.service_id ?? null,
       cat: b.category ?? null, desc: b.description, loc: b.location ?? null,
       email: b.email ?? null, budget: b.budget ?? null,
       lat: b.location_lat ?? null, lng: b.location_lng ?? null,
       pdate: b.preferred_date ?? null,
+      firstName: b.first_name ?? null, lastName: b.last_name ?? '',
+      phone: b.phone ?? '', message: b.message ?? b.description,
+      files: b.files ?? '',
     },
   );
   return one<any>('SELECT * FROM enquiries WHERE enquiry_id = :id', { id: result.insertId });

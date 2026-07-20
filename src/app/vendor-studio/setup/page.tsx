@@ -80,7 +80,17 @@ export default function VendorStudioSetupPage() {
     finally { setSaving(false) }
   }
 
-  const kycStatus = profile?.kyc_status || profile?.vendor_status
+  const rawKycStatus = String(profile?.kyc_status || profile?.vendor_status || profile?.status || '').toLowerCase()
+  const kycStatus = ['approved', 'verified', 'kyc_approved', 'active'].includes(rawKycStatus)
+    ? 'verified'
+    : rawKycStatus
+  const proofType = profile?.proof_type || profile?.kyc_id_type || ''
+  const proofNumber = String(profile?.proof_number || profile?.kyc_id_number || '')
+  const maskedProofNumber = proofNumber.length > 4
+    ? `${'*'.repeat(Math.max(4, proofNumber.length - 4))}${proofNumber.slice(-4)}`
+    : proofNumber
+  const proofDocument = profile?.kyc_document_url || profile?.kyc_id_image || ''
+  const approvedAt = profile?.kyc_approved_at || profile?.kyc_verified_at || ''
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-10">
@@ -110,6 +120,32 @@ export default function VendorStudioSetupPage() {
               </div>
               <h2 className="text-lg font-bold text-navy mb-1">KYC Verified</h2>
               <p className="text-sm text-gray-500">Your identity has been successfully verified.</p>
+              <div className="mt-6 border-t border-gray-100 pt-4 text-left space-y-3">
+                {proofType && (
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-gray-500">Proof type</span>
+                    <span className="font-semibold text-navy text-right">{proofType}</span>
+                  </div>
+                )}
+                {maskedProofNumber && (
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-gray-500">ID number</span>
+                    <span className="font-semibold text-navy text-right">{maskedProofNumber}</span>
+                  </div>
+                )}
+                {approvedAt && (
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-gray-500">Approved on</span>
+                    <span className="font-semibold text-navy text-right">{new Date(approvedAt).toLocaleDateString('en-IN')}</span>
+                  </div>
+                )}
+                {proofDocument && (
+                  <a href={proofDocument} target="_blank" rel="noreferrer"
+                    className="inline-flex text-sm font-semibold text-orange hover:underline">
+                    View approved document
+                  </a>
+                )}
+              </div>
             </div>
           ) : kycStatus === 'pending' ? (
             <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center">

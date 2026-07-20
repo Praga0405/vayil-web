@@ -801,12 +801,12 @@ async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?
   const rows = await query<any>(
     `SELECT CAST(COALESCE(e.id, e.enquiry_id) AS UNSIGNED) AS enquiry_id,
             CAST(e.customer_id AS UNSIGNED) AS customer_id,
-            COALESCE(e.first_name, c.name) AS first_name,
+            COALESCE(NULLIF(e.first_name, ''), NULLIF(c.name, ''), 'Customer') AS first_name,
             COALESCE(e.last_name, '') AS last_name,
-            COALESCE(e.email, c.email) AS email,
-            COALESCE(e.phone, c.phone, c.mobile) AS phone,
-            COALESCE(e.message, e.description) AS message,
-            e.files,
+            COALESCE(NULLIF(e.email, ''), NULLIF(c.email, ''), '') AS email,
+            COALESCE(NULLIF(e.phone, ''), NULLIF(c.phone, ''), NULLIF(c.mobile, ''), '') AS phone,
+            COALESCE(NULLIF(e.message, ''), NULLIF(e.description, ''), '') AS message,
+            COALESCE(e.files, '') AS files,
             CAST(${enquiryStatusExpr('e')} AS UNSIGNED) AS status,
             e.created_at,
             CAST(e.service_id AS UNSIGNED) AS service_id,
@@ -819,13 +819,13 @@ async function legacyCustomerEnquiryRows(customerId: number | string, enquiryId?
                 WHEN e.status = 'rejected' THEN 'Rejected'
                 ELSE e.status
               END) AS status_name,
-            v.company_name,
-            COALESCE(vs.service_title, vs.title) AS service_title,
+            COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), 'Vendor') AS company_name,
+            COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''), NULLIF(e.category, ''), 'Home Service') AS service_title,
             vs.price,
             COALESCE(vs.unit_name, vs.unit) AS unit_name,
             vs.pricing_type,
-            vs.description AS description,
-            COALESCE(vs.service_image, vs.thumbnail) AS service_image,
+            COALESCE(vs.description, e.description, '') AS description,
+            COALESCE(vs.service_image, vs.thumbnail, '') AS service_image,
             vs.minimum_fee
        FROM enquiries e
        LEFT JOIN customers c ON c.customer_id = e.customer_id
@@ -1543,7 +1543,6 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
   const body = req.body ?? {};
   const required: Array<{ name: string; keys: string[]; allowEmpty?: boolean }> = [
     { name: 'enquiry_id', keys: ['enquiry_id', 'enquiryId'] },
-    { name: 'quote_id', keys: ['quote_id', 'quotation_id', 'quoteId', 'quotationId'] },
     { name: 'service_id', keys: ['service_id', 'serviceId'] },
     { name: 'vendor_id', keys: ['vendor_id', 'vendorId'] },
     { name: 'message', keys: ['message'], allowEmpty: true },
@@ -1565,12 +1564,12 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
 
   const customerId = req.user!.id;
   const enquiryId = toNumberSafe(pickId(body, 'enquiry_id', 'enquiryId'));
-  const quoteId = toNumberSafe(pickId(body, 'quote_id', 'quotation_id', 'quoteId', 'quotationId'));
+  const requestedQuoteId = toNumberSafe(pickId(body, 'quote_id', 'quotation_id', 'quoteId', 'quotationId'));
   const serviceId = toNumberSafe(pickId(body, 'service_id', 'serviceId'));
   const vendorId = toNumberSafe(pickId(body, 'vendor_id', 'vendorId'));
   const amount = toNumberSafe(body?.order_amount ?? body?.orderAmount ?? body?.amount);
-  if (!enquiryId || !quoteId || !serviceId || !vendorId || !amount) {
-    throw new ApiError(400, 'enquiry_id, quote_id, service_id, vendor_id and order_amount are required');
+  if (!enquiryId || !serviceId || !vendorId || !amount) {
+    throw new ApiError(400, 'enquiry_id, service_id, vendor_id and order_amount are required');
   }
 
   const enquiry = await one<any>(
@@ -1582,16 +1581,23 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
   );
   if (!enquiry) throw new ApiError(403, 'Enquiry not found');
   if (enquiry.vendor_id && Number(enquiry.vendor_id) !== vendorId) throw new ApiError(400, 'vendor_id mismatch');
+  if (enquiry.service_id && Number(enquiry.service_id) !== serviceId) throw new ApiError(400, 'service_id mismatch');
 
   const quote = await one<any>(
-    `SELECT quotation_id, id, enquiry_id, vendor_id, amount, status
+    `SELECT quotation_id, id, enquiry_id, vendor_id, service_id, amount, status
        FROM quotation
       WHERE enquiry_id = :enquiryId
-        AND (quotation_id = :quoteId OR id = :quoteId)
+        AND (:quoteId = 0 OR quotation_id = :quoteId OR id = :quoteId)
+      ORDER BY CASE WHEN quotation_id = :quoteId OR id = :quoteId THEN 0 ELSE 1 END,
+               COALESCE(quotation_id, id) DESC
       LIMIT 1`,
-    { enquiryId, quoteId },
+    { enquiryId, quoteId: requestedQuoteId },
   );
   if (!quote) throw new ApiError(404, 'Quote not found');
+  const quoteId = toNumberSafe(quote.quotation_id ?? quote.id);
+  if (!quoteId) throw new ApiError(404, 'Quote not found');
+  if (quote.vendor_id && Number(quote.vendor_id) !== vendorId) throw new ApiError(400, 'vendor_id mismatch');
+  if (quote.service_id && Number(quote.service_id) !== serviceId) throw new ApiError(400, 'service_id mismatch');
 
   const currency = pickString(body, 'currency') || 'INR';
   const paymentJsonBody = objectFromJsonish(body?.payment_json);
@@ -1659,9 +1665,8 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
       `SELECT order_id FROM orders
         WHERE customer_id = ?
           AND enquiry_id = ?
-          AND (quotation_id = ? OR quote_id = ?)
         LIMIT 1`,
-      [customerId, enquiryId, quoteId, quoteId],
+      [customerId, enquiryId],
     );
     const existingOrderId = Array.isArray(existingOrders) ? existingOrders[0]?.order_id : null;
     if (existingOrderId) {
@@ -1671,13 +1676,13 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
             SET vendor_id = ?, quotation_id = ?, quote_id = ?, service_id = ?,
                 message = ?, files = ?, amount = ?, order_amount = ?,
                 currency = ?, payment_id = ?, payment_json = ?, payment_status = ?,
-                status = CASE WHEN ? = 'success' THEN 'active' ELSE COALESCE(status, 'pending') END
+                status = CASE WHEN ? = 1 THEN 'active' ELSE COALESCE(status, 'pending') END
           WHERE order_id = ?`,
         [
           vendorId, quoteId, quoteId, serviceId,
           message, files, amount, String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
           currency, paymentId, paymentJson, paymentStatus,
-          paymentStatusLower, orderId,
+          isPaid ? 1 : 0, orderId,
         ],
       );
     } else {
@@ -1691,7 +1696,7 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
           customerId, vendorId, enquiryId, quoteId, quoteId, serviceId,
           message, files, amount, String(body?.order_amount ?? body?.orderAmount ?? body?.amount),
           currency, paymentId, paymentJson, paymentStatus,
-          paymentStatusLower === 'success' ? 'active' : 'pending',
+          isPaid ? 'active' : 'pending',
         ],
       );
       orderId = Number(insertOrder.insertId);
@@ -1745,19 +1750,29 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
       }
     }
 
-    await conn.query(
-      `INSERT INTO payment_log
-         (order_id, customer_id, vendor_id, amount, status, provider, provider_payment_id,
-          notes, currency, payment_id, payment_json, payment_status, base_amount,
-          payment_amount, payment_date, payment_data, payment_type, convenience_fee_cost,
-          platform_cost, tax_cost)
-       VALUES (?, ?, ?, ?, ?, 'razorpay', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)`,
-      [
-        orderId, customerId, vendorId, amount, paymentStatus, paymentId || null,
-        message, currency, paymentId || null, paymentJson, paymentStatus,
-        baseAmount, amount, paymentJson, paymentType, convenienceFeeCost, platformCost, taxCost,
-      ],
-    );
+    const [existingPaymentRows]: any = paymentId
+      ? await conn.query(
+          `SELECT id FROM payment_log
+            WHERE order_id = ? AND (payment_id = ? OR provider_payment_id = ?)
+            LIMIT 1`,
+          [orderId, paymentId, paymentId],
+        )
+      : [[]];
+    if (!paymentId || !Array.isArray(existingPaymentRows) || existingPaymentRows.length === 0) {
+      await conn.query(
+        `INSERT INTO payment_log
+           (order_id, customer_id, vendor_id, amount, status, provider, provider_payment_id,
+            notes, currency, payment_id, payment_json, payment_status, base_amount,
+            payment_amount, payment_date, payment_data, payment_type, convenience_fee_cost,
+            platform_cost, tax_cost)
+         VALUES (?, ?, ?, ?, ?, 'razorpay', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)`,
+        [
+          orderId, customerId, vendorId, amount, paymentStatus, paymentId || null,
+          message, currency, paymentId || null, paymentJson, paymentStatus,
+          baseAmount, amount, paymentJson, paymentType, convenienceFeeCost, platformCost, taxCost,
+        ],
+      );
+    }
 
     if (isPaid) {
       const [[existingWalletCredit]]: any = await conn.query(
