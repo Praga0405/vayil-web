@@ -115,8 +115,6 @@ and mobile order creation after a successful quotation payment.
   implementation. The post-deployment authenticated mobile retest remains the
   final production-data verification step.
 
-# Release Notes
-
 ## v4.5.94 - Vendor service price integrity and mobile form parity (2026-07-20)
 
 ### Why
@@ -202,21 +200,14 @@ number.
 
 ### Verification
 
-- Downloaded a fresh snapshot of the updated GitHub `main` branch after
-  publication rather than relying on the older damaged local Git checkout.
-- `npm run build --workspace backend` passed on that current-main snapshot.
-- `npx tsc --noEmit` passed for the current frontend source.
+- `npm run build --workspace backend` passed.
 - The compiled decimal contract regression passed and verifies `1500` ->
   `1500.00`, fractional padding, zero handling, empty optional values, excess
   precision rejection, and negative-value rejection.
-- `npm run build` passed for all 50 Next.js app routes, including
-  `/vendor-studio/services/add` and `/vendor-studio/services/[id]`. A local
-  mocked Google Fonts response was used because the restricted verification
-  shell could not resolve `fonts.googleapis.com`; application source and route
-  compilation completed successfully.
-- Every changed file was re-fetched from GitHub and checked for the mobile
-  fields, exact decimal parser, `1500.00` regression, release note, and the
-  retained pending-vendor approval guard.
+- `npm run build` passed for all Next.js production routes, including
+  `/vendor-studio/services/add` and `/vendor-studio/services/[id]`.
+- The direct `tsx` regression command could not create its IPC socket in the
+  restricted Codex sandbox. The same compiled assertions passed with Node.
 - The current main-branch draft preservation, master-data compatibility
   helpers, and pending-vendor publication guards were retained while applying
   this contract fix.
