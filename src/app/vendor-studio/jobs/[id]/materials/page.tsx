@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { vendorApi } from '@/lib/api/client'
-import { demoOrLive } from '@/lib/demoMode'
+import { demoOrLive, IS_DEMO_MODE } from '@/lib/demoMode'
 
 type Draft = Pick<MockMaterial, 'name' | 'quantity' | 'unit' | 'rate' | 'status'> & { id?: number }
 
@@ -16,19 +16,17 @@ export default function MaterialsManagerPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id ?? ""
   const router = useRouter()
-  const { data: job, loading } = useLiveJob(id)
+  const { data: job, loading, reload } = useLiveJob(id)
 
   // All hooks declared up-front — never after a conditional return.
   const [items, setItems] = useState<Draft[]>([])
   const [saving, setSaving] = useState(false)
   React.useEffect(() => {
-    if (job?.materials && items.length === 0) {
-      setItems(job.materials.map(m => ({
-        id: m.id, name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
-      })))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job?.id])
+    if (!job) return
+    setItems(job.materials.map(m => ({
+      id: m.id, name: m.name, quantity: m.quantity, unit: m.unit, rate: m.rate, status: m.status,
+    })))
+  }, [job])
 
   if (loading) return <PageLoader />
   if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
@@ -61,6 +59,10 @@ export default function MaterialsManagerPage() {
         }
       })
       toast.success('Materials saved')
+      if (!IS_DEMO_MODE) {
+        reload()
+        router.push(`/vendor-studio/jobs/${id}`)
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Failed to save materials')
     } finally { setSaving(false) }

@@ -1,3 +1,53 @@
+## v4.5.98 - Vendor Studio material save and list flow (2026-07-22)
+
+### Why
+
+The Materials editor successfully saved rows but stopped on the editor after
+showing only a success toast. It did not return to the Job detail page or
+refresh the saved material list. Job detail already showed Milestones, but did
+not show an equivalent Materials list, so vendors could not confirm the
+committed row immediately.
+
+### Root Cause
+
+- The Materials page called the existing POST/PUT endpoints and stopped after
+  `toast.success(...)`.
+- The editor did not reload the job after saving, so newly inserted rows did
+  not receive their persisted IDs in local state.
+- The Job detail page omitted the Materials list even though the hook already
+  fetched materials from `GET /vendors/projects/:id/materials`.
+- The frontend mapper assumed only canonical material fields and did not accept
+  existing mobile-compatible aliases.
+
+### What Changed
+
+- Live saves now request a fresh job read and navigate to
+  `/vendor-studio/jobs/:id`.
+- Job detail now renders a Materials list matching the Milestones list pattern,
+  including item name, quantity, unit, rate, total, payment status, empty state,
+  and Manage Materials action.
+- Material mapping accepts `material_id`/ `id`, `name`/ `title`,
+  `quantity`/ `qty`, `unit`/ `unit_type`, `rate`/ `unit_cost`, and
+  `total`/ `total_cost`.
+- Demo-mode mutation behavior remains unchanged.
+- No API route, request body, authentication, database schema, payment, OTP, or
+  mobile legacy response contract was changed.
+
+### Verification
+
+- Backend TypeScript build passed.
+- Next.js production build passed, including the Job detail and Materials
+  routes.
+- `git diff --check` passed before publishing.
+- Live authenticated browser verification remains a post-deployment check.
+
+### Files Changed
+
+- `src/app/vendor-studio/jobs/[id]/materials/page.tsx`
+- `src/app/vendor-studio/jobs/[id]/page.tsx`
+- `src/hooks/useVendorStudio.ts`
+- `RELEASE_NOTES.md`
+
 # Release Notes
 
 ## v4.5.97 - Demo-login Razorpay compatibility (2026-07-22)

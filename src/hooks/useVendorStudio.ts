@@ -162,9 +162,9 @@ export function useLiveJob(id: string | number | undefined): State<MockJob | nul
         const job = adaptJob(project, plan, { escrow })
         // Map materials (backend shape) to MockMaterial.
         job.materials = (Array.isArray(materials) ? materials : []).map((m: any) => ({
-          id: m.material_id, name: m.name,
-          quantity: Number(m.quantity), unit: m.unit,
-          rate: Number(m.rate), total: Number(m.total),
+          id: m.material_id ?? m.id, name: m.name ?? m.title ?? '',
+          quantity: Number(m.quantity ?? m.qty ?? 0), unit: m.unit ?? m.unit_type ?? 'pc',
+          rate: Number(m.rate ?? m.unit_cost ?? 0), total: Number(m.total ?? m.total_cost ?? 0),
           status: (m.status || 'UNPAID') as any,
         }))
         setS({ data: job, loading: false, error: null, source: 'live' })

@@ -75,7 +75,8 @@ export default function VendorJobDetailPage() {
           </PageSection>
         }
         right={
-          <PageSection
+          <>
+            <PageSection
             title={`Milestones (${job.milestones.length})`}
             description="Tap a milestone to update progress or post an image."
             actions={
@@ -109,6 +110,38 @@ export default function VendorJobDetailPage() {
               </ul>
             )}
           </PageSection>
+            <PageSection
+              title={`Materials (${job.materials.length})`}
+              description="Review the materials added to this job and their payment status."
+              actions={
+                <Link href={`/vendor-studio/jobs/${id}/materials`}
+                  className="text-xs text-orange font-semibold inline-flex items-center gap-1 hover:underline">
+                  Manage <ChevronRight className="w-3 h-3" />
+                </Link>
+              }
+            >
+              {job.materials.length === 0 ? (
+                <div className="py-8 text-center text-sm text-gray-400">
+                  No materials yet. <Link href={`/vendor-studio/jobs/${id}/materials`} className="text-orange font-semibold hover:underline">Add materials →</Link>
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {job.materials.map(m => (
+                    <li key={m.id} className="flex flex-col xs:flex-row xs:items-center gap-3 py-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-navy text-sm truncate">{m.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {m.quantity} {m.unit} · {formatCurrency(m.rate)} per unit
+                        </p>
+                      </div>
+                      <StatusBadge status={m.status} />
+                      <span className="text-sm font-bold text-navy xs:ml-auto">{formatCurrency(m.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </PageSection>
+          </>
         }
       />
     </div>
