@@ -274,6 +274,17 @@ more reliable customer/service display fallbacks.
 - The July 17 mobile compatibility, legacy payment-total, and service-decimal
   regression guards all passed after these changes.
 - `git diff --check` passed.
+- Production commit `048ca29` was pushed to `main` and the Vercel alias moved
+  to the new build. Live `/health` and the database-backed `/listStatus`
+  endpoint both return HTTP 200 JSON.
+- Live historical URLs return the intended HTTP 307 locations:
+  `/customer/enquiries/420001` -> `/account/enquiries/420001` and
+  `/customer/projects/30001/materials` ->
+  `/account/projects/30001/materials`.
+- Unauthenticated production checks for `/vendors/enquiries`,
+  `/customers/projects`, and `/payments/create-order` return structured JSON
+  HTTP 401 responses, confirming that the routes are deployed behind the
+  expected authentication wall rather than falling through to an HTML page.
 
 ### Database and Deployment Notes
 
@@ -291,8 +302,13 @@ more reliable customer/service display fallbacks.
 - A local `next start` socket smoke test could not run because this managed
   environment blocks port binding (`listen EPERM`). The compiled route
   manifest was inspected instead and contains all four intended historical
-  customer-page redirects; production HTTP checks remain part of deployment
-  verification.
+  customer-page redirects; the representative enquiry and nested project
+  redirects were subsequently confirmed against production.
+- A read-only authenticated production contract check was attempted using the
+  customer token supplied for the earlier audit, but Vercel returned
+  `Invalid or expired token`. No OTP request, payment, or other production
+  mutation was performed to work around it. Authenticated full/minimum/custom
+  checkout remains in the mobile/web team's post-deployment acceptance list.
 - Post-deployment retest should use one new enquiry for each payment option,
   confirm exactly one order/hold/step 1, submit a plan, confirm one step 2,
   approve the plan, and complete one material payment.
