@@ -102,12 +102,19 @@ Two independent frontend compatibility defects blocked the payment flow.
 
 ### Production Verification
 
-- Vercel deployed commit `a0b4b90` to production successfully.
+- Vercel deployed the functional fix in `a0b4b90` and the test-contact follow-up
+  in `5786b34` to production successfully. The final deployment
+  `dpl_J1z74DNMX5ddcY8C5cFse53WNnPs` is `READY` and owns the
+  `vayil-web.vercel.app` alias.
 - Using the supplied `555...` demo login, the marker exchange called
   `/api/auth/otp/send` and `/api/auth/otp/verify` successfully. The protected
   enquiry and quotation requests then changed from HTTP 401 to HTTP 200.
 - Clicking `Pay ₹212` called `/api/payments/create-order`, which returned HTTP
   201, and opened the Razorpay checkout in Test Mode with the correct amount.
+- Reloading against the final deployment kept the authenticated enquiry loaded,
+  created another test order with HTTP 201, and opened checkout already showing
+  `Using as +91 90000 90000`; the invalid `555...` login number is no longer a
+  checkout blocker.
 - Gateway capture is not yet confirmed: Razorpay rejected its official Indian
   Visa test card and two checkout-listed netbanking choices with `Payment could
   not be completed` / `Please use another method`. No `/api/payments/verify`
