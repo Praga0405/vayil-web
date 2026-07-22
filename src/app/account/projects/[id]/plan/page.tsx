@@ -19,9 +19,10 @@ function adaptProject(payload: any) {
   return {
     id: project?.order_id ?? null,
     title: project?.title ?? `Project #${project?.order_id ?? ''}`,
-    plan_status: planRows[0]?.customer_status === 'approved' ? 'APPROVED'
-                : planRows[0]?.customer_status === 'revision_requested' ? 'REVISION_REQUESTED'
+    plan_status: planRows.length > 0 && planRows.every((p: any) => p.customer_status === 'approved') ? 'APPROVED'
+                : planRows.some((p: any) => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
                 : planRows.length ? 'SUBMITTED' : 'NOT_STARTED',
+    revision_reason: planRows.find((p: any) => p.customer_status === 'revision_requested')?.revision_reason ?? null,
     milestones: planRows.map((p: any) => ({
       id: p.plan_id,
       title: p.title,
@@ -94,6 +95,12 @@ export default function CustomerPlanApprovalPage() {
           <h1 className="text-xl font-bold text-navy">Vendor's Implementation Plan</h1>
         </div>
         <p className="text-sm text-gray-500">Review the milestones below. Approving locks the plan; the vendor will start work.</p>
+        {job.plan_status === 'REVISION_REQUESTED' && job.revision_reason && (
+          <div className="mt-4 rounded-xl border border-orange/30 bg-orange/5 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-orange">Change request</p>
+            <p className="mt-1 text-sm text-navy">{job.revision_reason}</p>
+          </div>
+        )}
       </div>
 
       {/* Milestones */}
@@ -121,7 +128,11 @@ export default function CustomerPlanApprovalPage() {
       </div>
 
       {/* Actions */}
-      {!showReject ? (
+      {job.plan_status === 'APPROVED' ? (
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-sm text-green-800">
+          This plan version has already been approved. The approval action will be available again when the vendor submits an updated version.
+        </div>
+      ) : !showReject ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 flex flex-col xs:flex-row gap-3 sticky bottom-4">
           <Button full onClick={approve} loading={pending === 'approve'}>
             <CheckCircle className="w-4 h-4" /> Approve Plan
