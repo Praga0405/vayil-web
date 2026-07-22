@@ -62,6 +62,7 @@ export interface MockJob {
   paid: number
   pending: number
   plan_status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REVISION_REQUESTED'
+  revision_reason?: string | null
   milestones: MockMilestone[]
   materials: MockMaterial[]
   created_at: string
