@@ -80,6 +80,12 @@ Migration `013_web_mobile_project_parity.sql` performs an idempotent repair for 
 - Selecting Fan changed the disabled state into an enabled `Pay ₹741` action and produced the expected breakdown: ₹700 subtotal, ₹35 platform fee, ₹6 GST, ₹741 total.
 - No real financial charge was attempted.
 
+### Git/Vercel Deployment Trigger (2026-07-22)
+
+- This release is being re-published through a merge to `main` so the configured Vercel Git integration rebuilds the production deployment from the exact `v4.5.100` source state.
+- No application logic, API route, request body, authentication flow, payment calculation, or database behavior is changed by this trigger commit.
+- After deployment, the frontend URL must be smoke-tested. Migration `013_web_mobile_project_parity.sql` and the database/mobile end-to-end checks below remain required before declaring the release fully production-verified.
+
 ### Deployment and retest requirements
 
 1. Deploy the backend and run migration `013_web_mobile_project_parity.sql`.
