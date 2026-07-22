@@ -372,6 +372,9 @@ export const paymentsApi = {
     amount:        number
     purpose:       'quote' | 'milestone' | 'materials'
     enquiry_id?:   number
+    quotation_id?: number
+    base_amount?:  number
+    payment_option?: 'full' | 'minimum' | 'custom'
     order_id?:     number
     milestone_id?: number
     material_ids?: number[]

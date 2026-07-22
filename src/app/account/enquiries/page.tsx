@@ -6,6 +6,7 @@ import { PageLoader, EmptyState, StatusBadge } from '@/components/ui'
 import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight, Search } from 'lucide-react'
 import { PageHero } from '@/components/shared/PageLayout'
+import { normalizeCustomerEnquiry } from '@/lib/adapters/customer-enquiry'
 
 export default function EnquiriesPage() {
   const [enquiries, setEnquiries] = useState<any[]>([])
@@ -16,12 +17,12 @@ export default function EnquiriesPage() {
     customerApi.getEnquiries()
       .then(r => {
         const d = r.data?.data || r.data?.result || []
-        setEnquiries(Array.isArray(d) ? d : [])
+        setEnquiries(Array.isArray(d) ? d.map(normalizeCustomerEnquiry) : [])
       })
       .finally(() => setLoading(false))
   }, [])
 
-  const STATUSES = ['ALL', 'PENDING', 'QUOTED', 'ONGOING', 'COMPLETED', 'CANCELLED']
+  const STATUSES = ['ALL', 'PENDING', 'QUOTED', 'ONGOING', 'COMPLETED', 'REJECTED', 'CANCELLED']
   const filtered = filter === 'ALL' ? enquiries : enquiries.filter(e => e.status === filter)
 
   return (

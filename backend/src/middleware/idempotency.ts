@@ -45,13 +45,19 @@ function bodyHash(body: any): string {
 
 export function idempotent() {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
-    const key = (req.header('Idempotency-Key') || req.body?.idempotency_key || '').toString().trim();
-    if (!key) return next();
+    const rawKey = (req.header('Idempotency-Key') || req.body?.idempotency_key || '').toString().trim();
+    if (!rawKey) return next();
 
     const endpoint = `${req.method} ${req.route?.path || req.path}`;
     const userId = Number(req.user?.id ?? 0);
     const userType = req.user?.userType || 'anon';
     const bh = bodyHash(req.body);
+    // The deployed table still has id_key as its single primary key. Store a
+    // deterministic scoped hash so create-order and verify can safely reuse
+    // the same public UUID without overwriting one another's cache rows.
+    const key = `v2:${crypto.createHash('sha256')
+      .update(`${rawKey}|${userId}|${userType}|${endpoint}`)
+      .digest('hex')}`;
 
     const cached = await one<any>(
       `SELECT response_status, response_body

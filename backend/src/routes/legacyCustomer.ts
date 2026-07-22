@@ -1703,8 +1703,8 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
       await conn.query(`UPDATE orders SET id = order_id WHERE order_id = ? AND (id IS NULL OR id = 0)`, [orderId]);
     }
 
-    await conn.query(`UPDATE quotation SET status = 'accepted' WHERE quotation_id = ? OR id = ?`, [quoteId, quoteId]);
-    await conn.query(`UPDATE enquiries SET status = 'accepted' WHERE enquiry_id = ?`, [enquiryId]);
+    await conn.query(`UPDATE quotation SET status = 'accepted', status_int = 2 WHERE quotation_id = ? OR id = ?`, [quoteId, quoteId]);
+    await conn.query(`UPDATE enquiries SET status = 'accepted', status_int = 2 WHERE enquiry_id = ?`, [enquiryId]);
     const [stepRows]: any = await conn.query(
       `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 1 LIMIT 1`,
       [orderId],
@@ -1720,18 +1720,24 @@ async function createLegacyPlaceOrder(req: AuthRequest) {
     if (intentId) {
       await conn.query(
         `UPDATE payment_intents
-            SET order_id = ?, enquiry_id = ?, amount = ?, status = ?,
+            SET order_id = ?, enquiry_id = ?, quotation_id = ?, base_amount = ?,
+                amount = ?, payment_option = ?, status = ?,
                 razorpay_order_id = ?, razorpay_payment_id = COALESCE(?, razorpay_payment_id)
           WHERE intent_id = ?`,
-        [orderId, enquiryId, amount, isPaid ? 'escrow_held' : 'initiated', razorpayOrder.id, paymentId || null, intentId],
+        [orderId, enquiryId, quoteId, baseAmount,
+         amount, pickString(body, 'payment_option', 'paymentOption') || 'full',
+         isPaid ? 'escrow_held' : 'initiated', razorpayOrder.id, paymentId || null, intentId],
       );
     } else {
       const [insertIntent]: any = await conn.query(
         `INSERT INTO payment_intents
-           (idempotency_key, customer_id, order_id, enquiry_id, amount, purpose, status,
+           (idempotency_key, customer_id, order_id, enquiry_id, quotation_id,
+            base_amount, amount, payment_option, purpose, status,
             razorpay_order_id, razorpay_payment_id)
-         VALUES (?, ?, ?, ?, ?, 'quote', ?, ?, ?)`,
-        [idempotencyKey, customerId, orderId, enquiryId, amount, isPaid ? 'escrow_held' : 'initiated', razorpayOrder.id, paymentId || null],
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'quote', ?, ?, ?)`,
+        [idempotencyKey, customerId, orderId, enquiryId, quoteId,
+         baseAmount, amount, pickString(body, 'payment_option', 'paymentOption') || 'full',
+         isPaid ? 'escrow_held' : 'initiated', razorpayOrder.id, paymentId || null],
       );
       intentId = Number(insertIntent.insertId);
     }

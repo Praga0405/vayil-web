@@ -14,7 +14,7 @@
 import type { MockEnquiry, MockJob, MockMilestone } from '@/lib/mockData'
 
 type BackendEnquiry = {
-  enquiry_id: number; customer_id: number; vendor_id?: number | null;
+  enquiry_id: number; id?: number; customer_id: number; vendor_id?: number | null;
   category?: string | null; description?: string | null; location?: string | null;
   status?: string | null; created_at?: string | null;
   customer_name?: string | null; customer_mobile?: string | null;
@@ -23,6 +23,10 @@ type BackendEnquiry = {
   scope?: string | null; work_scope?: string | null;
   timeline?: string | null; preferred_date?: string | null;
   attachments?: unknown; images?: unknown; image_urls?: unknown;
+  workflow_status?: string | null; workflow_bucket?: MockEnquiry['workflow_bucket'];
+  quote_status?: string | null; quote_count?: number | string | null;
+  quotation_id?: number | string | null; order_id?: number | string | null;
+  latest_step?: number | string | null;
 }
 type BackendOrder = {
   order_id: number; customer_id: number; vendor_id: number;
@@ -36,13 +40,16 @@ type BackendOrderPlan = {
   vendor_status?: string | null; customer_status?: string | null;
 }
 
-function statusToEnquiry(s: string | null | undefined): MockEnquiry['status'] {
-  const v = (s ?? '').toLowerCase()
+function statusToEnquiry(s: unknown): MockEnquiry['status'] {
+  const v = String(s ?? '').toLowerCase()
+  const code = Number(s)
+  if (v === 'awaiting_payment') return 'AWAITING_PAYMENT'
   if (v === 'accepted')  return 'ACCEPTED'
-  if (v === 'rejected')  return 'REJECTED'
-  if (v === 'quoted' || v === 'quote_sent') return 'QUOTED'
-  if (v === 'ongoing' || v === 'active')    return 'ONGOING'
-  if (v === 'completed') return 'COMPLETED'
+  if (v === 'rejected' || code === 3)  return 'REJECTED'
+  if (v === 'quoted' || v === 'quote_sent' || v === 'quote received' || code === 11) return 'QUOTED'
+  if (v === 'ongoing' || v === 'active' || code === 9)    return 'ONGOING'
+  if (v === 'completed' || code === 10) return 'COMPLETED'
+  if (code === 2) return 'ACCEPTED'
   return 'NEW'
 }
 function statusToMilestone(vendor?: string | null, customer?: string | null): MockMilestone['status'] {
@@ -61,9 +68,17 @@ export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | n
     : typeof attachmentsRaw === 'string'
       ? attachmentsRaw.split(',').map(s => s.trim()).filter(Boolean)
       : []
+  const customerName = String(row.customer_name ?? '').trim()
+  const status = statusToEnquiry(row.workflow_status ?? row.status)
+  const workflowBucket = row.workflow_bucket ?? (
+    status === 'ONGOING' ? 'ONGOING'
+      : status === 'COMPLETED' ? 'COMPLETED'
+        : status === 'REJECTED' ? 'REJECTED'
+          : 'REQUEST_QUOTATION'
+  )
   return {
-    id:               row.enquiry_id,
-    customer_name:    row.customer_name ?? `Customer #${row.customer_id}`,
+    id:               row.enquiry_id ?? row.id!,
+    customer_name:    customerName || `Customer #${row.customer_id}`,
     // Backend reveals customer_phone only after the vendor accepts the
     // enquiry; before that it returns null so we show "—" instead of
     // an empty +91.
@@ -76,7 +91,13 @@ export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | n
     timeline:         row.timeline ?? row.preferred_date ?? '—',
     description:      row.description ?? '',
     attachments,
-    status:           statusToEnquiry(row.status),
+    status,
+    workflow_bucket:  workflowBucket,
+    quote_status:     row.quote_status ?? null,
+    quote_count:      Number(row.quote_count ?? 0),
+    quotation_id:     row.quotation_id ? Number(row.quotation_id) : null,
+    order_id:         row.order_id ? Number(row.order_id) : null,
+    latest_step:      row.latest_step ? Number(row.latest_step) : null,
     created_at:       row.created_at ?? new Date().toISOString(),
   }
 }

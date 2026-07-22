@@ -25,6 +25,7 @@ import toast from 'react-hot-toast'
 import { customerApi } from '@/lib/api/client'
 import { IS_DEMO_MODE } from '@/lib/demoMode'
 import { getMockJob, type MockMaterial } from '@/lib/mockData'
+import { paymentFeeSettings } from '@/lib/quote-payment'
 
 interface MaterialsState {
   materials: MockMaterial[]
@@ -42,6 +43,7 @@ export default function CustomerMaterialsPage() {
   const [state, setState] = useState<MaterialsState>({ materials: [], locked: false, loading: true, error: null })
   const [selected, setSelected] = useState<number[]>([])
   const [nonce, setNonce] = useState(0)
+  const [settings, setSettings] = useState<any>({})
 
   useEffect(() => {
     if (!id) return
@@ -56,8 +58,11 @@ export default function CustomerMaterialsPage() {
       return
     }
 
-    customerApi.listMaterials(id)
-      .then((res: any) => {
+    Promise.all([
+      customerApi.listMaterials(id),
+      customerApi.getSettings().catch(() => null),
+    ])
+      .then(([res, settingsRes]: any[]) => {
         if (cancelled) return
         const body = res?.data?.data ?? res?.data ?? {}
         const rows = Array.isArray(body?.materials) ? body.materials : []
@@ -71,6 +76,7 @@ export default function CustomerMaterialsPage() {
           total: Number(m.total ?? Number(m.quantity ?? 1) * Number(m.rate ?? 0)),
           status: (m.status ?? 'UNPAID') as MockMaterial['status'],
         }))
+        setSettings(settingsRes?.data?.data ?? settingsRes?.data?.result ?? settingsRes?.data ?? {})
         setState({ materials: mapped, locked, loading: false, error: null })
       })
       .catch(err => {
@@ -90,7 +96,11 @@ export default function CustomerMaterialsPage() {
 
   const selectedItems = unpaid.filter(m => selected.includes(m.id))
   const subtotal      = selectedItems.reduce((s, m) => s + m.total, 0)
-  const fees          = useMemo(() => calculateFees(subtotal, 5, 18, 0), [subtotal])
+  const feeSettings   = paymentFeeSettings(settings)
+  const fees          = useMemo(
+    () => calculateFees(subtotal, feeSettings.platformFeePct, feeSettings.gstPct, feeSettings.tdsPct),
+    [subtotal, feeSettings.platformFeePct, feeSettings.gstPct, feeSettings.tdsPct],
+  )
 
   const toggle = (mid: number) => setSelected(s => s.includes(mid) ? s.filter(x => x !== mid) : [...s, mid])
   const reload = () => setNonce(n => n + 1)
@@ -192,8 +202,8 @@ export default function CustomerMaterialsPage() {
         <div className="bg-white border border-gray-100 rounded-2xl p-5 sticky bottom-4 space-y-3">
           <h3 className="text-sm font-bold text-navy">Payment Summary</h3>
           <Row label="Subtotal"          value={formatCurrency(fees.base)} />
-          <Row label="Platform Fee (5%)" value={formatCurrency(fees.platformFee)} />
-          <Row label="GST (18%)"         value={formatCurrency(fees.gst)} />
+          <Row label={`Platform Fee (${feeSettings.platformFeePct}%)`} value={formatCurrency(fees.platformFee)} />
+          <Row label={`GST (${feeSettings.gstPct}%)`} value={formatCurrency(fees.gst)} />
           <div className="h-px bg-gray-100 my-1" />
           <Row label="Total Payable"     value={formatCurrency(fees.total)} bold />
           <Button full onClick={() => {

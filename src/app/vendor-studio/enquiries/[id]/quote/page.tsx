@@ -8,6 +8,7 @@ import { demoOrLive } from '@/lib/demoMode'
 import { ChevronLeft, FileText, Paperclip } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import { isAcceptedQuote, isValidQuote } from '@/lib/quote-payment'
 
 export default function SendQuotePage() {
   const params = useParams<{ id: string }>()
@@ -24,7 +25,7 @@ export default function SendQuotePage() {
     vendorApi.getEnquiryDetail(id).then((res: any) => {
       const quotes = res?.data?.data?.quotes ?? res?.data?.quotes ?? []
       const editable = Array.isArray(quotes)
-        ? quotes.find((q: any) => String(q.status || '').toLowerCase() !== 'accepted')
+        ? quotes.find((q: any) => isValidQuote(q) && !isAcceptedQuote(q))
         : null
       if (!editable) return
       setQuoteId(editable.quotation_id || editable.id)
@@ -38,6 +39,21 @@ export default function SendQuotePage() {
 
   if (loading)  return <PageLoader />
   if (!enquiry) return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
+  if (enquiry.status === 'AWAITING_PAYMENT' || enquiry.order_id) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-5 pb-10">
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
+          <ChevronLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="bg-white border border-gray-100 rounded-2xl p-6">
+          <h1 className="text-xl font-bold text-navy">Quote locked</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            The customer has accepted this quote. It cannot be changed after acceptance.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const submit = async () => {
     if (!id) return
@@ -65,7 +81,7 @@ export default function SendQuotePage() {
       toast.success(quoteId ? 'Quote updated' : 'Quote sent to customer')
       router.push(`/vendor-studio/enquiries/${id}`)
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || err?.message || 'Failed to send quote')
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to send quote')
     } finally {
       setSubmitting(false)
     }

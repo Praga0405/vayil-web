@@ -141,7 +141,20 @@ customerRouter.post('/enquiries', async (req: AuthRequest, res, next) => {
 
 customerRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
   try {
-    const enquiry = await one<any>('SELECT * FROM enquiries WHERE enquiry_id = :id AND customer_id = :customerId', { id: req.params.id, customerId: req.user!.id });
+    const enquiry = await one<any>(
+      `SELECT e.*,
+              COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), 'Vendor') AS company_name,
+              COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
+                       NULLIF(vsl.service_title, ''), NULLIF(vsl.title, ''),
+                       NULLIF(e.category, ''), 'Home Service') AS service_title
+         FROM enquiries e
+         LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
+         LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id
+         LEFT JOIN vendor_services vsl ON vsl.id = e.service_id AND vs.vendor_service_id IS NULL
+        WHERE e.enquiry_id = :id AND e.customer_id = :customerId`,
+      { id: req.params.id, customerId: req.user!.id },
+    );
+    if (!enquiry) throw new ApiError(404, 'Enquiry not found');
     const quotes = await query<any>('SELECT * FROM quotation WHERE enquiry_id = :id ORDER BY quotation_id DESC', { id: req.params.id });
     ok(res, { enquiry, quotes });
   } catch (err) { next(err); }
@@ -149,7 +162,27 @@ customerRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
 
 customerRouter.get('/projects', async (req: AuthRequest, res, next) => {
   try {
-    const projects = await query<any>('SELECT * FROM orders WHERE customer_id = :id ORDER BY order_id DESC', { id: req.user!.id });
+    const projects = await query<any>(
+      `SELECT o.*,
+              COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), 'Vendor') AS company_name,
+              COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
+                       NULLIF(e.category, ''), 'Home Service') AS service_title,
+              e.category,
+              COALESCE(pay.paid_base_amount, 0) AS paid_base_amount
+         FROM orders o
+         LEFT JOIN enquiries e ON e.enquiry_id = o.enquiry_id
+         LEFT JOIN vendors v ON v.vendor_id = o.vendor_id
+         LEFT JOIN vendor_services vs ON vs.vendor_service_id = COALESCE(o.service_id, e.service_id)
+         LEFT JOIN (
+           SELECT order_id, SUM(COALESCE(base_amount, amount)) AS paid_base_amount
+             FROM payment_intents
+            WHERE status IN ('escrow_held', 'released')
+            GROUP BY order_id
+         ) pay ON pay.order_id = o.order_id
+        WHERE o.customer_id = :id
+        ORDER BY o.order_id DESC`,
+      { id: req.user!.id },
+    );
     ok(res, { projects });
   } catch (err) { next(err); }
 });
@@ -192,7 +225,9 @@ customerRouter.get('/payments', async (req: AuthRequest, res, next) => {
     // this customer (so pre-v4 historical rows still surface).
     const intents = await query<any>(
       `SELECT intent_id AS id, customer_id, order_id, enquiry_id, milestone_id,
-              amount, purpose, status, razorpay_order_id, razorpay_payment_id, created_at
+              quotation_id, COALESCE(base_amount, amount) AS base_amount,
+              amount, payment_option, purpose, status,
+              razorpay_order_id, razorpay_payment_id, created_at
          FROM payment_intents
         WHERE customer_id = :id
         ORDER BY intent_id DESC`,
@@ -262,18 +297,18 @@ customerRouter.post('/quotes/:quoteId/accept', async (req: AuthRequest, res, nex
     const { quotation_id, enquiry_id } = await assertQuoteBelongs(req.params.quoteId, req.user!.id);
     await transaction(async (conn) => {
       await conn.query(
-        `UPDATE quotation SET status = 'accepted' WHERE quotation_id = ?`,
+        `UPDATE quotation SET status = 'accepted', status_int = 2 WHERE quotation_id = ?`,
         [quotation_id],
       );
       // Reject any sibling quotes on the same enquiry so the customer can't
       // accept two at once.
       await conn.query(
-        `UPDATE quotation SET status = 'rejected'
+        `UPDATE quotation SET status = 'rejected', status_int = 3
            WHERE enquiry_id = ? AND quotation_id <> ? AND status = 'sent'`,
         [enquiry_id, quotation_id],
       );
       await conn.query(
-        `UPDATE enquiries SET status = 'accepted' WHERE enquiry_id = ?`,
+        `UPDATE enquiries SET status = 'accepted', status_int = 2 WHERE enquiry_id = ?`,
         [enquiry_id],
       );
     });
@@ -286,7 +321,7 @@ customerRouter.post('/quotes/:quoteId/reject', async (req: AuthRequest, res, nex
     const { quotation_id, enquiry_id } = await assertQuoteBelongs(req.params.quoteId, req.user!.id);
     const reason = z.object({ reason: z.string().optional() }).parse(req.body || {}).reason ?? null;
     await exec(
-      `UPDATE quotation SET status = 'rejected', message = COALESCE(:reason, message)
+      `UPDATE quotation SET status = 'rejected', status_int = 3, message = COALESCE(:reason, message)
          WHERE quotation_id = :id`,
       { id: quotation_id, reason },
     );

@@ -5,6 +5,8 @@ import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
 import * as vendorSvc from '../services/vendorService';
+import { isAcceptedQuoteStatus } from '../services/quotePayment';
+import { calculateTax } from '../services/tax';
 
 export const vendorRouter = Router();
 vendorRouter.use(requireAuth(['vendor']));
@@ -14,6 +16,129 @@ function blankToNull(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   return text ? text : null;
+}
+
+function lowerStatus(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function validWorkflowQuote(row: any): boolean {
+  const status = lowerStatus(row?.status);
+  const amount = Number(row?.amount);
+  return Number.isFinite(amount) && amount > 0
+    && !['rejected', 'cancelled', 'deleted', 'inactive'].includes(status);
+}
+
+function finalStepState(step: any): 'COMPLETED' | 'REJECTED' | null {
+  if (Number(step?.step) !== 4) return null;
+  const value = lowerStatus(step?.step_status);
+  if (['1', 'accepted', 'accept', 'completed', 'complete'].includes(value)) return 'COMPLETED';
+  if (['2', 'rejected', 'reject'].includes(value)) return 'REJECTED';
+  return null;
+}
+
+/**
+ * Canonical vendor enquiry read model. Its buckets mirror the mobile
+ * vendorEnuqiryList contract: no order = request_quotation, order step 1 =
+ * new_enquiry, and order step 2 = ongoing. Terminal step 4 remains visible.
+ */
+async function vendorWorkflowEnquiries(vendorId: number | string, enquiryId?: number | string | string[]) {
+  const rows = await query<any>(
+    `SELECT e.*,
+            COALESCE(NULLIF(c.name, ''), NULLIF(cl.name, ''),
+                     NULLIF(TRIM(CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, ''))), ''),
+                     CONCAT('Customer #', e.customer_id)) AS customer_name,
+            COALESCE(NULLIF(c.email, ''), NULLIF(cl.email, ''), NULLIF(e.email, ''), '') AS customer_email,
+            COALESCE(NULLIF(c.phone, ''), NULLIF(c.mobile, ''),
+                     NULLIF(cl.phone, ''), NULLIF(cl.mobile, ''), NULLIF(e.phone, ''), '') AS customer_mobile,
+            COALESCE(c.profile_image, cl.profile_image) AS customer_profile_image,
+            COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
+                     NULLIF(vsl.service_title, ''), NULLIF(vsl.title, ''),
+                     NULLIF(e.category, ''), 'Home Service') AS service_title,
+            COALESCE(NULLIF(sc.name, ''), NULLIF(e.category, ''), 'Service') AS category_name
+       FROM enquiries e
+       LEFT JOIN customers c ON c.customer_id = e.customer_id
+       LEFT JOIN customers cl ON cl.id = e.customer_id AND c.customer_id IS NULL
+       LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id
+       LEFT JOIN vendor_services vsl ON vsl.id = e.service_id AND vs.vendor_service_id IS NULL
+       LEFT JOIN service_categories sc ON sc.category_id = COALESCE(vs.category_id, vsl.category_id)
+      WHERE e.vendor_id = :vendorId
+        AND (:enquiryId IS NULL OR e.enquiry_id = :enquiryId OR e.id = :enquiryId)
+      ORDER BY COALESCE(e.id, e.enquiry_id) DESC`,
+    { vendorId, enquiryId: enquiryId ?? null },
+  );
+  if (!rows.length) return [];
+
+  const enquiryIds = rows.map((row: any) => Number(row.enquiry_id)).filter(Boolean);
+  const quotes = await query<any>(
+    `SELECT * FROM quotation WHERE enquiry_id IN (:ids) ORDER BY quotation_id DESC`,
+    { ids: enquiryIds } as any,
+  );
+  const orders = await query<any>(
+    `SELECT * FROM orders WHERE enquiry_id IN (:ids) ORDER BY order_id DESC`,
+    { ids: enquiryIds } as any,
+  );
+  const orderIds = orders.map((row: any) => Number(row.order_id)).filter(Boolean);
+  const steps = orderIds.length ? await query<any>(
+    `SELECT * FROM order_step_logs WHERE order_id IN (:ids) ORDER BY id DESC`,
+    { ids: orderIds } as any,
+  ) : [];
+  const plans = orderIds.length ? await query<any>(
+    `SELECT * FROM order_plan WHERE order_id IN (:ids) ORDER BY plan_id DESC`,
+    { ids: orderIds } as any,
+  ) : [];
+
+  return rows.map((row: any) => {
+    const rowQuotes = quotes.filter((quote: any) => Number(quote.enquiry_id) === Number(row.enquiry_id));
+    const activeQuotes = rowQuotes.filter(validWorkflowQuote);
+    const acceptedQuote = activeQuotes.find((quote: any) => isAcceptedQuoteStatus(quote.status, quote.status_int));
+    const latestQuote = acceptedQuote ?? activeQuotes[0] ?? null;
+    const rowOrders = orders.filter((order: any) => Number(order.enquiry_id) === Number(row.enquiry_id));
+    const latestOrder = rowOrders[0] ?? null;
+    const orderSteps = latestOrder
+      ? steps.filter((step: any) => Number(step.order_id) === Number(latestOrder.order_id))
+      : [];
+    const latestStep = orderSteps[0] ?? null;
+    const terminal = orderSteps.map(finalStepState).find(Boolean) ?? null;
+    const rawStatus = lowerStatus(row.status);
+    const rawCode = Number(row.status_int ?? row.status);
+
+    let workflowStatus: string;
+    if (terminal === 'COMPLETED' || rawCode === 10 || rawStatus === 'completed') workflowStatus = 'COMPLETED';
+    else if (terminal === 'REJECTED' || rawCode === 3 || rawStatus === 'rejected') workflowStatus = 'REJECTED';
+    else if (latestOrder && Number(latestStep?.step) === 2) workflowStatus = 'ONGOING';
+    else if (latestOrder) workflowStatus = 'NEW';
+    else if (acceptedQuote) workflowStatus = 'AWAITING_PAYMENT';
+    else if (latestQuote) workflowStatus = 'QUOTED';
+    else if (rawCode === 2 || rawStatus === 'accepted') workflowStatus = 'ACCEPTED';
+    else workflowStatus = 'NEW';
+
+    const workflowBucket = workflowStatus === 'COMPLETED' || workflowStatus === 'REJECTED'
+      ? workflowStatus
+      : latestOrder
+        ? Number(latestStep?.step) === 2 ? 'ONGOING' : 'NEW'
+        : 'REQUEST_QUOTATION';
+    const revealContact = !['NEW', 'REJECTED'].includes(workflowStatus) || Boolean(latestOrder);
+
+    return {
+      ...row,
+      customer_phone: revealContact ? row.customer_mobile : null,
+      status: workflowStatus,
+      workflow_status: workflowStatus,
+      workflow_bucket: workflowBucket,
+      quote_count: activeQuotes.length,
+      quote_status: latestQuote?.status ?? null,
+      quotation_id: latestQuote?.quotation_id ?? null,
+      order_id: latestOrder?.order_id ?? null,
+      latest_step: latestStep?.step ?? null,
+      quotations: rowQuotes,
+      orders: rowOrders.map((order: any) => ({
+        ...order,
+        plans: plans.filter((plan: any) => Number(plan.order_id) === Number(order.order_id)),
+        order_step_logs: steps.filter((step: any) => Number(step.order_id) === Number(order.order_id)),
+      })),
+    };
+  });
 }
 
 vendorRouter.get('/me', async (req: AuthRequest, res, next) => {
@@ -79,34 +204,14 @@ vendorRouter.get('/dashboard', async (req: AuthRequest, res, next) => {
 });
 
 vendorRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
-  try { ok(res, { enquiries: await query<any>('SELECT * FROM enquiries WHERE vendor_id = :id ORDER BY enquiry_id DESC', { id: req.user!.id }) }); } catch (err) { next(err); }
+  try { ok(res, { enquiries: await vendorWorkflowEnquiries(req.user!.id) }); } catch (err) { next(err); }
 });
 
 vendorRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
   try {
-    // Join the customer so the vendor sees a real name (not "Customer #11").
-    // Phone is revealed once the vendor has accepted the enquiry — before
-    // that we mask it to discourage off-platform contact.
-    const enquiry = await one<any>(
-      `SELECT e.*,
-              c.name      AS customer_name,
-              c.email     AS customer_email,
-              c.city      AS customer_city,
-              c.profile_image AS customer_profile_image,
-              CASE WHEN e.status IN ('accepted','quoted','active','completed')
-                   THEN COALESCE(c.phone, c.mobile)
-                   ELSE NULL
-              END         AS customer_phone
-         FROM enquiries e
-         LEFT JOIN customers c ON c.customer_id = e.customer_id
-        WHERE e.enquiry_id = :id AND e.vendor_id = :vendorId`,
-      { id: req.params.id, vendorId: req.user!.id },
-    );
-    const quotes = await query<any>(
-      'SELECT * FROM quotation WHERE enquiry_id = :id AND vendor_id = :vendorId',
-      { id: req.params.id, vendorId: req.user!.id },
-    );
-    ok(res, { enquiry, quotes });
+    const [enquiry] = await vendorWorkflowEnquiries(req.user!.id, req.params.id);
+    if (!enquiry) throw new ApiError(404, 'Enquiry not found');
+    ok(res, { enquiry, quotes: enquiry.quotations, orders: enquiry.orders });
   } catch (err) { next(err); }
 });
 
@@ -126,7 +231,7 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
     // guessed) another vendor's enquiry_id could post a quote on it.
     // Also defends against quoting on rejected/cancelled enquiries.
     const enquiry = await one<any>(
-      `SELECT enquiry_id, status FROM enquiries
+      `SELECT enquiry_id, customer_id, service_id, status FROM enquiries
         WHERE enquiry_id = :id AND vendor_id = :vendorId LIMIT 1`,
       { id: req.params.id, vendorId: req.user!.id },
     );
@@ -135,22 +240,38 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
       throw new ApiError(400, `Cannot quote on a ${enquiry.status} enquiry`);
     }
 
-    // Coerce undefined → null so mysql2 named-placeholders don't blow up.
+    const tax = calculateTax({ baseAmount: body.amount });
+    const totalGst = tax.gstOnPlatformFee + tax.gstOnProject;
+    // Populate both canonical and mobile compatibility fields so a quote
+    // created on web can be accepted and paid from either client.
     const result = await exec(
       `INSERT INTO quotation
-         (enquiry_id, vendor_id, amount, message, estimated_days, valid_until, files, status, created_at)
-       VALUES (:enquiryId, :vendorId, :amount, :message, :estimatedDays, :validUntil, :files, 'sent', NOW())`,
+         (enquiry_id, customer_id, vendor_id, sender_role, sender_id, receiver_id,
+          service_id, amount, subtotal, platform_fee, gst_amount, total, final_amount,
+          message, estimated_days, service_time, valid_until, files,
+          status, status_int, created_at)
+       VALUES (:enquiryId, :customerId, :vendorId, 'VENDOR', :vendorId, :customerId,
+          :serviceId, :amount, :amount, :platformFee, :gstAmount, :total, :total,
+          :message, :estimatedDays, :serviceTime, :validUntil, :files,
+          'sent', 11, NOW())`,
       {
         enquiryId:     req.params.id,
+        customerId:    enquiry.customer_id,
         vendorId:      req.user!.id,
+        serviceId:     enquiry.service_id ?? null,
         amount:        body.amount,
+        platformFee:   tax.platformFee,
+        gstAmount:     totalGst,
+        total:         tax.customerTotal,
         message:       body.message       ?? null,
         estimatedDays: body.estimatedDays ?? null,
+        serviceTime:   body.estimatedDays !== undefined ? String(body.estimatedDays) : null,
         validUntil:    body.validUntil    ?? null,
         files:         body.files         ?? null,
       },
     );
-    await exec(`UPDATE enquiries SET status = 'quoted' WHERE enquiry_id = :id`, { id: req.params.id });
+    await exec(`UPDATE quotation SET id = quotation_id WHERE quotation_id = :id AND (id IS NULL OR id = 0)`, { id: result.insertId });
+    await exec(`UPDATE enquiries SET status = 'quoted', status_int = 11 WHERE enquiry_id = :id`, { id: req.params.id });
     ok(res, { quote: await one<any>('SELECT * FROM quotation WHERE quotation_id = :id', { id: result.insertId }) }, 201);
   } catch (err) { next(err); }
 });
@@ -177,29 +298,41 @@ vendorRouter.put('/enquiries/:id/quotes/:quoteId', async (req: AuthRequest, res,
       { quoteId: req.params.quoteId, enquiryId: req.params.id, vendorId: req.user!.id },
     );
     if (!quote) throw new ApiError(404, 'Quote not found');
-    if (String(quote.status || '').toLowerCase() === 'accepted') {
-      throw new ApiError(400, 'Accepted quotes cannot be edited');
+    if (['accepted', 'rejected', 'cancelled'].includes(String(quote.status || '').toLowerCase())) {
+      throw new ApiError(400, `${quote.status} quotes cannot be edited`);
     }
 
+    const tax = calculateTax({ baseAmount: body.amount });
+    const totalGst = tax.gstOnPlatformFee + tax.gstOnProject;
     await exec(
       `UPDATE quotation
           SET amount = :amount,
+              subtotal = :amount,
+              platform_fee = :platformFee,
+              gst_amount = :gstAmount,
+              total = :total,
+              final_amount = :total,
               message = COALESCE(:message, message),
               estimated_days = COALESCE(:estimatedDays, estimated_days),
+              service_time = COALESCE(:serviceTime, service_time),
               valid_until = COALESCE(:validUntil, valid_until),
               files = COALESCE(:files, files),
-              status = 'sent'
+              status = 'sent', status_int = 11
         WHERE quotation_id = :quoteId`,
       {
         quoteId: req.params.quoteId,
         amount: body.amount,
+        platformFee: tax.platformFee,
+        gstAmount: totalGst,
+        total: tax.customerTotal,
         message: body.message ?? null,
         estimatedDays: body.estimatedDays ?? null,
+        serviceTime: body.estimatedDays !== undefined ? String(body.estimatedDays) : null,
         validUntil: body.validUntil ?? null,
         files: body.files ?? null,
       },
     );
-    await exec(`UPDATE enquiries SET status = 'quoted' WHERE enquiry_id = :id`, { id: req.params.id });
+    await exec(`UPDATE enquiries SET status = 'quoted', status_int = 11 WHERE enquiry_id = :id`, { id: req.params.id });
     ok(res, { quote: await one<any>('SELECT * FROM quotation WHERE quotation_id = :id', { id: req.params.quoteId }) });
   } catch (err) { next(err); }
 });
@@ -228,9 +361,9 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
          LEFT JOIN customers c ON c.customer_id = o.customer_id
          LEFT JOIN (
            SELECT order_id,
-                  SUM(amount) AS escrow_total,
-                  SUM(CASE WHEN status = 'escrow_held'   THEN amount ELSE 0 END) AS escrow_held,
-                  SUM(CASE WHEN status = 'released'      THEN amount ELSE 0 END) AS escrow_released
+                  SUM(COALESCE(base_amount, amount)) AS escrow_total,
+                  SUM(CASE WHEN status = 'escrow_held'   THEN COALESCE(base_amount, amount) ELSE 0 END) AS escrow_held,
+                  SUM(CASE WHEN status = 'released'      THEN COALESCE(base_amount, amount) ELSE 0 END) AS escrow_released
              FROM payment_intents
             WHERE status IN ('escrow_held','released')
             GROUP BY order_id
@@ -268,14 +401,14 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
     // Roll up payment_intents so the vendor's dashboard shows
     // "Paid in escrow" rather than ₹0 until milestones complete.
     const intents = await query<any>(
-      `SELECT amount, status, purpose FROM payment_intents
+      `SELECT amount, base_amount, status, purpose FROM payment_intents
         WHERE order_id = :id AND status IN ('escrow_held','released')`,
       { id: req.params.id },
     );
     const escrow_held    = intents.filter((i: any) => i.status === 'escrow_held')
-                                  .reduce((s: number, i: any) => s + Number(i.amount), 0);
+                                  .reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0);
     const escrow_released = intents.filter((i: any) => i.status === 'released')
-                                  .reduce((s: number, i: any) => s + Number(i.amount), 0);
+                                  .reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0);
     ok(res, {
       project, plan,
       escrow: { held: escrow_held, released: escrow_released, total: escrow_held + escrow_released },
@@ -368,7 +501,7 @@ async function assertOrderBelongs(orderId: string | number | undefined | string[
 vendorRouter.post('/enquiries/:id/accept', async (req: AuthRequest, res, next) => {
   try {
     const result: any = await exec(
-      `UPDATE enquiries SET status = 'accepted', accepted_at = NOW()
+      `UPDATE enquiries SET status = 'accepted', status_int = 2, accepted_at = NOW()
          WHERE enquiry_id = :id AND vendor_id = :vendorId`,
       { id: req.params.id, vendorId: req.user!.id },
     );
@@ -381,7 +514,7 @@ vendorRouter.post('/enquiries/:id/reject', async (req: AuthRequest, res, next) =
   try {
     const reason = z.object({ reason: z.string().optional() }).parse(req.body).reason || null;
     const result: any = await exec(
-      `UPDATE enquiries SET status = 'rejected', rejected_at = NOW(), reject_reason = :reason
+      `UPDATE enquiries SET status = 'rejected', status_int = 3, rejected_at = NOW(), reject_reason = :reason
          WHERE enquiry_id = :id AND vendor_id = :vendorId`,
       { id: req.params.id, vendorId: req.user!.id, reason },
     );
@@ -471,6 +604,18 @@ vendorRouter.post('/projects/:id/plan/submit', async (req: AuthRequest, res, nex
            WHERE order_id = ?`,
         [orderId],
       );
+      const [stepRows]: any = await conn.query(
+        `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 2 LIMIT 1`,
+        [orderId],
+      );
+      if (!Array.isArray(stepRows) || stepRows.length === 0) {
+        await conn.query(
+          `INSERT INTO order_step_logs
+             (order_id, step, step_status, performed_by, performed_by_id, remarks)
+           VALUES (?, 2, '1', 'VENDOR', ?, 'Implementation plan submitted')`,
+          [orderId, req.user!.id],
+        );
+      }
     });
     ok(res, { order_id: Number(orderId), status: 'submitted' });
   } catch (err) { next(err); }

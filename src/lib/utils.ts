@@ -65,10 +65,15 @@ export function phoneFormat(mobile: string): string {
 }
 
 export function calculateFees(base: number, platformFeePct = 5, gstPct = 18, tdsPct = 1) {
-  const platformFee = (base * platformFeePct) / 100
-  const gst         = (platformFee * gstPct) / 100
-  const tds         = (base * tdsPct) / 100
-  const total       = base + platformFee + gst
-  const vendorNet   = base - tds - platformFee
-  return { base, platformFee, gst, tds, total, vendorNet }
+  // Keep the browser preview byte-for-byte aligned with backend calculateTax.
+  // Razorpay orders are created in whole rupees; independent decimal math in
+  // the UI previously displayed a paise total that differed from the amount
+  // accepted and returned by the server.
+  const roundedBase = Math.round(Number(base || 0))
+  const platformFee = Math.round((roundedBase * platformFeePct) / 100)
+  const gst         = Math.round((platformFee * gstPct) / 100)
+  const tds         = Math.round((roundedBase * tdsPct) / 100)
+  const total       = roundedBase + platformFee + gst
+  const vendorNet   = roundedBase - tds - platformFee
+  return { base: roundedBase, platformFee, gst, tds, total, vendorNet }
 }

@@ -43,7 +43,13 @@ export interface MockEnquiry {
   timeline: string
   description: string
   attachments: string[]
-  status: 'NEW' | 'ACCEPTED' | 'REJECTED' | 'QUOTED' | 'ONGOING' | 'COMPLETED'
+  status: 'NEW' | 'ACCEPTED' | 'REJECTED' | 'QUOTED' | 'AWAITING_PAYMENT' | 'ONGOING' | 'COMPLETED'
+  workflow_bucket?: 'REQUEST_QUOTATION' | 'NEW' | 'ONGOING' | 'COMPLETED' | 'REJECTED'
+  quote_status?: string | null
+  quote_count?: number
+  quotation_id?: number | null
+  order_id?: number | null
+  latest_step?: number | null
   created_at: string
 }
 

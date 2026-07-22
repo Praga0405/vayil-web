@@ -105,7 +105,7 @@ the same service layer underneath.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/payments/create-order` | `{ amount, purpose:'quote'\|'milestone'\|'materials', enquiry_id\|order_id\|milestone_id, material_ids?, idempotency_key }` — re-derives amount server-side, refuses mismatch by >₹1, creates Razorpay order, INSERTs payment_intent |
+| POST | `/payments/create-order` | `{ amount, purpose:'quote'\|'milestone'\|'materials', enquiry_id\|order_id\|milestone_id, quotation_id?, base_amount?, payment_option?:'full'\|'minimum'\|'custom', material_ids?, idempotency_key }` — re-derives the selected base and gateway total server-side, refuses mismatch by >₹1, creates a Razorpay order, and inserts a payment intent. Quote payments bind to the accepted quotation instead of the latest sibling row. |
 | POST | `/payments/verify` | `{ razorpay_order_id, razorpay_payment_id, razorpay_signature, idempotency_key? }` — HMAC verify, intent→escrow_held, escrow_ledger hold row, materialise orders row (quote) or flip materials→PAID (materials), backfill intent.order_id |
 | POST | `/payments/webhooks/razorpay` | Mounted with `express.raw()` BEFORE the JSON parser. Verifies `x-razorpay-signature`, handles `payment.captured` / `payment.failed`, writes `webhook_deliveries` row |
 

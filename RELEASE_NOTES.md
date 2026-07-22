@@ -1,5 +1,302 @@
 # Release Notes
 
+## v4.5.96 - July 21 enquiry, quote-payment, and project-flow parity (2026-07-22)
+
+### Scope
+
+This release addresses every non-green issue in `Vayil-July-21-2026.pdf` and
+audits the connected customer-to-vendor workflow through plan submission and
+material payment. The reported surfaces were:
+
+- `/account/enquiries/:id` minimum, custom, and full quote payments returning
+  HTTP 400;
+- quote/status values displaying as unexplained numbers and customer enquiry
+  tabs only working under All;
+- vendor enquiry list/detail displaying `Customer #<id>` instead of a name;
+- Vendor Studio enquiry grouping differing from the mobile
+  `vendorEnuqiryList` workflow;
+- website-created quotes not being payable reliably from web or mobile; and
+- the downstream order, plan, and materials flow after a successful payment.
+
+### Root Cause Analysis
+
+#### All three quote payment options could return HTTP 400
+
+- The web page offered Full, Minimum 25%, and Custom, but sent only
+  `amount`, `purpose`, and `enquiry_id` to `/payments/create-order`.
+- The backend always recalculated the full accepted quotation amount. A valid
+  25% or custom amount therefore failed the server's amount comparison.
+- Full payment used `quote.total` before `quote.amount`. Website/mobile quote
+  rows may store platform fee and GST in `total`, so the frontend could add
+  those fees a second time and fail the same comparison.
+- The backend selected the latest quotation row. When accepting one quote had
+  rejected a newer/older sibling, ordering alone could select the rejected
+  row and report that the quote was not accepted.
+- Frontend fee previews used decimal arithmetic while backend tax calculation
+  rounds each component to whole rupees. The displayed checkout total could
+  differ from the authoritative Razorpay amount by paise.
+
+#### A successful payment did not create a mobile-compatible project
+
+- Browser verification created/reused an order using the gateway amount,
+  including fees, as `orders.amount`. For an advance payment this also made
+  the project total equal only to the paid advance instead of the full quote.
+- The verification path did not insert step 1 in `order_step_logs`. Mobile
+  `vendorEnuqiryList` classifies paid enquiries by step 1/2, so an order with
+  no step was omitted from request, new, and ongoing buckets.
+- The escrow hold initially had null order/vendor IDs and the intent was not
+  linked to the accepted quotation.
+- Browser `/payments/verify` and Razorpay `payment.captured` webhook used
+  different database operations. If checkout succeeded but the browser
+  closed, the webhook held money without materializing the order or step.
+- Retry paths could append another escrow hold. Concurrent browser/webhook
+  completion could race while creating the one-order-per-enquiry row.
+- The idempotency table has a single-column `id_key` primary key, while the
+  frontend reused one UUID for create-order and verify. The verify cache write
+  could overwrite create-order's response and make a later retry receive the
+  wrong response shape.
+
+#### Customer enquiry badges and filters consumed different status types
+
+- `/customer/enquiryList` intentionally returns mobile integer statuses such
+  as `1`, `9`, `10`, and `11`.
+- The web filters compared those values with strings such as `PENDING`,
+  `ONGOING`, and `QUOTED`. Consequently only All contained records, while the
+  raw integer appeared inside `StatusBadge` and looked like a count.
+- The UI did not validate quotation rows before deriving Quote Received. A
+  rejected, empty, or zero-value quotation could keep an enquiry in the quote
+  state.
+
+#### Vendor enquiry list/detail was not using the mobile workflow model
+
+- Canonical `GET /vendors/enquiries` returned raw enquiry rows only. It did
+  not join customers/services or load quotations, orders, step logs, and
+  plans.
+- Customer lookup used only `customers.customer_id`; historical/mobile rows
+  may reference the compatibility `customers.id` field. The adapter therefore
+  fell back to `Customer #<id>` even when a real customer name existed.
+- Vendor Studio filtered raw enquiry statuses into web-only tabs, while the
+  mobile endpoint classifies no order as `request_quotation`, step 1 as
+  `new_enquiry`, and step 2 as `ongoing`.
+- Historical orders with no step log were dropped by the mobile bridge as
+  well, leaving no recoverable bucket.
+
+#### Website-created quotations did not carry all mobile compatibility fields
+
+- Canonical quote creation wrote only the web columns and the text status
+  `sent`. TiDB does not run the MySQL status-sync triggers, so `status_int`
+  remained its default and mobile clients could interpret a sent quote as
+  Pending.
+- Quote/customer/enquiry aliases (`id`, `customer_id`, `service_id`, sender
+  metadata, fee totals) were not consistently populated.
+- Canonical accept/reject operations updated text status only, leaving the
+  numeric mobile status stale.
+- The quote editor treated every non-accepted row as editable, including a
+  rejected sibling, and a manually opened route could create a replacement
+  after customer acceptance.
+
+#### Downstream plan/material screens still had two independent gaps
+
+- Customer Projects reused enquiry data and repeated the same string-vs-int
+  filter, so a correctly created order could still be absent from Projects.
+- Canonical plan submission updated plan tables but did not record step 2;
+  Vendor Studio and the mobile list therefore kept the project under New
+  Orders instead of Ongoing.
+- Material checkout used hard-coded fee percentages and the browser-computed
+  total instead of the amount returned by the server.
+
+### What Changed
+
+| Area | Previous behavior | New behavior |
+|---|---|---|
+| Quote checkout request | Sent only enquiry and gateway amount. | Sends accepted `quotation_id`, selected `base_amount`, and `payment_option` (`full`, `minimum`, or `custom`) in both account payment entry points. |
+| Server validation | Recomputed every quote payment as full. | Validates full against `quotation.amount`; minimum against configured `advance_amount` or 25%; custom inside the minimum/full range; then recomputes gateway fees. |
+| Accepted quote selection | Latest row could be a rejected sibling. | Explicit quotation ID is bound to the intent and must carry accepted text/numeric status. Older clients without the ID select the newest accepted row, not simply the newest row. |
+| Quote amount source | `quote.total` could become the base and receive fees twice. | `quotation.amount` is the only project base; fee-inclusive `total` is display metadata. |
+| Fee preview | Decimal browser total could differ from whole-rupee server total. | Browser calculation now rounds base, platform fee, GST, and TDS exactly like backend `calculateTax`; Razorpay opens with the server-returned amount. |
+| Payment intent | Stored gateway total only. | Migration 012 adds `quotation_id`, `base_amount`, and `payment_option`; `amount` remains the gateway total. |
+| Order creation | Advance/gateway total could become project total. | Order always stores the complete accepted quote amount and full quote/service linkage, regardless of how much is paid initially. |
+| Mobile order progression | No step 1 after canonical payment. | Verification inserts one idempotent step-1 `Order placed` record, so mobile/vendor web lists classify the paid enquiry as a new order. |
+| Verify/webhook behavior | Separate implementations with different side effects. | Both call `holdVerifiedPayment`, which atomically links quote/order/intent/escrow, inserts step 1, and marks material rows paid when applicable. |
+| Retry handling | Duplicate escrow holds and order-create races were possible. | Existing holds are reused; order creation is an enquiry-keyed upsert; repeated verification returns the prior state without replaying side effects. |
+| Idempotency cache scope | Same raw UUID on create and verify could collide in the single-key table. | Stored cache keys are deterministic hashes of raw key + user + role + endpoint, so each payment phase and user has an independent replay record without changing the public header. |
+| Customer status filters | Compared integer API statuses with strings. | A customer enquiry adapter derives semantic status from terminal steps, orders, and valid quotations before rendering/filtering. |
+| Quote count/state | Any quotation could imply Quote Received. | Only rows with a valid ID, positive amount, and non-rejected/non-cancelled status count as active quotes. |
+| Customer Projects | Built from filtered enquiry rows. | Loads canonical `GET /customers/projects`, which now joins vendor/service labels and paid-base totals. |
+| Vendor customer name | Canonical customer ID only, then `Customer #ID`. | Resolves canonical `customer_id`, legacy `id`, saved enquiry first/last name, then falls back to the ID only when no real name exists. |
+| Vendor enquiry model | Raw rows and web-only status tabs. | Canonical list/detail return quotations, orders, plans, step logs, `workflow_status`, `workflow_bucket`, quote count, quote ID, order ID, and latest step. |
+| Vendor Studio tabs | New/Accepted/Quoted/Ongoing based on raw status. | Requests, New Orders, Ongoing, Completed, and Rejected follow the mobile bucket model. Accepted/quoted/waiting-payment remain informative badges inside Requests. |
+| Historical missing steps | Orders without step 1/2 disappeared from mobile list. | Existing order with no matching step falls back to New Orders; new payments always write step 1. |
+| Quote mobile aliases | Web quote text status and sparse fields only. | Web/shared quote creation writes customer/service/sender aliases, fee totals, `id`, and `status_int=11`; accept/reject dual-write status text and numeric codes. |
+| Accepted quote edits | Rejected rows could be edited and accepted routes could be reopened. | Rejected/cancelled/accepted quotes are immutable; the editor shows a locked state once accepted or paid. |
+| Plan transition | Submitting a web plan did not advance enquiry classification. | Plan submit inserts step 2 once and moves the vendor workflow to Ongoing without creating unrelated timeline steps. |
+| Materials | Hard-coded preview and local checkout amount. | Reads fee settings, shows the same rounded fee total as the backend, and opens Razorpay with the server-returned amount. |
+| Historical customer URLs | `/customer/enquiries*` retained a second incomplete `placeOrder` implementation. | Temporary redirects route historical UI URLs to the canonical `/account/enquiries*` and `/account/projects*` flows; API paths are unaffected. |
+
+### API Contract
+
+No endpoint name, HTTP method, authentication requirement, or successful
+response envelope was removed. `POST /payments/create-order` now accepts these
+additive quote fields:
+
+```json
+{
+  "amount": 397,
+  "purpose": "quote",
+  "enquiry_id": 420001,
+  "quotation_id": 150001,
+  "base_amount": 375,
+  "payment_option": "minimum",
+  "idempotency_key": "<uuid>"
+}
+```
+
+For quote payments, the response adds corresponding audit fields:
+
+```json
+{
+  "success": true,
+  "intent_id": 123,
+  "razorpay_order_id": "order_...",
+  "amount": 397,
+  "base_amount": 375,
+  "quotation_id": 150001,
+  "payment_option": "minimum",
+  "currency": "INR",
+  "status": "initiated"
+}
+```
+
+Older clients remain compatible: omitting `payment_option` and `base_amount`
+continues as a full quote payment. Materials and milestone request shapes are
+unchanged; their intents also retain a server-derived base amount internally.
+
+Canonical `GET /vendors/enquiries` and `GET /vendors/enquiries/:id` add fields
+without removing raw enquiry fields:
+
+- `workflow_status`: `NEW`, `ACCEPTED`, `QUOTED`, `AWAITING_PAYMENT`,
+  `ONGOING`, `COMPLETED`, or `REJECTED`;
+- `workflow_bucket`: `REQUEST_QUOTATION`, `NEW`, `ONGOING`, `COMPLETED`, or
+  `REJECTED`;
+- `customer_name`, `customer_phone`, `service_title`, `category_name`;
+- `quote_count`, `quote_status`, `quotation_id`, `order_id`, `latest_step`;
+- nested `quotations` and `orders`, with order plans and step logs.
+
+The legacy `/vendorEnuqiryList` top-level response remains exactly
+`success`, `new_enquiry`, `ongoing`, and `request_quotation`. Its only logic
+change is the safe New fallback for historical orders with no step log and
+more reliable customer/service display fallbacks.
+
+### Impact Areas Checked and Addressed
+
+1. **Customer quote acceptance:** canonical and shared quote services now
+   dual-write accepted/rejected numeric statuses used by Flutter.
+2. **Full/minimum/custom web checkout:** both `/account/enquiries/:id` and
+   `/account/enquiries/:id/pay` use the same base/option contract.
+3. **Razorpay recovery:** browser verification and webhook capture create the
+   same order, step, escrow, and material side effects.
+4. **Vendor mobile list:** website-created enquiry -> quote -> accepted quote
+   -> payment appears in request/new/ongoing buckets with the expected keys.
+5. **Vendor Studio list/detail/dashboard:** paid New Orders are not shown as
+   unhandled customer requests on the dashboard, and project actions replace
+   accept/quote actions after an order exists.
+6. **Customer Projects:** actual order IDs are used for project links and paid
+   progress uses `base_amount` rather than fee-inclusive gateway totals.
+7. **Plan builder:** percentages still must total 100; because order amount is
+   now the full quote, milestone values remain correct after an advance.
+8. **Plan submission:** adds only step 2 idempotently; no extra signoff/final
+   step is inserted.
+9. **Plan approval and materials gate:** existing ownership checks and the
+   approved-plan requirement are unchanged.
+10. **Material checkout:** selected IDs, amount validation, signature verify,
+    and PAID transition use the shared payment workflow and current settings.
+11. **Idempotency/concurrency:** idempotency keys, one order per enquiry, one
+    hold per intent, one step 1, and one step 2 are retained on retries.
+12. **Contact privacy:** phone remains hidden before vendor acceptance and is
+    revealed for accepted/quoted/paid workflow states.
+
+### Files Changed
+
+- `backend/migrations/012_quote_payment_options.sql`
+- `backend/src/services/quotePayment.ts`
+- `backend/src/services/paymentWorkflow.ts`
+- `backend/src/services/paymentService.ts`
+- `backend/src/services/quoteService.ts`
+- `backend/src/routes/payments.ts`
+- `backend/src/routes/customer.ts`
+- `backend/src/routes/vendor.ts`
+- `backend/src/routes/legacyCustomer.ts`
+- `backend/src/routes/legacyVendor.ts`
+- `backend/src/middleware/idempotency.ts`
+- `backend/scripts/check-july21-enquiry-payment.ts`
+- `backend/package.json`
+- `src/lib/quote-payment.ts`
+- `src/lib/adapters/customer-enquiry.ts`
+- `src/lib/adapters/vendor-studio.ts`
+- `src/lib/api/client.ts`
+- `src/lib/mockData.ts`
+- `src/lib/utils.ts`
+- `src/app/account/enquiries/page.tsx`
+- `src/app/account/enquiries/[id]/page.tsx`
+- `src/app/account/enquiries/[id]/pay/page.tsx`
+- `src/app/account/projects/page.tsx`
+- `src/app/account/projects/[id]/page.tsx`
+- `src/app/account/projects/[id]/materials/page.tsx`
+- `src/app/account/projects/[id]/materials/pay/page.tsx`
+- `src/app/vendor-studio/dashboard/page.tsx`
+- `src/app/vendor-studio/enquiries/page.tsx`
+- `src/app/vendor-studio/enquiries/[id]/page.tsx`
+- `src/app/vendor-studio/enquiries/[id]/quote/page.tsx`
+- `next.config.js`
+- `docs/API_CANONICAL.md`
+- `docs/PAYMENT_FLOW.md`
+- `RELEASE_NOTES.md`
+
+### Verification
+
+- Backend TypeScript production build passed.
+- Frontend strict TypeScript check passed.
+- Next.js production build passed for all 50 generated static pages, every
+  dynamic route, and the catch-all API function.
+- Next.js lint completed with no errors. It reports only the repository's
+  existing hook-dependency and `<img>` optimization warnings outside the
+  changed enquiry/payment surfaces.
+- Compiled July 21 regression checks passed for:
+  - full, 25% minimum, configured advance, and custom base resolution;
+  - out-of-range custom rejection;
+  - text/numeric accepted quote statuses;
+  - fee-inclusive `quote.total` exclusion;
+  - additive payment request fields;
+  - full-quote order materialization;
+  - idempotent step 1 and escrow hold guards;
+  - plan-submit step 2;
+  - customer status adaptation and canonical project source.
+- The July 17 mobile compatibility, legacy payment-total, and service-decimal
+  regression guards all passed after these changes.
+- `git diff --check` passed.
+
+### Database and Deployment Notes
+
+- Migration `012_quote_payment_options.sql` is additive and idempotent under
+  the existing migration runner. It adds nullable intent audit columns and an
+  index; it does not delete or rewrite order, quote, enquiry, plan, material,
+  or payment records.
+- Existing intents receive `base_amount = amount` because their historical
+  fee split cannot be reconstructed safely without the original request.
+  New quote/material/milestone intents store the exact server-derived base.
+- No production database write was executed from this Codex environment.
+  The read-only TiDB agent could not connect because `DB_HOST`, `DB_USER`,
+  `DB_PASSWORD`, and `DB_NAME` are not present locally. Vercel runs migration
+  012 during `vercel-build` using deployment credentials.
+- A local `next start` socket smoke test could not run because this managed
+  environment blocks port binding (`listen EPERM`). The compiled route
+  manifest was inspected instead and contains all four intended historical
+  customer-page redirects; production HTTP checks remain part of deployment
+  verification.
+- Post-deployment retest should use one new enquiry for each payment option,
+  confirm exactly one order/hold/step 1, submit a plan, confirm one step 2,
+  approve the plan, and complete one material payment.
+
 ## v4.5.95 - July 17 mobile-flow compatibility fixes (2026-07-20)
 
 ### Scope

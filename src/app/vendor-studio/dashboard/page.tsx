@@ -14,7 +14,9 @@ export default function VendorDashboardPage() {
 
   const enquiriesState = useLiveEnquiries()
   const jobsState      = useLiveJobs()
-  const newEnquiries   = enquiriesState.data.filter(e => e.status === 'NEW').slice(0, 3)
+  const newEnquiries   = enquiriesState.data
+    .filter(e => e.workflow_bucket === 'REQUEST_QUOTATION' && e.status === 'NEW')
+    .slice(0, 3)
   const ongoing        = jobsState.data
 
   const totalEarnings = ongoing.reduce((s, j) => s + j.paid, 0)

@@ -13,7 +13,7 @@ export default function VendorEnquiryDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id
   const router = useRouter()
-  const { data: enquiry, loading } = useLiveEnquiry(id)
+  const { data: enquiry, loading, reload } = useLiveEnquiry(id)
   // All hooks declared up-front — never after a conditional return.
   const [localStatus, setLocalStatus] = useState<string>(enquiry?.status || 'NEW')
   const [pending, setPending] = useState<'accept' | 'reject' | null>(null)
@@ -30,9 +30,10 @@ export default function VendorEnquiryDetailPage() {
     try {
       await demoOrLive(() => vendorApi.acceptEnquiry(id))
       setLocalStatus('ACCEPTED')
+      reload()
       toast.success('Enquiry accepted — customer notified')
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Failed to accept enquiry')
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to accept enquiry')
     } finally { setPending(null) }
   }
   const reject = async () => {
@@ -41,9 +42,10 @@ export default function VendorEnquiryDetailPage() {
     try {
       await demoOrLive(() => vendorApi.rejectEnquiry(id))
       setLocalStatus('REJECTED')
+      reload()
       toast.success('Enquiry rejected')
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Failed to reject enquiry')
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to reject enquiry')
     } finally { setPending(null) }
   }
 
@@ -93,7 +95,16 @@ export default function VendorEnquiryDetailPage() {
         {/* Side action panel — sticky so it stays visible while scrolling long descriptions. */}
         <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3 lg:sticky lg:top-24">
           <h2 className="text-base font-bold text-navy">Next Step</h2>
-          {displayStatus === 'NEW' && (
+          {enquiry.order_id ? (
+            <>
+              <Button full onClick={() => router.push(`/vendor-studio/jobs/${enquiry.order_id}`)}>
+                <FileText className="w-4 h-4" /> View Project
+              </Button>
+              <p className="text-xs text-gray-500 leading-relaxed pt-1">
+                This enquiry has been paid and is now managed from the project workflow.
+              </p>
+            </>
+          ) : displayStatus === 'NEW' ? (
             <>
               <Button full onClick={accept} loading={pending === 'accept'}>
                 <CheckCircle className="w-4 h-4" /> Accept Enquiry
@@ -105,13 +116,11 @@ export default function VendorEnquiryDetailPage() {
                 Accepting reveals the customer's phone and unlocks quoting.
               </p>
             </>
-          )}
-          {displayStatus === 'ACCEPTED' && (
+          ) : displayStatus === 'ACCEPTED' ? (
             <Button full onClick={() => router.push(`/vendor-studio/enquiries/${id}/quote`)}>
               <FileText className="w-4 h-4" /> Create &amp; Send Quote
             </Button>
-          )}
-          {displayStatus === 'QUOTED' && (
+          ) : displayStatus === 'QUOTED' ? (
             <>
               <Button full onClick={() => router.push(`/vendor-studio/enquiries/${id}/quote`)}>
                 <FileText className="w-4 h-4" /> Edit Quote
@@ -120,12 +129,15 @@ export default function VendorEnquiryDetailPage() {
                 You can edit the quote until the customer accepts it.
               </p>
             </>
-          )}
-          {(displayStatus === 'REJECTED' || displayStatus === 'CANCELLED') && (
+          ) : displayStatus === 'AWAITING_PAYMENT' ? (
+            <p className="text-sm text-gray-500 text-center py-2">
+              Quote accepted. Waiting for the customer payment.
+            </p>
+          ) : (displayStatus === 'REJECTED' || displayStatus === 'CANCELLED') ? (
             <p className="text-sm text-gray-500 text-center py-2">
               This enquiry was {displayStatus.toLowerCase()}.
             </p>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

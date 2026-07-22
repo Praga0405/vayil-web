@@ -18,6 +18,8 @@ import { exec, one, query, transaction } from '../db';
 import { ApiError } from '../utils/http';
 import { calculateTax } from './tax';
 import { createRazorpayOrder, verifyRazorpaySignature } from '../utils/razorpay';
+import { isAcceptedQuoteStatus, resolveQuotePaymentBase, type QuotePaymentOption } from './quotePayment';
+import { holdVerifiedPayment } from './paymentWorkflow';
 // Re-export the canonical releaseEscrow so legacy routes can call it.
 export { releaseEscrow } from '../routes/payments';
 
@@ -28,6 +30,9 @@ export interface CreateIntentInput {
   amount: number;
   purpose: Purpose;
   enquiry_id?: number;
+  quotation_id?: number;
+  base_amount?: number;
+  payment_option?: QuotePaymentOption;
   order_id?: number;
   milestone_id?: number;
   material_ids?: number[];
@@ -41,9 +46,22 @@ function amountMatches(a: number, b: number) { return Math.abs(Math.round(a) - M
 
 export async function resolveExpectedAmount(opts: {
   purpose: Purpose; customerId: number | string;
-  enquiry_id?: number; order_id?: number; milestone_id?: number; material_ids?: number[];
-}): Promise<{ expected: number; orderId: number | null; vendorId: number | null }> {
+  enquiry_id?: number; quotation_id?: number; base_amount?: number;
+  payment_option?: QuotePaymentOption; order_id?: number;
+  milestone_id?: number; material_ids?: number[];
+}): Promise<{
+  expected: number; baseAmount: number; orderId: number | null;
+  vendorId: number | null; quotationId: number | null;
+}> {
   const { purpose, customerId } = opts;
+  const settings = await one<any>(
+    `SELECT platform_fee_percentage, gst_percentage FROM settings ORDER BY id ASC LIMIT 1`,
+  );
+  const taxFor = (baseAmount: number) => calculateTax({
+    baseAmount,
+    platformFeePct: Number(settings?.platform_fee_percentage ?? 5),
+    gstPct: Number(settings?.gst_percentage ?? 18),
+  });
   if (purpose === 'quote') {
     if (!opts.enquiry_id) throw new ApiError(400, 'enquiry_id required');
     const enquiry = await one<any>(
@@ -52,17 +70,27 @@ export async function resolveExpectedAmount(opts: {
       { id: opts.enquiry_id, cid: customerId },
     );
     if (!enquiry) throw new ApiError(403, 'Enquiry not found');
-    const quote = await one<any>(
-      `SELECT quotation_id, amount, status FROM quotation
-        WHERE enquiry_id = :id ORDER BY quotation_id DESC LIMIT 1`,
-      { id: opts.enquiry_id },
+    const quotes = await query<any>(
+      `SELECT quotation_id, id, amount, advance_amount, status, status_int
+         FROM quotation
+        WHERE enquiry_id = :id
+          AND (:quotationId IS NULL OR quotation_id = :quotationId OR id = :quotationId)
+        ORDER BY quotation_id DESC`,
+      { id: opts.enquiry_id, quotationId: opts.quotation_id ?? null },
     );
+    const quote = quotes.find((row) => isAcceptedQuoteStatus(row.status, row.status_int));
     if (!quote) throw new ApiError(400, 'No quote for this enquiry');
-    if (String(quote.status).toLowerCase() !== 'accepted') {
-      throw new ApiError(400, `Quote must be accepted (status: ${quote.status})`);
-    }
-    const tax = calculateTax({ baseAmount: Number(quote.amount) });
-    return { expected: tax.customerTotal, orderId: null, vendorId: enquiry.vendor_id ?? null };
+    const baseAmount = resolveQuotePaymentBase({
+      quoteAmount: Number(quote.amount),
+      advanceAmount: quote.advance_amount,
+      paymentOption: opts.payment_option,
+      requestedBaseAmount: opts.base_amount,
+    });
+    const tax = taxFor(baseAmount);
+    return {
+      expected: tax.customerTotal, baseAmount, orderId: null,
+      vendorId: enquiry.vendor_id ?? null, quotationId: Number(quote.quotation_id),
+    };
   }
   if (purpose === 'materials') {
     if (!opts.order_id) throw new ApiError(400, 'order_id required');
@@ -93,8 +121,11 @@ export async function resolveExpectedAmount(opts: {
       }
     }
     const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const tax = calculateTax({ baseAmount: subtotal });
-    return { expected: tax.customerTotal, orderId: opts.order_id, vendorId: order.vendor_id ?? null };
+    const tax = taxFor(subtotal);
+    return {
+      expected: tax.customerTotal, baseAmount: subtotal, orderId: opts.order_id,
+      vendorId: order.vendor_id ?? null, quotationId: null,
+    };
   }
   // milestone
   if (!opts.milestone_id) throw new ApiError(400, 'milestone_id required');
@@ -108,8 +139,12 @@ export async function resolveExpectedAmount(opts: {
   if (String(m.customer_status).toLowerCase() !== 'awaiting_payment') {
     throw new ApiError(400, `Milestone not awaiting payment (${m.customer_status})`);
   }
-  const tax = calculateTax({ baseAmount: Number(m.amount) });
-  return { expected: tax.customerTotal, orderId: m.order_id, vendorId: m.vendor_id ?? null };
+  const baseAmount = Number(m.amount);
+  const tax = taxFor(baseAmount);
+  return {
+    expected: tax.customerTotal, baseAmount, orderId: m.order_id,
+    vendorId: m.vendor_id ?? null, quotationId: null,
+  };
 }
 
 export async function createPaymentIntent(b: CreateIntentInput) {
@@ -122,13 +157,18 @@ export async function createPaymentIntent(b: CreateIntentInput) {
       intent_id: existing.intent_id,
       razorpay_order_id: existing.razorpay_order_id,
       amount: Number(existing.amount),
+      base_amount: Number(existing.base_amount ?? existing.amount),
+      quotation_id: existing.quotation_id ?? null,
+      payment_option: existing.payment_option ?? null,
       status: existing.status,
       reused: true,
     };
   }
-  const { expected, orderId } = await resolveExpectedAmount({
+  const { expected, baseAmount, orderId, quotationId } = await resolveExpectedAmount({
     purpose: b.purpose, customerId: b.customerId,
-    enquiry_id: b.enquiry_id, order_id: b.order_id,
+    enquiry_id: b.enquiry_id, quotation_id: b.quotation_id,
+    base_amount: b.base_amount, payment_option: b.payment_option,
+    order_id: b.order_id,
     milestone_id: b.milestone_id, material_ids: b.material_ids,
   });
   if (!amountMatches(b.amount, expected)) {
@@ -138,26 +178,38 @@ export async function createPaymentIntent(b: CreateIntentInput) {
   const rzOrder = await createRazorpayOrder({
     amount: expected, currency: b.currency ?? 'INR',
     receipt: b.idempotency_key.slice(0, 40),
-    notes: { customer_id: String(b.customerId), purpose: b.purpose },
+    notes: {
+      customer_id: String(b.customerId),
+      purpose: b.purpose,
+      payment_option: b.payment_option ?? 'full',
+      quotation_id: quotationId ? String(quotationId) : '',
+    },
     keyId: b.payment_key,
     keySecret: b.payment_secret,
   });
   const result: any = await exec(
     `INSERT INTO payment_intents
-       (idempotency_key, customer_id, order_id, enquiry_id, milestone_id, material_ids,
-        amount, purpose, status, razorpay_order_id)
-     VALUES (:key, :cid, :oid, :eid, :mid, :mids, :amt, :p, 'initiated', :rz)`,
+       (idempotency_key, customer_id, order_id, enquiry_id, quotation_id,
+        milestone_id, material_ids, base_amount, amount, payment_option,
+        purpose, status, razorpay_order_id)
+     VALUES (:key, :cid, :oid, :eid, :qid, :mid, :mids, :base, :amt,
+             :option, :p, 'initiated', :rz)`,
     {
       key: b.idempotency_key, cid: b.customerId, oid: finalOrderId,
-      eid: b.enquiry_id ?? null, mid: b.milestone_id ?? null,
+      eid: b.enquiry_id ?? null, qid: quotationId, mid: b.milestone_id ?? null,
       mids: b.material_ids ? JSON.stringify(b.material_ids) : null,
-      amt: expected, p: b.purpose, rz: rzOrder.id,
+      base: baseAmount, amt: expected,
+      option: b.purpose === 'quote' ? (b.payment_option ?? 'full') : null,
+      p: b.purpose, rz: rzOrder.id,
     },
   );
   return {
     intent_id: result.insertId,
     razorpay_order_id: rzOrder.id,
     amount: expected,
+    base_amount: baseAmount,
+    quotation_id: quotationId,
+    payment_option: b.purpose === 'quote' ? (b.payment_option ?? 'full') : null,
     currency: b.currency ?? 'INR',
     status: 'initiated' as const,
   };
@@ -187,64 +239,31 @@ export async function verifyAndHold(b: VerifyInput) {
     );
     throw new ApiError(400, 'Invalid Razorpay signature');
   }
-  await transaction(async (conn) => {
-    await conn.query(
-      `UPDATE payment_intents
-          SET status = 'escrow_held', razorpay_payment_id = ?, razorpay_signature = ?
-        WHERE intent_id = ?`,
-      [b.razorpay_payment_id, b.razorpay_signature, intent.intent_id],
-    );
-    await conn.query(
-      `INSERT INTO escrow_ledger (intent_id, order_id, vendor_id, amount, direction, reason)
-       VALUES (?, ?, NULL, ?, 'hold', ?)`,
-      [intent.intent_id, intent.order_id, intent.amount, intent.purpose],
-    );
-    if (intent.purpose === 'quote' && intent.enquiry_id) {
-      const [existingOrder]: any = await conn.query(
-        `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
-        [intent.enquiry_id],
-      );
-      if (Array.isArray(existingOrder) && existingOrder.length > 0) {
-        await conn.query(`UPDATE orders SET status = 'active' WHERE enquiry_id = ?`, [intent.enquiry_id]);
-      } else {
-        await conn.query(
-          `INSERT INTO orders (customer_id, vendor_id, enquiry_id, amount, status, created_at)
-           SELECT e.customer_id, e.vendor_id, e.enquiry_id, ?, 'active', NOW()
-             FROM enquiries e WHERE e.enquiry_id = ?`,
-          [intent.amount, intent.enquiry_id],
-        );
-      }
-      // Backfill payment_intents.order_id + escrow_ledger.order_id so
-      // releaseEscrow can find this intent later (was previously left
-      // NULL → finalStep never credited the vendor wallet).
-      const [orderRow]: any = await conn.query(
-        `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
-        [intent.enquiry_id],
-      );
-      const newOrderId = Array.isArray(orderRow) ? orderRow[0]?.order_id : null;
-      if (newOrderId) {
-        await conn.query(`UPDATE payment_intents SET order_id = ? WHERE intent_id = ?`, [newOrderId, intent.intent_id]);
-        await conn.query(`UPDATE escrow_ledger SET order_id = ? WHERE intent_id = ? AND order_id IS NULL`, [newOrderId, intent.intent_id]);
-      }
-    }
-    if (intent.purpose === 'materials' && intent.material_ids) {
-      const ids = JSON.parse(intent.material_ids);
-      if (Array.isArray(ids) && ids.length > 0) {
-        const placeholders = ids.map(() => '?').join(',');
-        await conn.query(
-          `UPDATE materials SET status = 'PAID' WHERE material_id IN (${placeholders})`,
-          ids,
-        );
-      }
-    }
-  });
-  return { status: 'escrow_held' as const, intent_id: intent.intent_id };
+  if (intent.status === 'escrow_held' || intent.status === 'released') {
+    return {
+      status: intent.status as 'escrow_held' | 'released',
+      intent_id: intent.intent_id,
+      order_id: intent.order_id ?? null,
+      reused: true,
+    };
+  }
+  const held = await transaction((conn) => holdVerifiedPayment(conn, intent, {
+    razorpayPaymentId: b.razorpay_payment_id,
+    razorpaySignature: b.razorpay_signature,
+  }));
+  return {
+    status: 'escrow_held' as const,
+    intent_id: intent.intent_id,
+    order_id: held.orderId,
+  };
 }
 
 export async function listCustomerPayments(customerId: number | string) {
   // Prefer payment_intents over the legacy payment_log table.
   return query<any>(
-    `SELECT intent_id AS id, order_id, enquiry_id, amount, purpose, status, razorpay_order_id,
+    `SELECT intent_id AS id, order_id, enquiry_id, quotation_id,
+            COALESCE(base_amount, amount) AS base_amount, amount,
+            payment_option, purpose, status, razorpay_order_id,
             razorpay_payment_id, created_at
        FROM payment_intents
       WHERE customer_id = :id
@@ -263,7 +282,7 @@ export async function getOrderPaymentSummary(customerId: number | string, orderI
   );
   const paid = intents
     .filter((i) => i.status === 'escrow_held' || i.status === 'released')
-    .reduce((s, i) => s + Number(i.amount), 0);
+    .reduce((s, i) => s + Number(i.base_amount ?? i.amount), 0);
   const order = await one<any>('SELECT amount FROM orders WHERE order_id = :id', { id: orderId });
   const total = Number(order?.amount ?? 0);
   return { order_id: Number(orderId), total, paid, remaining: Math.max(total - paid, 0), intents };

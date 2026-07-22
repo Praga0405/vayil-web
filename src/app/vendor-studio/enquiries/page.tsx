@@ -7,13 +7,19 @@ import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight } from 'lucide-react'
 import { PageHero } from '@/components/shared/PageLayout'
 
-type Tab = 'NEW' | 'ACCEPTED' | 'QUOTED' | 'ONGOING' | 'COMPLETED' | 'REJECTED'
-const TABS: Tab[] = ['NEW', 'ACCEPTED', 'QUOTED', 'ONGOING', 'COMPLETED', 'REJECTED']
+type Tab = 'REQUEST_QUOTATION' | 'NEW' | 'ONGOING' | 'COMPLETED' | 'REJECTED'
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'REQUEST_QUOTATION', label: 'Requests' },
+  { value: 'NEW', label: 'New Orders' },
+  { value: 'ONGOING', label: 'Ongoing' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'REJECTED', label: 'Rejected' },
+]
 
 export default function VendorEnquiriesListPage() {
-  const [tab, setTab] = useState<Tab>('NEW')
+  const [tab, setTab] = useState<Tab>('REQUEST_QUOTATION')
   const { data: enquiries, loading } = useLiveEnquiries()
-  const filtered = enquiries.filter(e => e.status === tab)
+  const filtered = enquiries.filter(e => e.workflow_bucket === tab)
 
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-10">
@@ -22,14 +28,14 @@ export default function VendorEnquiriesListPage() {
         subtitle="Customer requests — accept, quote, or reject."
         meta={
           <div className="flex bg-gray-50 border border-gray-100 rounded-xl p-1 overflow-x-auto">
-            {TABS.map(t => (
-              <button key={t} onClick={() => setTab(t)}
+            {TABS.map(({ value, label }) => (
+              <button key={value} onClick={() => setTab(value)}
                 className={`flex-1 min-w-[100px] py-2 rounded-lg text-sm font-semibold transition-all ${
-                  tab === t ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
+                  tab === value ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
                 }`}>
-                {t.charAt(0) + t.slice(1).toLowerCase()}
-                {tab === t && enquiries.filter(e => e.status === t).length > 0 && (
-                  <span className="ml-1.5 text-xs opacity-75">({enquiries.filter(e => e.status === t).length})</span>
+                {label}
+                {tab === value && enquiries.filter(e => e.workflow_bucket === value).length > 0 && (
+                  <span className="ml-1.5 text-xs opacity-75">({enquiries.filter(e => e.workflow_bucket === value).length})</span>
                 )}
               </button>
             ))}
@@ -38,8 +44,8 @@ export default function VendorEnquiriesListPage() {
       />
 
       {loading ? <PageLoader /> : filtered.length === 0 ? (
-        <EmptyState icon={ClipboardList} title={`No ${tab.toLowerCase()} enquiries`}
-          description={tab === 'NEW' ? 'New customer requests will land here.' : 'Nothing in this state yet.'} />
+        <EmptyState icon={ClipboardList} title={`No ${TABS.find(item => item.value === tab)?.label.toLowerCase()} enquiries`}
+          description={tab === 'REQUEST_QUOTATION' ? 'New customer requests will land here.' : 'Nothing in this state yet.'} />
       ) : (
         <div className="space-y-3">
           {filtered.map(e => (

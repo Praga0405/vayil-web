@@ -24,6 +24,19 @@ const nextConfig = {
       { protocol: 'https', hostname: 'vayil-files.s3.ap-south-1.amazonaws.com' },
     ],
   },
+  async redirects() {
+    // Keep the historical /customer workspace URLs as UI aliases only.
+    // Their duplicated enquiry/payment implementation still called the old
+    // placeOrder contract with an incomplete body. Route users to the single
+    // canonical account workflow so quote acceptance, partial payments,
+    // projects, plans, and materials cannot drift again.
+    return [
+      { source: '/customer/enquiries', destination: '/account/enquiries', permanent: false },
+      { source: '/customer/enquiries/:id', destination: '/account/enquiries/:id', permanent: false },
+      { source: '/customer/projects', destination: '/account/projects', permanent: false },
+      { source: '/customer/projects/:path*', destination: '/account/projects/:path*', permanent: false },
+    ]
+  },
   async headers() {
     /* v4.5.22 — Security headers. Lighthouse "Best Practices" deducted
      * for missing CSP, COOP, X-Frame-Options, and Trusted Types. This

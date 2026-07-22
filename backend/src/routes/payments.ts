@@ -26,6 +26,12 @@ import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
 import { calculateTax } from '../services/tax';
 import { createRazorpayOrder, verifyRazorpaySignature, verifyWebhookSignature } from '../utils/razorpay';
+import {
+  isAcceptedQuoteStatus,
+  resolveQuotePaymentBase,
+  type QuotePaymentOption,
+} from '../services/quotePayment';
+import { holdVerifiedPayment } from '../services/paymentWorkflow';
 
 export const paymentsRouter = Router();
 export const paymentsWebhookRouter = Router();
@@ -41,6 +47,9 @@ const createOrderSchema = z.object({
   amount:        z.number().positive(),
   purpose:       z.enum(['quote', 'milestone', 'materials']).default('quote'),
   enquiry_id:    z.number().int().optional(),
+  quotation_id:  z.number().int().positive().optional(),
+  base_amount:   z.number().positive().optional(),
+  payment_option: z.enum(['full', 'minimum', 'custom']).optional(),
   order_id:      z.number().int().optional(),
   milestone_id:  z.number().int().optional(),
   material_ids:  z.array(z.number().int()).optional(),
@@ -57,8 +66,32 @@ function amountMatches(claimed: number, expected: number): boolean {
 
 async function resolveExpectedAmount(
   purpose: 'quote' | 'milestone' | 'materials',
-  args: { customerId: number; enquiry_id?: number; order_id?: number; milestone_id?: number; material_ids?: number[] },
-): Promise<{ expected: number; orderId: number | null; vendorId: number | null }> {
+  args: {
+    customerId: number;
+    enquiry_id?: number;
+    quotation_id?: number;
+    base_amount?: number;
+    payment_option?: QuotePaymentOption;
+    order_id?: number;
+    milestone_id?: number;
+    material_ids?: number[];
+  },
+): Promise<{
+  expected: number;
+  baseAmount: number;
+  orderId: number | null;
+  vendorId: number | null;
+  quotationId: number | null;
+}> {
+  const settings = await one<any>(
+    `SELECT platform_fee_percentage, gst_percentage FROM settings ORDER BY id ASC LIMIT 1`,
+  );
+  const taxFor = (baseAmount: number) => calculateTax({
+    baseAmount,
+    platformFeePct: Number(settings?.platform_fee_percentage ?? 5),
+    gstPct: Number(settings?.gst_percentage ?? 18),
+  });
+
   if (purpose === 'quote') {
     if (!args.enquiry_id) throw new ApiError(400, 'enquiry_id required for quote payment');
     const enquiry = await one<any>(
@@ -67,18 +100,30 @@ async function resolveExpectedAmount(
       { id: args.enquiry_id, cid: args.customerId },
     );
     if (!enquiry) throw new ApiError(403, 'Enquiry not found for this customer');
-    const quote = await one<any>(
-      `SELECT quotation_id, amount, status FROM quotation
-        WHERE enquiry_id = :id ORDER BY quotation_id DESC LIMIT 1`,
-      { id: args.enquiry_id },
+    const quotes = await query<any>(
+      `SELECT quotation_id, id, amount, advance_amount, status, status_int
+         FROM quotation
+        WHERE enquiry_id = :id
+          AND (:quotationId IS NULL OR quotation_id = :quotationId OR id = :quotationId)
+        ORDER BY quotation_id DESC`,
+      { id: args.enquiry_id, quotationId: args.quotation_id ?? null },
     );
+    const quote = quotes.find((row) => isAcceptedQuoteStatus(row.status, row.status_int));
     if (!quote) throw new ApiError(400, 'No quote available for this enquiry');
-    if (String(quote.status).toLowerCase() !== 'accepted') {
-      throw new ApiError(400, `Quote must be accepted before payment (status: ${quote.status})`);
-    }
-    // Expected: quote total + platform fee + GST (server is the source of truth).
-    const tax = calculateTax({ baseAmount: Number(quote.amount) });
-    return { expected: tax.customerTotal, orderId: null, vendorId: enquiry.vendor_id ?? null };
+    const baseAmount = resolveQuotePaymentBase({
+      quoteAmount: Number(quote.amount),
+      advanceAmount: quote.advance_amount,
+      paymentOption: args.payment_option,
+      requestedBaseAmount: args.base_amount,
+    });
+    const tax = taxFor(baseAmount);
+    return {
+      expected: tax.customerTotal,
+      baseAmount,
+      orderId: null,
+      vendorId: enquiry.vendor_id ?? null,
+      quotationId: Number(quote.quotation_id),
+    };
   }
 
   if (purpose === 'materials') {
@@ -114,8 +159,14 @@ async function resolveExpectedAmount(
       }
     }
     const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const tax = calculateTax({ baseAmount: subtotal });
-    return { expected: tax.customerTotal, orderId: args.order_id, vendorId: order.vendor_id ?? null };
+    const tax = taxFor(subtotal);
+    return {
+      expected: tax.customerTotal,
+      baseAmount: subtotal,
+      orderId: args.order_id,
+      vendorId: order.vendor_id ?? null,
+      quotationId: null,
+    };
   }
 
   // milestone
@@ -131,8 +182,15 @@ async function resolveExpectedAmount(
   if (String(milestone.customer_status).toLowerCase() !== 'awaiting_payment') {
     throw new ApiError(400, `Milestone is not awaiting payment (status: ${milestone.customer_status})`);
   }
-  const tax = calculateTax({ baseAmount: Number(milestone.amount) });
-  return { expected: tax.customerTotal, orderId: milestone.order_id, vendorId: milestone.vendor_id ?? null };
+  const baseAmount = Number(milestone.amount);
+  const tax = taxFor(baseAmount);
+  return {
+    expected: tax.customerTotal,
+    baseAmount,
+    orderId: milestone.order_id,
+    vendorId: milestone.vendor_id ?? null,
+    quotationId: null,
+  };
 }
 
 paymentsRouter.post('/create-order',
@@ -155,6 +213,9 @@ paymentsRouter.post('/create-order',
           intent_id: existing.intent_id,
           razorpay_order_id: existing.razorpay_order_id,
           amount: Number(existing.amount),
+          base_amount: Number(existing.base_amount ?? existing.amount),
+          quotation_id: existing.quotation_id ?? null,
+          payment_option: existing.payment_option ?? null,
           status: existing.status,
           reused: true,
         });
@@ -162,9 +223,12 @@ paymentsRouter.post('/create-order',
 
       // 1) Ownership + state validation.
       // 2) Recompute expected amount; reject if client lied about the total.
-      const { expected, orderId } = await resolveExpectedAmount(body.purpose, {
+      const { expected, baseAmount, orderId, quotationId } = await resolveExpectedAmount(body.purpose, {
         customerId,
         enquiry_id:   body.enquiry_id,
+        quotation_id: body.quotation_id,
+        base_amount: body.base_amount,
+        payment_option: body.payment_option,
         order_id:     body.order_id,
         milestone_id: body.milestone_id,
         material_ids: body.material_ids,
@@ -183,23 +247,33 @@ paymentsRouter.post('/create-order',
         amount: expected,
         currency: body.currency,
         receipt: idempotencyKey.slice(0, 40),
-        notes: { customer_id: String(customerId), purpose: body.purpose },
+        notes: {
+          customer_id: String(customerId),
+          purpose: body.purpose,
+          payment_option: body.payment_option ?? 'full',
+          quotation_id: quotationId ? String(quotationId) : '',
+        },
       });
 
       const result: any = await exec(
         `INSERT INTO payment_intents
-           (idempotency_key, customer_id, order_id, enquiry_id, milestone_id, material_ids,
-            amount, purpose, status, razorpay_order_id)
-         VALUES (:key, :customerId, :orderId, :enquiryId, :milestoneId, :materialIds,
-            :amount, :purpose, 'initiated', :razorpayOrderId)`,
+           (idempotency_key, customer_id, order_id, enquiry_id, quotation_id,
+            milestone_id, material_ids, base_amount, amount, payment_option,
+            purpose, status, razorpay_order_id)
+         VALUES (:key, :customerId, :orderId, :enquiryId, :quotationId,
+            :milestoneId, :materialIds, :baseAmount, :amount, :paymentOption,
+            :purpose, 'initiated', :razorpayOrderId)`,
         {
           key:          idempotencyKey,
           customerId,
           orderId:      finalOrderId,
           enquiryId:    body.enquiry_id ?? null,
+          quotationId,
           milestoneId:  body.milestone_id ?? null,
           materialIds:  body.material_ids ? JSON.stringify(body.material_ids) : null,
+          baseAmount,
           amount:       expected,
+          paymentOption: body.purpose === 'quote' ? (body.payment_option ?? 'full') : null,
           purpose:      body.purpose,
           razorpayOrderId: rzOrder.id,
         },
@@ -209,6 +283,9 @@ paymentsRouter.post('/create-order',
         intent_id:         result.insertId,
         razorpay_order_id: rzOrder.id,
         amount:            expected,
+        base_amount:       baseAmount,
+        quotation_id:      quotationId,
+        payment_option:    body.purpose === 'quote' ? (body.payment_option ?? 'full') : null,
         currency:          body.currency,
         status:            'initiated',
       }, 201);
@@ -248,69 +325,25 @@ paymentsRouter.post('/verify',
         throw new ApiError(400, 'Invalid Razorpay signature');
       }
 
-      await transaction(async (conn) => {
-        await conn.query(
-          `UPDATE payment_intents
-              SET status = 'escrow_held',
-                  razorpay_payment_id = ?,
-                  razorpay_signature  = ?
-            WHERE intent_id = ?`,
-          [body.razorpay_payment_id, body.razorpay_signature, intent.intent_id],
-        );
-        await conn.query(
-          `INSERT INTO escrow_ledger (intent_id, order_id, vendor_id, amount, direction, reason)
-           VALUES (?, ?, NULL, ?, 'hold', ?)`,
-          [intent.intent_id, intent.order_id, intent.amount, intent.purpose],
-        );
-        // Quote payment → materialise (or reuse) the orders row. We pre-check
-        // existence to avoid relying on a UNIQUE constraint that older deploys
-        // may not have, and to give a deterministic insert id back when one
-        // is already there.
-        if (intent.purpose === 'quote' && intent.enquiry_id) {
-          const [existingOrder]: any = await conn.query(
-            `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
-            [intent.enquiry_id],
-          );
-          if (Array.isArray(existingOrder) && existingOrder.length > 0) {
-            await conn.query(
-              `UPDATE orders SET status = 'active' WHERE enquiry_id = ?`,
-              [intent.enquiry_id],
-            );
-          } else {
-            await conn.query(
-              `INSERT INTO orders (customer_id, vendor_id, enquiry_id, amount, status, created_at)
-               SELECT e.customer_id, e.vendor_id, e.enquiry_id, ?, 'active', NOW()
-                 FROM enquiries e WHERE e.enquiry_id = ?`,
-              [intent.amount, intent.enquiry_id],
-            );
-          }
-          // Backfill payment_intents.order_id + escrow_ledger.order_id
-          // so releaseEscrow on signoff finds this intent (was leaving
-          // both NULL on quote payments → vendor wallet never credited).
-          const [orderRow]: any = await conn.query(
-            `SELECT order_id FROM orders WHERE enquiry_id = ? LIMIT 1`,
-            [intent.enquiry_id],
-          );
-          const newOrderId = Array.isArray(orderRow) ? orderRow[0]?.order_id : null;
-          if (newOrderId) {
-            await conn.query(`UPDATE payment_intents SET order_id = ? WHERE intent_id = ?`, [newOrderId, intent.intent_id]);
-            await conn.query(`UPDATE escrow_ledger SET order_id = ? WHERE intent_id = ? AND order_id IS NULL`, [newOrderId, intent.intent_id]);
-          }
-        }
-        // Materials → flip rows to PAID.
-        if (intent.purpose === 'materials' && intent.material_ids) {
-          const ids = JSON.parse(intent.material_ids);
-          if (Array.isArray(ids) && ids.length > 0) {
-            const placeholders = ids.map(() => '?').join(',');
-            await conn.query(
-              `UPDATE materials SET status = 'PAID' WHERE material_id IN (${placeholders})`,
-              ids,
-            );
-          }
-        }
-      });
+      if (intent.status === 'escrow_held' || intent.status === 'released') {
+        return ok(res, {
+          status: intent.status,
+          intent_id: intent.intent_id,
+          order_id: intent.order_id ?? null,
+          reused: true,
+        });
+      }
 
-      ok(res, { status: 'escrow_held', intent_id: intent.intent_id });
+      const held = await transaction((conn) => holdVerifiedPayment(conn, intent, {
+        razorpayPaymentId: body.razorpay_payment_id,
+        razorpaySignature: body.razorpay_signature,
+      }));
+
+      ok(res, {
+        status: 'escrow_held',
+        intent_id: intent.intent_id,
+        order_id: held.orderId,
+      });
     } catch (err) { next(err); }
   },
 );
@@ -356,15 +389,12 @@ paymentsWebhookRouter.post('/razorpay',
           { id: entity.order_id },
         );
         if (intent && intent.status !== 'escrow_held' && intent.status !== 'released') {
-          await exec(
-            `UPDATE payment_intents SET status = 'escrow_held', razorpay_payment_id = :pid WHERE intent_id = :id`,
-            { pid: entity.id, id: intent.intent_id },
-          );
-          await exec(
-            `INSERT INTO escrow_ledger (intent_id, order_id, amount, direction, reason)
-             VALUES (:id, :oid, :amt, 'hold', 'webhook')`,
-            { id: intent.intent_id, oid: intent.order_id, amt: intent.amount },
-          );
+          await transaction((conn) => holdVerifiedPayment(conn, intent, {
+            razorpayPaymentId: entity.id,
+            // Checkout signatures are not included in captured-payment
+            // webhooks. The shared workflow preserves any existing value.
+            razorpaySignature: '',
+          }));
         }
       }
       if (event === 'payment.failed' && entity?.order_id) {

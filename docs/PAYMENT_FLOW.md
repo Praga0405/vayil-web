@@ -33,7 +33,7 @@ is reconstructible from `escrow_ledger` alone.
    ─► refuses mismatched client amount (≤ ₹1 tolerance)
    ─► INSERT payment_intents (status='initiated')
    ─► Razorpay Orders.create               (or dev fallback order_dev_…)
-   ◄─ { intent_id, razorpay_order_id, amount }
+   ◄─ { intent_id, razorpay_order_id, amount, base_amount, quotation_id, payment_option }
 
 2. (Razorpay Checkout opens on the client.)
 
@@ -41,9 +41,10 @@ is reconstructible from `escrow_ledger` alone.
    ─► HMAC-verify razorpay_signature (timingSafeEqual)
    ─► UPDATE payment_intents SET status='escrow_held', razorpay_payment_id, razorpay_signature
    ─► INSERT escrow_ledger { intent_id, order_id, amount, direction='hold', reason=purpose }
-   ─► if purpose='quote' AND no orders row yet:
-        INSERT orders (customer_id, vendor_id, enquiry_id, amount, status='active')
-        backfill payment_intents.order_id + escrow_ledger.order_id
+   ─► if purpose='quote':
+        UPSERT orders using the full accepted quote as orders.amount
+        INSERT step 1 / CUSTOMER / "Order placed" when absent
+        backfill payment_intents.order_id + escrow_ledger order/vendor IDs
    ─► if purpose='materials':
         UPDATE materials SET status='PAID' WHERE material_id IN (...)
    ◄─ { status:'escrow_held', intent_id }
@@ -57,11 +58,32 @@ never gets credited. Added in v4.4.
 
 | Purpose | When | Server re-derives from |
 |---|---|---|
-| `quote` | Customer pays the advance after accepting a quote | latest quotation on the enquiry (must be `status='accepted'`) × `calculateTax({baseAmount})` |
+| `quote` | Customer pays full, configured minimum/25%, or a valid custom amount after accepting a quote | the explicitly supplied accepted `quotation_id`; `base_amount` is validated against `payment_option`, then fees are calculated server-side |
 | `materials` | Customer pays for selected materials | sum of `materials.total` for the supplied ids (all must be UNPAID/AWAITING_PAYMENT, plan must be approved) |
 | `milestone` | Customer pays for a specific completed milestone | `order_plan.amount` for the milestone (must be `customer_status='awaiting_payment'`) |
 
 Each path is implemented in `paymentService.resolveExpectedAmount`.
+
+### Quote payment options
+
+Quote checkout sends these additional compatibility fields:
+
+| Field | Meaning |
+|---|---|
+| `quotation_id` | Exact accepted quote being paid. Rejected/newer sibling quotes cannot replace it. |
+| `payment_option` | `full`, `minimum`, or `custom`. Defaults to `full` for older clients. |
+| `base_amount` | Project amount selected before platform fee and GST. Full must equal `quotation.amount`; minimum uses a valid `advance_amount` or 25%; custom must be within minimum and full. |
+
+`payment_intents.amount` remains the Razorpay gateway total. The new
+`payment_intents.base_amount` stores the project portion so partial-payment
+progress and remaining-plan calculations do not include platform fee/GST.
+`orders.amount` always stores the complete accepted quote amount, even when
+the first payment is only an advance.
+
+Browser verification and the `payment.captured` webhook call the same
+transactional materialization function. This guarantees the order, escrow
+link, accepted quote, and mobile step-1 record are created whether the browser
+handler completes or Razorpay's webhook is the recovery path.
 
 ## Server-derived totals
 

@@ -12,11 +12,10 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    customerApi.getEnquiries()
+    customerApi.listProjects()
       .then(r => {
-        const d = r.data?.data || r.data?.result || []
-        const all = Array.isArray(d) ? d : []
-        setProjects(all.filter((e: any) => ['ONGOING','COMPLETED','CANCELLED'].includes(e.status)))
+        const d = r.data?.data?.projects || r.data?.projects || []
+        setProjects(Array.isArray(d) ? d : [])
       })
       .finally(() => setLoading(false))
   }, [])
@@ -35,9 +34,9 @@ export default function ProjectsPage() {
       ) : (
         <div className="space-y-3">
           {projects.map((p: any) => {
-            const pid = p.order_id || p.id || p.enquiry_id
+            const pid = p.order_id || p.id
             return (
-              <Link key={p.id || p.enquiry_id} href={`/account/projects/${pid}`}
+              <Link key={pid} href={`/account/projects/${pid}`}
                 className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-4 hover:shadow-sm hover:border-orange/30 transition">
                 <div className="w-12 h-12 rounded-2xl bg-navy/10 flex items-center justify-center shrink-0">
                   <Briefcase className="w-6 h-6 text-navy" />

@@ -59,7 +59,7 @@ export default function ProjectDetailPage() {
   const totalCharged = Number(order.amount ?? 0)
   const paid = payments
     .filter((p: any) => ['escrow_held', 'released'].includes(p.status))
-    .reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0)
+    .reduce((s: number, p: any) => s + Number(p.base_amount ?? p.amount ?? 0), 0)
   const remaining = Math.max(totalCharged - paid, 0)
   const approvedCount = plan.filter(p => p.customer_status === 'approved').length
   const completedCount = plan.filter(p => p.vendor_status === 'completed').length

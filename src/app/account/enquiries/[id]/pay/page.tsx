@@ -7,6 +7,13 @@ import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
 import { IS_DEMO_MODE } from '@/lib/demoMode'
+import {
+  minimumQuoteAmount,
+  paymentFeeSettings,
+  quoteBaseAmount,
+  quoteId,
+  selectCurrentQuote,
+} from '@/lib/quote-payment'
 
 declare global { interface Window { Razorpay: any } }
 
@@ -34,6 +41,8 @@ export default function PaymentOptionSheetPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [total, setTotal] = useState<number | null>(null)
+  const [quote, setQuote] = useState<any>(null)
+  const [settings, setSettings] = useState<any>({})
   const [loadingQuote, setLoadingQuote] = useState(true)
 
   // PRD audit P0-9 — read the real quote amount from /customer/quotes/:enquiryId.
@@ -44,21 +53,27 @@ export default function PaymentOptionSheetPage() {
     if (IS_DEMO_MODE) {
       // Demo: use the mock job total so the full Razorpay-options sheet
       // is exercisable without a real quote in the database.
+      setQuote({ quotation_id: 1, amount: 850000, status: 'accepted' })
       setTotal(850000)
       setLoadingQuote(false)
       return
     }
-    customerApi.getQuote(id)
-      .then((res: any) => {
+    Promise.all([
+      customerApi.getQuote(id),
+      customerApi.getSettings().catch(() => null),
+    ])
+      .then(([res, settingsRes]: any[]) => {
         if (cancelled) return
         const quotes = res?.data?.data?.quotes ?? res?.data?.quotes ?? []
-        const latest = Array.isArray(quotes) && quotes[0]
-        if (!latest) throw new Error('No quote available for this enquiry yet')
-        setTotal(Number(latest.amount))
+        const current = selectCurrentQuote(quotes)
+        if (!current) throw new Error('No active quote available for this enquiry yet')
+        setQuote(current)
+        setTotal(quoteBaseAmount(current))
+        setSettings(settingsRes?.data?.data ?? settingsRes?.data?.result ?? settingsRes?.data ?? {})
       })
       .catch(err => {
         if (cancelled) return
-        setError(err?.response?.data?.error || err?.message || 'Failed to load quote')
+        setError(err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to load quote')
       })
       .finally(() => { if (!cancelled) setLoadingQuote(false) })
     return () => { cancelled = true }
@@ -75,14 +90,15 @@ export default function PaymentOptionSheetPage() {
       </div>
     )
   }
-  const min = Math.round(total * 0.25)
+  const min = minimumQuoteAmount(quote)
 
   const amount =
     option === 'full' ? total :
     option === 'min'  ? min :
     Number(custom) || 0
 
-  const fees = calculateFees(amount, 5, 18, 0)
+  const feeSettings = paymentFeeSettings(settings)
+  const fees = calculateFees(amount, feeSettings.platformFeePct, feeSettings.gstPct, feeSettings.tdsPct)
   const valid = option === 'custom' ? amount >= min && amount <= total : true
 
   const pay = async () => {
@@ -110,21 +126,24 @@ export default function PaymentOptionSheetPage() {
         amount:          fees.total,
         purpose:         'quote',
         enquiry_id:      Number(id),
+        quotation_id:    quoteId(quote) ?? undefined,
+        base_amount:     amount,
+        payment_option:  option === 'min' ? 'minimum' : option,
         idempotency_key: idempotencyKey,
       })
       const orderData = orderRes?.data?.data || orderRes?.data || {}
       const razorpayOrderId = orderData.razorpay_order_id
+      const gatewayAmount = Number(orderData.amount ?? fees.total)
 
       // 2) Open Razorpay checkout
-      const settings: any = await customerApi.getSettings().catch(() => ({}))
-      const key = settings?.data?.data?.razorpay_key
-              ?? settings?.data?.result?.razorpay_key
+      const key = settings?.razorpay_key
+              ?? settings?.payment_key
               ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
               ?? ''
       await loadRazorpay()
       new window.Razorpay({
         key,
-        amount:   Math.round(fees.total * 100),
+        amount:   Math.round(gatewayAmount * 100),
         currency: 'INR',
         order_id: razorpayOrderId,
         name:     'Vayil',
@@ -142,7 +161,7 @@ export default function PaymentOptionSheetPage() {
             toast.success('Payment successful — funds held in escrow')
             router.push('/account/projects')
           } catch (verifyErr: any) {
-            setError(verifyErr?.response?.data?.error || 'Payment captured but verification failed — try again or contact support')
+            setError(verifyErr?.response?.data?.error || verifyErr?.response?.data?.message || 'Payment captured but verification failed — try again or contact support')
           } finally {
             setSubmitting(false)
           }
@@ -150,7 +169,7 @@ export default function PaymentOptionSheetPage() {
         modal: { ondismiss: () => { setSubmitting(false); setError('Payment cancelled') } },
       }).open()
     } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Failed to start payment')
+      setError(err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to start payment')
       setSubmitting(false)
     }
   }
@@ -195,8 +214,8 @@ export default function PaymentOptionSheetPage() {
         <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2">
           <h2 className="text-sm font-bold text-navy">Payment Summary</h2>
           <Row label="Base"             value={formatCurrency(fees.base)} />
-          <Row label="Platform Fee (5%)" value={formatCurrency(fees.platformFee)} />
-          <Row label="GST (18%)"         value={formatCurrency(fees.gst)} />
+          <Row label={`Platform Fee (${feeSettings.platformFeePct}%)`} value={formatCurrency(fees.platformFee)} />
+          <Row label={`GST (${feeSettings.gstPct}%)`}         value={formatCurrency(fees.gst)} />
           <div className="h-px bg-gray-100 my-2" />
           <Row label="Total Payable"     value={formatCurrency(fees.total)} bold />
         </div>

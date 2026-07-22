@@ -14,12 +14,26 @@ import { customerApi, paymentsApi } from '@/lib/api/client'
 import { IS_DEMO_MODE, demoOrLive } from '@/lib/demoMode'
 import { PageLoader, InfoRow, StatusBadge, Amount, Button } from '@/components/ui'
 import { formatDate, formatCurrency, calculateFees } from '@/lib/utils'
+import {
+  isAcceptedQuote,
+  minimumQuoteAmount,
+  paymentFeeSettings,
+  quoteBaseAmount,
+  quoteId as getQuoteId,
+  selectCurrentQuote,
+} from '@/lib/quote-payment'
+import { normalizeCustomerEnquiry } from '@/lib/adapters/customer-enquiry'
 import { ChevronLeft, CheckCircle, XCircle, Receipt, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 declare global { interface Window { Razorpay: any } }
 
 type Option = 'full' | 'min' | 'custom'
+
+function isValidActionableQuoteStatus(status: unknown): boolean {
+  const value = String(status ?? '').trim().toLowerCase()
+  return !value || ['pending', 'sent', 'quoted', '1', '11'].includes(value)
+}
 
 async function loadRazorpay(): Promise<void> {
   if (typeof window === 'undefined') return
@@ -54,17 +68,20 @@ export default function EnquiryDetailPage() {
       customerApi.getEnquiryDetail(Number(id)).catch(() => null),
       customerApi.getSettings().catch(() => null),
     ]).then(([er, sr]) => {
-      const e = er?.data?.data || er?.data?.result || er?.data || {}
-      setEnquiry(e)
-      if (e.quote) setQuote(e.quote)
+      const payload = er?.data?.data || er?.data?.result || er?.data || {}
+      const e = payload?.enquiry ?? payload
+      setEnquiry(normalizeCustomerEnquiry({ ...e, quotes: payload?.quotes ?? e?.quotes }))
+      const currentQuote = selectCurrentQuote(payload?.quotes)
+      if (currentQuote) setQuote(currentQuote)
+      else if (e.quote) setQuote(e.quote)
       setSettings(sr?.data?.data || sr?.data?.result || sr?.data || {})
     }).finally(() => setLoading(false))
 
     customerApi.getQuote(Number(id)).then((r: any) => {
       // New REST endpoint returns { enquiry, quotes:[...] }; legacy returns array.
       const body = r?.data?.data || r?.data?.result || r?.data || {}
-      const quotes = body?.quotes
-      if (Array.isArray(quotes) && quotes.length > 0) setQuote(quotes[0])
+      const currentQuote = selectCurrentQuote(body?.quotes)
+      if (currentQuote) setQuote(currentQuote)
       else if (body && !Array.isArray(body) && body.amount) setQuote(body)
     }).catch(() => {})
   }, [id])
@@ -73,7 +90,7 @@ export default function EnquiryDetailPage() {
   if (!enquiry) return <div className="text-center py-20 text-gray-500">Enquiry not found</div>
 
   /* ── Quote accept / reject (canonical REST) ── */
-  const quoteId = quote?.quotation_id || quote?.id
+  const quoteId = getQuoteId(quote)
   const acceptQuote = async () => {
     if (!quote || !quoteId) return
     setActing('accept')
@@ -83,7 +100,7 @@ export default function EnquiryDetailPage() {
       setEnquiry((e: any) => ({ ...e, status: 'accepted' }))
       setQuote((q: any) => ({ ...q, status: 'accepted' }))
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Failed to accept quote')
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to accept quote')
     } finally { setActing(null) }
   }
   const rejectQuote = async () => {
@@ -94,18 +111,19 @@ export default function EnquiryDetailPage() {
       toast.success('Quote rejected')
       setQuote((q: any) => ({ ...q, status: 'rejected' }))
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Failed to reject quote')
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to reject quote')
     } finally { setActing(null) }
   }
 
   /* ── Payment options ── */
-  const quoteTotal = Number(quote?.total ?? quote?.amount ?? 0)
-  const minAmount  = Math.round(quoteTotal * 0.25)
+  const quoteTotal = quoteBaseAmount(quote)
+  const minAmount  = minimumQuoteAmount(quote)
   const payAmount  =
     option === 'full'   ? quoteTotal :
     option === 'min'    ? minAmount :
     Math.max(0, Number(custom) || 0)
-  const fees       = calculateFees(payAmount, settings?.platform_fee_pct ?? 5, settings?.gst_pct ?? 18, settings?.tds_pct ?? 0)
+  const feeSettings = paymentFeeSettings(settings)
+  const fees       = calculateFees(payAmount, feeSettings.platformFeePct, feeSettings.gstPct, feeSettings.tdsPct)
   const customValid = option !== 'custom' || (payAmount >= minAmount && payAmount <= quoteTotal)
 
   /* ── Payment flow (paymentsApi + verify) ── */
@@ -133,10 +151,14 @@ export default function EnquiryDetailPage() {
         amount:          fees.total,
         purpose:         'quote',
         enquiry_id:      Number(id),
+        quotation_id:    quoteId ?? undefined,
+        base_amount:     payAmount,
+        payment_option:  option === 'min' ? 'minimum' : option,
         idempotency_key: idempotencyKey,
       })
       const orderData = orderRes?.data?.data || orderRes?.data || {}
       const razorpayOrderId = orderData.razorpay_order_id
+      const gatewayAmount = Number(orderData.amount ?? fees.total)
 
       const key = settings?.razorpay_key
               ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
@@ -144,7 +166,7 @@ export default function EnquiryDetailPage() {
       await loadRazorpay()
       new window.Razorpay({
         key,
-        amount: Math.round(fees.total * 100),
+        amount: Math.round(gatewayAmount * 100),
         currency: 'INR',
         order_id: razorpayOrderId,
         name: 'Vayil',
@@ -161,13 +183,13 @@ export default function EnquiryDetailPage() {
             toast.success('Payment successful — funds held in escrow')
             router.push('/account/projects')
           } catch (verifyErr: any) {
-            setPayError(verifyErr?.response?.data?.error || 'Payment captured but verification failed — retry or contact support')
+            setPayError(verifyErr?.response?.data?.error || verifyErr?.response?.data?.message || 'Payment captured but verification failed — retry or contact support')
           } finally { setPaying(false) }
         },
         modal: { ondismiss: () => { setPaying(false); setPayError('Payment cancelled') } },
       }).open()
     } catch (err: any) {
-      setPayError(err?.response?.data?.error || err?.message || 'Failed to start payment')
+      setPayError(err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to start payment')
       setPaying(false)
     }
   }
@@ -214,7 +236,7 @@ export default function EnquiryDetailPage() {
             </div>
           </div>
 
-          {(!quote.status || quote.status === 'PENDING' || quote.status === 'SENT' || quote.status === 'sent') && (
+          {!isAcceptedQuote(quote) && isValidActionableQuoteStatus(quote.status) && (
             <div className="flex flex-col xs:flex-row gap-3 pt-2">
               <Button full onClick={acceptQuote} loading={acting === 'accept'}><CheckCircle className="w-4 h-4" /> Accept Quote</Button>
               <Button variant="outline" onClick={rejectQuote} loading={acting === 'reject'}><XCircle className="w-4 h-4" /> Reject</Button>
@@ -222,7 +244,7 @@ export default function EnquiryDetailPage() {
           )}
 
           {/* Payment options panel — visible once the quote is accepted */}
-          {(quote.status === 'ACCEPTED' || quote.status === 'accepted') && enquiry.status !== 'COMPLETED' && (
+          {isAcceptedQuote(quote) && String(enquiry.status).toUpperCase() !== 'COMPLETED' && (
             <div className="space-y-3 pt-2 border-t border-gray-100">
               <h3 className="text-sm font-bold text-navy">Choose how much to pay now</h3>
               <OptionCard active={option === 'full'} onClick={() => { setOption('full'); setPayError(null) }}
@@ -248,8 +270,8 @@ export default function EnquiryDetailPage() {
               {payAmount > 0 && (
                 <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 text-sm">
                   <Row label="Base"                                              value={formatCurrency(fees.base)} />
-                  <Row label={`Platform Fee (${settings?.platform_fee_pct ?? 5}%)`} value={formatCurrency(fees.platformFee)} />
-                  <Row label={`GST (${settings?.gst_pct ?? 18}%)`}                 value={formatCurrency(fees.gst)} />
+                  <Row label={`Platform Fee (${feeSettings.platformFeePct}%)`} value={formatCurrency(fees.platformFee)} />
+                  <Row label={`GST (${feeSettings.gstPct}%)`}                 value={formatCurrency(fees.gst)} />
                   <div className="h-px bg-gray-200 my-2" />
                   <Row label="Total Payable" value={formatCurrency(fees.total)} bold />
                 </div>

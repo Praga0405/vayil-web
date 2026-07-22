@@ -1649,7 +1649,9 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
       `SELECT
           CAST(COALESCE(e.id, e.enquiry_id) AS UNSIGNED) AS enquiry_id,
           CAST(e.customer_id AS UNSIGNED) AS customer_id,
-          cu.name AS customer_name,
+          COALESCE(NULLIF(cu.name, ''), NULLIF(cul.name, ''),
+                   NULLIF(TRIM(CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, ''))), ''),
+                   CONCAT('Customer #', e.customer_id)) AS customer_name,
           e.first_name,
           e.last_name,
           e.email,
@@ -1668,17 +1670,20 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
               WHEN e.status = 'rejected' THEN 'Rejected'
               ELSE e.status
             END) AS status_name,
-          v.company_name,
-          COALESCE(vs.service_title, vs.title) AS service_title,
-          vs.price,
-          COALESCE(vs.unit_name, vs.unit) AS unit_name,
-          vs.pricing_type,
-          vs.description,
-          COALESCE(vs.service_image, vs.thumbnail) AS service_image
+          COALESCE(v.company_name, vl.company_name) AS company_name,
+          COALESCE(vs.service_title, vs.title, vsl.service_title, vsl.title, e.category) AS service_title,
+          COALESCE(vs.price, vsl.price) AS price,
+          COALESCE(vs.unit_name, vs.unit, vsl.unit_name, vsl.unit) AS unit_name,
+          COALESCE(vs.pricing_type, vsl.pricing_type) AS pricing_type,
+          COALESCE(vs.description, vsl.description, e.description) AS description,
+          COALESCE(vs.service_image, vs.thumbnail, vsl.service_image, vsl.thumbnail, '') AS service_image
         FROM enquiries e
-        LEFT JOIN customers cu ON cu.id = e.customer_id OR cu.customer_id = e.customer_id
-        LEFT JOIN vendors v ON v.id = e.vendor_id OR v.vendor_id = e.vendor_id
-        LEFT JOIN vendor_services vs ON vs.id = e.service_id OR vs.vendor_service_id = e.service_id
+        LEFT JOIN customers cu ON cu.customer_id = e.customer_id
+        LEFT JOIN customers cul ON cul.id = e.customer_id AND cu.customer_id IS NULL
+        LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
+        LEFT JOIN vendors vl ON vl.id = e.vendor_id AND v.vendor_id IS NULL
+        LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id
+        LEFT JOIN vendor_services vsl ON vsl.id = e.service_id AND vs.vendor_service_id IS NULL
         LEFT JOIN (
           SELECT id, MAX(status_name) AS status_name
             FROM status_master
@@ -1686,7 +1691,7 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
            GROUP BY id
         ) sm ON sm.id = CAST(${enquiryStatusExpr('e')} AS UNSIGNED)
        WHERE e.vendor_id = :vendorId
-         AND COALESCE(vs.is_deleted, 0) = 0
+         AND COALESCE(vs.is_deleted, vsl.is_deleted, 0) = 0
        ORDER BY CAST(COALESCE(e.id, e.enquiry_id) AS UNSIGNED) DESC`,
       { vendorId },
     );
@@ -1803,7 +1808,7 @@ legacyVendorRouter.post('/vendorEnuqiryList', async (req: AuthRequest, res, next
             order_step_logs: orderLogs,
           }],
         };
-        if (Number(stepLog?.step) === 1) {
+        if (!stepLog || Number(stepLog.step) === 1) {
           new_enquiry.push(orderData);
         } else if (Number(stepLog?.step) === 2) {
           ongoing.push(orderData);

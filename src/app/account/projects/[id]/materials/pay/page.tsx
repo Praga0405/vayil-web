@@ -7,6 +7,7 @@ import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
 import { IS_DEMO_MODE } from '@/lib/demoMode'
+import { paymentFeeSettings } from '@/lib/quote-payment'
 
 // Customer-side projection of project + materials so we don't depend
 // on the vendor-only useLiveJob hook (was triggering 403s).
@@ -15,8 +16,12 @@ function useCustomerJob(id: string) {
   const [loading, setLoading] = useState(true)
   useEffect(() => {
     if (!id) return
-    Promise.all([customerApi.getProjectDetail(id), customerApi.listMaterials(id)])
-      .then(([pr, mr]: any) => {
+    Promise.all([
+      customerApi.getProjectDetail(id),
+      customerApi.listMaterials(id),
+      customerApi.getSettings().catch(() => null),
+    ])
+      .then(([pr, mr, sr]: any) => {
         const project = pr.data?.project ?? null
         const plan    = Array.isArray(pr.data?.plan) ? pr.data.plan : []
         const planStatus = plan[0]?.customer_status === 'approved' ? 'APPROVED'
@@ -27,7 +32,8 @@ function useCustomerJob(id: string) {
           rate: Number(m.rate), total: Number(m.total), amount: Number(m.total),
           status: String(m.status).toUpperCase(),
         }))
-        setJob({ id: project?.order_id, plan_status: planStatus, materials })
+        const settings = sr?.data?.data ?? sr?.data?.result ?? sr?.data ?? {}
+        setJob({ id: project?.order_id, plan_status: planStatus, materials, settings })
       })
       .catch(() => setJob(null))
       .finally(() => setLoading(false))
@@ -93,7 +99,8 @@ export default function MaterialsPaymentPage() {
   const toggle = (mid: number) => setSelected(s => s.includes(mid) ? s.filter(x => x !== mid) : [...s, mid])
   const items   = unpaid.filter((m: any) => selected.includes(m.id))
   const subtotal = items.reduce((s: any, m: any) => s + m.total, 0)
-  const fees     = calculateFees(subtotal, 5, 18, 0)
+  const feeSettings = paymentFeeSettings(job.settings)
+  const fees     = calculateFees(subtotal, feeSettings.platformFeePct, feeSettings.gstPct, feeSettings.tdsPct)
 
   const pay = async () => {
     if (items.length === 0) { toast.error('Select at least one material item'); return }
@@ -118,13 +125,13 @@ export default function MaterialsPaymentPage() {
         idempotency_key: idempotencyKey,
       })
       const orderData = orderRes?.data?.data || orderRes?.data || {}
-      const settings: any = await customerApi.getSettings().catch(() => ({}))
-      const key = settings?.data?.data?.razorpay_key
-              ?? settings?.data?.result?.razorpay_key
+      const gatewayAmount = Number(orderData.amount ?? fees.total)
+      const key = job.settings?.razorpay_key
+              ?? job.settings?.payment_key
               ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? ''
       await loadRazorpay()
       new window.Razorpay({
-        key, amount: Math.round(fees.total * 100), currency: 'INR',
+        key, amount: Math.round(gatewayAmount * 100), currency: 'INR',
         order_id: orderData.razorpay_order_id, name: 'Vayil',
         description: `Materials payment for ${items.length} item${items.length !== 1 ? 's' : ''}`,
         theme: { color: '#E8943A' },
@@ -139,13 +146,13 @@ export default function MaterialsPaymentPage() {
             toast.success('Materials paid — vendor will start procurement')
             router.push(`/account/projects/${id}`)
           } catch (verifyErr: any) {
-            setPayError(verifyErr?.response?.data?.error || 'Payment captured but verification failed — retry or contact support')
+            setPayError(verifyErr?.response?.data?.error || verifyErr?.response?.data?.message || 'Payment captured but verification failed — retry or contact support')
           } finally { setSubmitting(false) }
         },
         modal: { ondismiss: () => { setSubmitting(false); setPayError('Payment cancelled') } },
       }).open()
     } catch (err: any) {
-      setPayError(err?.response?.data?.error || err?.message || 'Failed to start payment')
+      setPayError(err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to start payment')
       setSubmitting(false)
     }
   }
@@ -193,8 +200,8 @@ export default function MaterialsPaymentPage() {
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2 text-sm">
             <h3 className="font-bold text-navy mb-1">Payment summary</h3>
             <Row label="Subtotal"            value={formatCurrency(fees.base)} />
-            <Row label="Platform Fee (5%)"   value={formatCurrency(fees.platformFee)} />
-            <Row label="GST (18%)"           value={formatCurrency(fees.gst)} />
+            <Row label={`Platform Fee (${feeSettings.platformFeePct}%)`} value={formatCurrency(fees.platformFee)} />
+            <Row label={`GST (${feeSettings.gstPct}%)`} value={formatCurrency(fees.gst)} />
             <div className="h-px bg-gray-100 my-2" />
             <Row label="Total Payable"       value={formatCurrency(fees.total)} bold />
           </div>
