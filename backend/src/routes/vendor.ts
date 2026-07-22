@@ -5,6 +5,7 @@ import { requireApprovedVendor, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
 import * as vendorSvc from '../services/vendorService';
+import * as notifSvc from '../services/notificationService';
 import { isAcceptedQuoteStatus } from '../services/quotePayment';
 import { calculateTax } from '../services/tax';
 
@@ -679,6 +680,35 @@ vendorRouter.put('/projects/:id/materials/:materialId', async (req: AuthRequest,
   } catch (err) { next(err); }
 });
 
+vendorRouter.post('/projects/:id/materials/:materialId/payment-request', async (req: AuthRequest, res, next) => {
+  try {
+    const material = await one<any>(
+      `SELECT m.*, o.customer_id, o.vendor_id
+         FROM materials m
+         JOIN orders o ON o.order_id = m.order_id
+        WHERE m.material_id = :materialId AND m.order_id = :orderId
+        LIMIT 1`,
+      { materialId: req.params.materialId, orderId: req.params.id },
+    );
+    if (!material || Number(material.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Material not found');
+    if (String(material.status).toUpperCase() === 'PAID') throw new ApiError(409, 'Material has already been paid');
+    const alreadyRequested = String(material.status).toUpperCase() === 'AWAITING_PAYMENT';
+    if (!alreadyRequested) {
+      await exec(
+        `UPDATE materials SET status = 'AWAITING_PAYMENT' WHERE material_id = :materialId AND order_id = :orderId`,
+        { materialId: req.params.materialId, orderId: req.params.id },
+      );
+      await notifSvc.notify({
+        recipient_type: 'customer', recipient_id: material.customer_id,
+        type: 'material_payment_request', title: 'Material payment requested',
+        body: `${material.name} is ready for payment`,
+        data: { order_id: material.order_id, material_id: material.material_id, amount: Number(material.total) },
+      });
+    }
+    ok(res, { material_id: Number(material.material_id), status: 'awaiting_payment', amount: Number(material.total), notification_sent: !alreadyRequested });
+  } catch (err) { next(err); }
+});
+
 /* ── Milestone updates / completion / payment-request ───── */
 vendorRouter.post('/milestones/:id/updates', async (req: AuthRequest, res, next) => {
   try {
@@ -727,6 +757,16 @@ vendorRouter.post('/milestones/:id/payment-request', async (req: AuthRequest, re
       { id: req.params.id },
     );
     if (!owner || Number(owner.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Milestone not found');
+    const paid = await one<any>(
+      `SELECT COALESCE(SUM(amount), 0) AS total
+         FROM payment_intents
+        WHERE order_id = :orderId AND purpose = 'quote' AND status IN ('escrow_held', 'released')`,
+      { orderId: owner.order_id },
+    );
+    const order = await one<any>('SELECT amount FROM orders WHERE order_id = :id', { id: owner.order_id });
+    if (Number(paid?.total ?? 0) >= Number(order?.amount ?? 0) && Number(order?.amount ?? 0) > 0) {
+      throw new ApiError(409, 'The quote has already been paid in full');
+    }
     await exec(
       `UPDATE order_plan SET customer_status = 'awaiting_payment' WHERE plan_id = :id`,
       { id: req.params.id },

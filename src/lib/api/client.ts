@@ -346,6 +346,8 @@ export const vendorApi = {
                       vendorClient.post(`/projects/${id}/materials`, data),
   updateMaterial:   (id: string | number, materialId: string | number, data: Record<string, unknown>) =>
                       vendorClient.put(`/projects/${id}/materials/${materialId}`, data),
+  requestMaterialPayment: (id: string | number, materialId: string | number) =>
+                      vendorClient.post(`/projects/${id}/materials/${materialId}/payment-request`, {}),
 
   // Milestones
   postMilestoneUpdate:  (milestoneId: string | number, data: { comment?: string; image_urls?: string[] }) =>

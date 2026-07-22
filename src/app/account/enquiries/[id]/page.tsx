@@ -62,12 +62,14 @@ export default function EnquiryDetailPage() {
   const [option, setOption]         = useState<Option>('full')
   const [custom, setCustom]         = useState('')
   const [payError, setPayError]     = useState<string | null>(null)
+  const [paymentCompleted, setPaymentCompleted] = useState(false)
 
   useEffect(() => {
     Promise.all([
       customerApi.getEnquiryDetail(Number(id)).catch(() => null),
       customerApi.getSettings().catch(() => null),
-    ]).then(([er, sr]) => {
+      customerApi.listPayments().catch(() => null),
+    ]).then(([er, sr, pr]: any[]) => {
       const payload = er?.data?.data || er?.data?.result || er?.data || {}
       const e = payload?.enquiry ?? payload
       setEnquiry(normalizeCustomerEnquiry({ ...e, quotes: payload?.quotes ?? e?.quotes }))
@@ -75,6 +77,12 @@ export default function EnquiryDetailPage() {
       if (currentQuote) setQuote(currentQuote)
       else if (e.quote) setQuote(e.quote)
       setSettings(sr?.data?.data || sr?.data?.result || sr?.data || {})
+      const rows = Array.isArray(pr?.data?.payments) ? pr.data.payments : []
+      const paidStatuses = new Set(['escrow_held', 'released', 'success', 'paid', 'completed'])
+      setPaymentCompleted(rows.some((p: any) =>
+        paidStatuses.has(String(p.status ?? p.payment_status ?? '').toLowerCase()) &&
+        Number(p.enquiry_id) === Number(id)
+      ))
     }).finally(() => setLoading(false))
 
     customerApi.getQuote(Number(id)).then((r: any) => {
@@ -127,8 +135,22 @@ export default function EnquiryDetailPage() {
   const customValid = option !== 'custom' || (payAmount >= minAmount && payAmount <= quoteTotal)
 
   /* ── Payment flow (paymentsApi + verify) ── */
+  const paymentRowsForQuote = async () => {
+    const response: any = await customerApi.listPayments().catch(() => null)
+    const rows = Array.isArray(response?.data?.payments) ? response.data.payments : []
+    const paidStatuses = new Set(['escrow_held', 'released', 'success', 'paid', 'completed'])
+    return rows.some((p: any) =>
+      paidStatuses.has(String(p.status ?? p.payment_status ?? '').toLowerCase()) &&
+      (Number(p.enquiry_id) === Number(id) || Number(p.quote_id ?? p.quotation_id) === Number(quoteId))
+    )
+  }
   const initiatePayment = async () => {
     if (!quote) return
+    if (await paymentRowsForQuote()) {
+      setPaymentCompleted(true)
+      setPayError('This quote has already been paid.')
+      return
+    }
     if (!customValid) {
       setPayError(`Custom amount must be between ${formatCurrency(minAmount)} and ${formatCurrency(quoteTotal)}`)
       return
@@ -245,7 +267,7 @@ export default function EnquiryDetailPage() {
           )}
 
           {/* Payment options panel — visible once the quote is accepted */}
-          {isAcceptedQuote(quote) && String(enquiry.status).toUpperCase() !== 'COMPLETED' && (
+          {isAcceptedQuote(quote) && String(enquiry.status).toUpperCase() !== 'COMPLETED' && !paymentCompleted && (
             <div className="space-y-3 pt-2 border-t border-gray-100">
               <h3 className="text-sm font-bold text-navy">Choose how much to pay now</h3>
               <OptionCard active={option === 'full'} onClick={() => { setOption('full'); setPayError(null) }}
@@ -298,6 +320,11 @@ export default function EnquiryDetailPage() {
               <Button full loading={paying} onClick={initiatePayment} disabled={!customValid || payAmount <= 0}>
                 <CreditCard className="w-4 h-4" /> {payError ? 'Retry payment' : `Pay ${formatCurrency(fees.total)}`}
               </Button>
+            </div>
+          )}
+          {isAcceptedQuote(quote) && paymentCompleted && (
+            <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-sm text-green-800">
+              Initial payment completed for this quote. No further quote payment is required.
             </div>
           )}
         </div>

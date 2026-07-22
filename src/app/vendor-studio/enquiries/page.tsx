@@ -34,9 +34,7 @@ export default function VendorEnquiriesListPage() {
                   tab === value ? 'bg-navy text-white shadow-sm' : 'text-gray-500 hover:text-navy'
                 }`}>
                 {label}
-                {tab === value && enquiries.filter(e => e.workflow_bucket === value).length > 0 && (
-                  <span className="ml-1.5 text-xs opacity-75">({enquiries.filter(e => e.workflow_bucket === value).length})</span>
-                )}
+                <span className="ml-1.5 text-xs opacity-75">({enquiries.filter(e => e.workflow_bucket === value).length})</span>
               </button>
             ))}
           </div>

@@ -126,6 +126,12 @@ export default function ProjectDetailPage() {
                     ? `Plan approved · ${completedCount} of ${plan.length} milestones completed`
                     : `${plan.length} milestones · awaiting your approval`}
                 </p>
+                {planStatus === 'REVISION_REQUESTED' && plan.find((m: any) => m.revision_reason)?.revision_reason && (
+                  <div className="mb-3 rounded-xl border border-orange/30 bg-orange/5 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-orange">Change request</p>
+                    <p className="mt-1 text-sm text-navy">{plan.find((m: any) => m.revision_reason)?.revision_reason}</p>
+                  </div>
+                )}
                 <ol className="space-y-3">
                   {plan.map((m, i) => (
                     <li key={m.plan_id} className="flex flex-col xs:flex-row xs:items-start gap-3 pb-3 border-b border-gray-100 last:border-0">

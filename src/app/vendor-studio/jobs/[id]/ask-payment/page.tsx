@@ -23,7 +23,8 @@ export default function AskPaymentPage() {
   if (loading) return <PageLoader />
   if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
 
-  const eligibleMilestones = job.milestones.filter(m => m.status === 'IN_PROGRESS' || m.status === 'PENDING')
+  const fullyPaid = job.total > 0 && job.paid >= job.total
+  const eligibleMilestones = fullyPaid ? [] : job.milestones.filter(m => m.status === 'IN_PROGRESS' || m.status === 'PENDING')
   const eligibleMaterials  = job.materials.filter(m => m.status === 'UNPAID')
 
   const toggle = (sel: Selection) => {
@@ -44,9 +45,13 @@ export default function AskPaymentPage() {
       // /customer/projects/:id/materials/payment-order flow; vendor doesn't
       // need to "request" those — flagging them awaiting_payment is enough.
       const milestoneIds = selected.filter(s => s.type === 'milestone').map(s => s.id)
+      const materialIds = selected.filter(s => s.type === 'material').map(s => s.id)
       await demoOrLive(async () => {
         for (const mid of milestoneIds) {
           await vendorApi.requestMilestonePayment(mid)
+        }
+        for (const materialId of materialIds) {
+          await vendorApi.requestMaterialPayment(id, materialId)
         }
       })
       toast.success(`Payment request for ${formatCurrency(total)} sent to customer`)

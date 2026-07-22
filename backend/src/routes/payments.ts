@@ -110,6 +110,24 @@ async function resolveExpectedAmount(
     );
     const quote = quotes.find((row) => isAcceptedQuoteStatus(row.status, row.status_int));
     if (!quote) throw new ApiError(400, 'No quote available for this enquiry');
+    const paidIntent = await one<any>(
+      `SELECT intent_id FROM payment_intents
+        WHERE enquiry_id = :id AND customer_id = :cid AND purpose = 'quote'
+          AND status IN ('escrow_held', 'released')
+        LIMIT 1`,
+      { id: args.enquiry_id, cid: args.customerId },
+    );
+    const paidLegacy = await one<any>(
+      `SELECT pl.id
+         FROM payment_log pl
+         JOIN orders o ON o.order_id = pl.order_id
+        WHERE o.enquiry_id = :id AND pl.customer_id = :cid
+          AND LOWER(COALESCE(pl.payment_status, pl.status, '')) IN ('success', 'paid', 'completed')
+          AND LOWER(COALESCE(pl.payment_type, pl.notes, 'place_order')) = 'place_order'
+        LIMIT 1`,
+      { id: args.enquiry_id, cid: args.customerId },
+    );
+    if (paidIntent || paidLegacy) throw new ApiError(409, 'Initial payment already completed for this quote');
     const baseAmount = resolveQuotePaymentBase({
       quoteAmount: Number(quote.amount),
       advanceAmount: quote.advance_amount,

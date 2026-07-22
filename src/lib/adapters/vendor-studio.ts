@@ -164,6 +164,9 @@ export function adaptJob(
        : plan.length > 0                                            ? 'APPROVED'
        :                                                              'NOT_STARTED')
   const orderIdResolved = (order as any).order_id ?? (order as any).id
+  const revisionReason = plan.find(p => String((p as any).customer_status ?? '').toLowerCase() === 'revision_requested')
+    ? (plan.find(p => String((p as any).customer_status ?? '').toLowerCase() === 'revision_requested') as any)?.revision_reason ?? null
+    : null
   return {
     id:           orderIdResolved,
     order_id:     orderIdResolved,
@@ -173,6 +176,7 @@ export function adaptJob(
     paid,
     pending:      Math.max(0, total - paid),
     plan_status:  planStatus,
+    revision_reason: revisionReason,
     milestones,
     materials:    [],   // backend doesn't have a materials table yet
     created_at:   order.created_at ?? new Date().toISOString(),
