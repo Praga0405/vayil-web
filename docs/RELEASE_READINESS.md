@@ -4,7 +4,7 @@ This file is the single checklist for moving from dev/demo to
 production. Every flag below is a deliberate dev-mode convenience —
 **leaving any of them on in production is a bug**.
 
-Last updated: 2026-06-27 · v4.5.58.
+Last updated: 2026-07-22 · v4.5.97.
 
 ## ⚠ Critical — must be flipped
 
@@ -22,6 +22,7 @@ Last updated: 2026-06-27 · v4.5.58.
 | Bypass | Where | Demo state | Production requirement | Risk |
 |---|---|---|---|---|
 | Unauthenticated vendor status update | `backend/src/routes/adminMobile.ts` and `backend/src/routes/admin.ts` -> `POST /Admin/VendorStatusUpdate` | Route is mounted before admin auth so testers can update newly registered vendors without staff JWTs. | Move both route mounts back behind admin auth before production. | Anyone with the endpoint URL could set a vendor to `pending`, `verified`, `pending_approval`, `approved`, or `rejected`. |
+| Standalone demo-login token promotion | `src/lib/api/client.ts` | A `dev_customer_token_<phone>` or `dev_vendor_token_<phone>` marker is silently exchanged through `/auth/otp/send` + `/auth/otp/verify` using `NEXT_PUBLIC_OTP_BYPASS_CODE` (default `123456`) before protected API calls. This keeps the current one-step demo login while allowing real enquiry/payment APIs. | Replace the standalone demo login pages with the canonical OTP UI, then remove marker promotion. Disable `OTP_BYPASS` and `NEXT_PUBLIC_OTP_BYPASS` together. | The known demo code can authenticate any eligible demo account while backend bypass is enabled. Promotion itself does not bypass the backend; it stops working when backend bypass is disabled. |
 
 ## Required to be set in production (currently demo-friendly defaults)
 
@@ -63,6 +64,10 @@ Last updated: 2026-06-27 · v4.5.58.
       reachable from the vendor side.
 - [ ] Revoke / rotate any test secrets that were shared in chat or
       Slack during the demo phase.
+- [ ] Remove the standalone demo-token promotion after replacing
+      `/customer/login` and `/vendor/login` with the canonical OTP flow.
+- [ ] Confirm `JWT_SECRET` and `STAFF_JWT_SECRET` are independently generated,
+      at least 32 characters, and do not produce fallback-secret warnings.
 
 ## Rotation reminders (already-exposed test secrets)
 
@@ -73,6 +78,22 @@ Last updated: 2026-06-27 · v4.5.58.
 - TiDB Cloud password used during seeding (`CQVwcg…`) — rotate via
   TiDB Cloud → Connect → Generate Password, then update Vercel
   `DB_PASSWORD`.
+
+## Current demo payment compatibility (v4.5.97)
+
+- Production payment pages always call the real Razorpay create-order and
+  verify endpoints. They no longer inherit the broad frontend `IS_DEMO_MODE`
+  value that is true when same-origin API rewrites are used.
+- Local development can still simulate checkout through
+  `IS_PAYMENT_DEMO_MODE`; this flag is hard-disabled when
+  `NODE_ENV=production`.
+- The current one-step demo login is intentionally unchanged for the scheduled
+  demo. Its synthetic token is promoted to a signed backend JWT on the first
+  protected request, using the existing OTP bypass configuration.
+- Vercel runtime logs observed during the 2026-07-22 investigation warned that
+  JWT secrets were missing/short and fallback demo values were active. Set and
+  rotate both JWT secrets before a real-user launch even though the current
+  demo remains operational.
 
 ---
 

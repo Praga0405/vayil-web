@@ -1,5 +1,115 @@
 # Release Notes
 
+## v4.5.97 - Demo-login Razorpay compatibility (2026-07-22)
+
+### Scope
+
+This release restores real Razorpay checkout on the customer enquiry page for
+the scheduled demo while deliberately preserving the existing one-step demo
+login and the `123456` OTP bypass. No customer/vendor login page, backend OTP
+handler, authentication condition, or mobile API contract was changed.
+
+Affected web surfaces:
+
+- `/account/enquiries/:id` quote acceptance, rejection, and Full/Minimum/Custom
+  payment;
+- `/account/enquiries/:id/pay` dedicated quote checkout;
+- `/account/projects/:id/materials` live material selection; and
+- `/account/projects/:id/materials/pay` material Razorpay checkout.
+
+### Root Cause Analysis
+
+Two independent frontend compatibility defects blocked the payment flow.
+
+#### The standalone demo login stored a marker, not a JWT
+
+- `/customer/login` intentionally stores `dev_customer_token_<phone>` and the
+  vendor equivalent stores `dev_vendor_token_<phone>` to keep the one-step
+  demo login experience.
+- Protected enquiry, quote, project, and payment APIs require a signed backend
+  JWT. Axios sent the marker in `Authorization: Bearer ...`, so the backend
+  correctly returned HTTP 401 before Razorpay order creation was reached.
+- Vercel runtime logs reproduced the failure on the supplied demo account:
+  `GET /api/customers/enquiries/420001`,
+  `GET /api/customers/quotes/420001`, and
+  `POST /api/customer/enquiryList` all returned 401.
+- The backend OTP path itself was healthy. Sending and verifying the configured
+  demo OTP returned a signed JWT for customer `450001`, and that JWT could load
+  enquiry `420001` and its accepted quotation.
+
+#### Production payment pages inherited the broad UI demo flag
+
+- `IS_DEMO_MODE` becomes true when `NEXT_PUBLIC_API_URL` is absent. That was
+  originally used to identify an application with no backend.
+- Production now intentionally uses same-origin Next.js rewrites, so an absent
+  public API URL does not mean the backend is unavailable.
+- Quote and material payment pages still used the broad flag. They therefore
+  displayed a fake payment-success toast and skipped Razorpay even after the
+  authentication problem was removed.
+
+### Implementation
+
+#### Transparent demo-token promotion
+
+- The shared API client recognizes only the explicit
+  `dev_customer_token_<phone>` and `dev_vendor_token_<phone>` marker formats.
+- Before the first protected call, it invokes the existing canonical
+  `/auth/otp/send` and `/auth/otp/verify` endpoints with the configured demo
+  code, validates that the result is JWT-shaped, and replaces the marker in
+  local storage and the route-guard cookie.
+- Simultaneous enquiry/settings/quote requests share one in-flight promotion,
+  preventing duplicate OTP verification races.
+- Normal signed JWTs, operations tokens, the login UI, and backend OTP logic
+  are unchanged. This is not a new authentication bypass: promotion succeeds
+  only while the backend's existing `OTP_BYPASS` accepts the configured code.
+
+#### Payment-only production guard
+
+- Added `IS_PAYMENT_DEMO_MODE`, which permits mock payment behavior only in a
+  non-production build.
+- Production quote loading, quote acceptance/rejection, Razorpay order
+  creation, Razorpay verification, material loading, and material payment now
+  always use the real backend.
+- The broader `IS_DEMO_MODE` behavior remains in place for the scheduled demo,
+  so the visible OTP/demo login experience does not change.
+
+### Impact and Compatibility
+
+| Area | Before | After |
+|---|---|---|
+| Demo login | One-step login created a marker rejected by protected APIs. | Same one-step UI; the first API call silently exchanges the marker for a signed JWT. |
+| Enquiry page | Redirected to login after API 401. | Loads the authenticated enquiry and accepted quotation. |
+| Quote payment | Production could report mock success without opening Razorpay. | Full, Minimum, and Custom payment create a server order and open Razorpay. |
+| Quote decisions | Production could fake accept/reject under the broad demo flag. | Accept/reject reaches the backend before the UI reports success. |
+| Materials | Production could use mock rows and fake payment success. | Material rows and payment orders come from the real backend. |
+| OTP/mobile APIs | At risk of regression if login logic was rewritten. | No endpoint, payload, condition, response, or mobile flow changed. |
+
+### Investigation Evidence
+
+- Authenticated `GET /customers/enquiries/420001` returned customer `450001`,
+  vendor `510001`, and the accepted quotation `450001` with base amount
+  `200.00`.
+- A non-capturing create-order diagnostic produced payment intent `450001` and
+  Razorpay test order `order_TGR067bTNXPrIM` for `212.00`. No Razorpay payment
+  was captured and no escrow/order completion was performed by that diagnostic.
+- The regression command `npm run check:july22-demo-payment` statically guards
+  marker recognition, OTP endpoint reuse, concurrent promotion, production
+  payment mode, all four payment surfaces, and live quote accept/reject calls.
+
+### Release Readiness
+
+This compatibility behavior is temporary for the demo window. Before a
+real-user launch:
+
+1. Replace the standalone one-step customer/vendor login pages with the
+   canonical OTP UI and remove synthetic-token promotion.
+2. Set backend/frontend OTP bypass flags to false together and confirm a real
+   SMS login.
+3. Set and rotate strong independent `JWT_SECRET` and `STAFF_JWT_SECRET`
+   values; the investigation observed fallback/short-secret warnings.
+4. Rotate previously shared Razorpay test credentials, configure live keys,
+   and run the signed ₹1 payment/webhook smoke test in the readiness checklist.
+
 ## v4.5.96 - July 21 enquiry, quote-payment, and project-flow parity (2026-07-22)
 
 ### Scope

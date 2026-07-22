@@ -6,7 +6,7 @@ import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
-import { IS_DEMO_MODE } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE } from '@/lib/demoMode'
 import {
   minimumQuoteAmount,
   paymentFeeSettings,
@@ -50,7 +50,7 @@ export default function PaymentOptionSheetPage() {
   useEffect(() => {
     if (!id) return
     let cancelled = false
-    if (IS_DEMO_MODE) {
+    if (IS_PAYMENT_DEMO_MODE) {
       // Demo: use the mock job total so the full Razorpay-options sheet
       // is exercisable without a real quote in the database.
       setQuote({ quotation_id: 1, amount: 850000, status: 'accepted' })
@@ -106,8 +106,8 @@ export default function PaymentOptionSheetPage() {
     setSubmitting(true)
     setError(null)
 
-    // Demo mode: skip Razorpay entirely and fake a successful escrow hold.
-    if (IS_DEMO_MODE) {
+    // Local-only demo mode: deployed builds must create a real Razorpay order.
+    if (IS_PAYMENT_DEMO_MODE) {
       await new Promise(r => setTimeout(r, 800))
       toast.success('Payment successful — funds held in escrow (demo)')
       router.push('/account/projects')

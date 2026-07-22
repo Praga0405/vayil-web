@@ -15,6 +15,14 @@ const OPT_OUT    = process.env.NEXT_PUBLIC_USE_MOCK_DATA === 'false'
 export const IS_DEMO_MODE = USE_MOCK || (NO_BACKEND && !OPT_OUT)
 
 /**
+ * Payments must never be simulated by a production build. The deployed app
+ * uses same-origin APIs, which makes NO_BACKEND true even though the backend
+ * is available through Next.js rewrites. Keep the broader demo behavior for
+ * the current OTP/demo UX, but restrict payment mocks to local development.
+ */
+export const IS_PAYMENT_DEMO_MODE = process.env.NODE_ENV !== 'production' && IS_DEMO_MODE
+
+/**
  * OTP bypass flag — independent of IS_DEMO_MODE. Real backend, real
  * DB writes, but OTP send/verify is short-circuited so testers can
  * sign in with the well-known dev code (default `123456`) without
@@ -37,6 +45,15 @@ export const SHOW_DEV_OTP_BANNER = IS_DEMO_MODE || OTP_BYPASS_ON
  */
 export async function demoOrLive<T>(realCall: () => Promise<T>, fakeDelayMs = 400): Promise<T> {
   if (IS_DEMO_MODE) {
+    await new Promise(res => setTimeout(res, fakeDelayMs))
+    return undefined as unknown as T
+  }
+  return realCall()
+}
+
+/** Payment-workflow variant: production builds always execute the real API. */
+export async function paymentDemoOrLive<T>(realCall: () => Promise<T>, fakeDelayMs = 400): Promise<T> {
+  if (IS_PAYMENT_DEMO_MODE) {
     await new Promise(res => setTimeout(res, fakeDelayMs))
     return undefined as unknown as T
   }

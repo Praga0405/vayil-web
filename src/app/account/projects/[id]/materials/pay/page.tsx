@@ -6,7 +6,7 @@ import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
-import { IS_DEMO_MODE } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE } from '@/lib/demoMode'
 import { paymentFeeSettings } from '@/lib/quote-payment'
 
 // Customer-side projection of project + materials so we don't depend
@@ -106,7 +106,7 @@ export default function MaterialsPaymentPage() {
     if (items.length === 0) { toast.error('Select at least one material item'); return }
     setSubmitting(true); setPayError(null)
 
-    if (IS_DEMO_MODE) {
+    if (IS_PAYMENT_DEMO_MODE) {
       await new Promise(r => setTimeout(r, 800))
       toast.success('Materials paid — vendor will start procurement (demo)')
       router.push(`/account/projects/${id}`)

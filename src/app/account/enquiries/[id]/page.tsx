@@ -5,13 +5,13 @@
  * Payment migrated from legacy `placeOrder + paymentUpdate` to the canonical
  * `paymentsApi.createOrder` → Razorpay → `paymentsApi.verify` flow with
  * idempotency-key plumbing, escrow messaging, and Full / 25%-min / Custom
- * payment options + GST/platform-fee preview. Demo mode short-circuits
- * Razorpay entirely so the flow stays exercisable without a live backend.
+ * payment options + GST/platform-fee preview. Local demo mode short-circuits
+ * Razorpay; production builds always use the real test/live gateway flow.
  */
 import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { customerApi, paymentsApi } from '@/lib/api/client'
-import { IS_DEMO_MODE, demoOrLive } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE, paymentDemoOrLive } from '@/lib/demoMode'
 import { PageLoader, InfoRow, StatusBadge, Amount, Button } from '@/components/ui'
 import { formatDate, formatCurrency, calculateFees } from '@/lib/utils'
 import {
@@ -95,7 +95,7 @@ export default function EnquiryDetailPage() {
     if (!quote || !quoteId) return
     setActing('accept')
     try {
-      await demoOrLive(() => customerApi.acceptQuote(quoteId))
+      await paymentDemoOrLive(() => customerApi.acceptQuote(quoteId))
       toast.success('Quote accepted')
       setEnquiry((e: any) => ({ ...e, status: 'accepted' }))
       setQuote((q: any) => ({ ...q, status: 'accepted' }))
@@ -107,7 +107,7 @@ export default function EnquiryDetailPage() {
     if (!quote || !quoteId) return
     setActing('reject')
     try {
-      await demoOrLive(() => customerApi.rejectQuote(quoteId))
+      await paymentDemoOrLive(() => customerApi.rejectQuote(quoteId))
       toast.success('Quote rejected')
       setQuote((q: any) => ({ ...q, status: 'rejected' }))
     } catch (err: any) {
@@ -135,7 +135,7 @@ export default function EnquiryDetailPage() {
     }
     setPaying(true); setPayError(null)
 
-    if (IS_DEMO_MODE) {
+    if (IS_PAYMENT_DEMO_MODE) {
       await new Promise(r => setTimeout(r, 800))
       toast.success('Payment successful — funds held in escrow (demo)')
       router.push('/account/projects')

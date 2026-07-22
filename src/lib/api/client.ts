@@ -51,11 +51,73 @@ const BASE =
 const getToken    = () => typeof window !== 'undefined' ? localStorage.getItem('vayil_token')     : null
 const getOpsToken = () => typeof window !== 'undefined' ? localStorage.getItem('vayil_ops_token') : null
 
+/* ── Demo-login token compatibility ─────────────────────────────
+ * The standalone customer/vendor login pages intentionally retain their
+ * one-step demo UX for the current demo window. They store a short-lived
+ * marker (`dev_<role>_token_<phone>`) rather than a signed JWT. Protected
+ * APIs cannot accept that marker, so promote it once through the existing
+ * OTP endpoints before the first authenticated request.
+ *
+ * This does not bypass backend authentication: promotion succeeds only while
+ * the backend's explicit OTP_BYPASS/OTP_BYPASS_CODE configuration accepts the
+ * code. Concurrent page-load requests share one promotion call.
+ */
+type DemoLoginRole = 'customer' | 'vendor'
+
+interface DemoLoginMarker {
+  phone: string
+  userType: DemoLoginRole
+}
+
+let demoTokenPromotion: { marker: string; promise: Promise<string> } | null = null
+
+function parseDemoLoginMarker(token: string): DemoLoginMarker | null {
+  const match = /^dev_(customer|vendor)_token_([0-9]{8,15})$/.exec(token)
+  return match ? { userType: match[1] as DemoLoginRole, phone: match[2] } : null
+}
+
+function persistPromotedToken(token: string): void {
+  localStorage.setItem('vayil_token', token)
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `vayil_token=${token}; path=/; max-age=86400; SameSite=Lax${secure}`
+}
+
+async function promoteDemoLoginToken(marker: string): Promise<string> {
+  if (typeof window === 'undefined') return marker
+  const demoLogin = parseDemoLoginMarker(marker)
+  if (!demoLogin) return marker
+
+  if (demoTokenPromotion?.marker === marker) return demoTokenPromotion.promise
+
+  const promise = (async () => {
+    await axios.post(`${BASE}/auth/otp/send`, demoLogin)
+    const verifyResponse = await axios.post(`${BASE}/auth/otp/verify`, {
+      ...demoLogin,
+      otp: process.env.NEXT_PUBLIC_OTP_BYPASS_CODE || '123456',
+    })
+    const body = verifyResponse?.data?.data ?? verifyResponse?.data ?? {}
+    const signedToken = body?.token
+    if (typeof signedToken !== 'string' || signedToken.split('.').length !== 3) {
+      throw new Error('Demo login could not be promoted to an authenticated session')
+    }
+    persistPromotedToken(signedToken)
+    return signedToken
+  })()
+
+  demoTokenPromotion = { marker, promise }
+  try {
+    return await promise
+  } finally {
+    if (demoTokenPromotion?.marker === marker) demoTokenPromotion = null
+  }
+}
+
 /* ── Client factory ────────────────────────────────────────────── */
 function makeClient(baseURL: string, tokenFn: () => string | null): AxiosInstance {
   const client = axios.create({ baseURL, timeout: 30_000 })
-  client.interceptors.request.use((cfg) => {
-    const tok = tokenFn()
+  client.interceptors.request.use(async (cfg) => {
+    const rawToken = tokenFn()
+    const tok = rawToken ? await promoteDemoLoginToken(rawToken) : null
     if (tok) cfg.headers.Authorization = `Bearer ${tok}`
     return cfg
   })

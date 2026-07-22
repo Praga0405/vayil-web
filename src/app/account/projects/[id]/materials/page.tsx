@@ -23,7 +23,7 @@ import { formatCurrency, calculateFees } from '@/lib/utils'
 import { Lock, Package, ChevronLeft, CreditCard, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi } from '@/lib/api/client'
-import { IS_DEMO_MODE } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE } from '@/lib/demoMode'
 import { getMockJob, type MockMaterial } from '@/lib/mockData'
 import { paymentFeeSettings } from '@/lib/quote-payment'
 
@@ -50,7 +50,7 @@ export default function CustomerMaterialsPage() {
     let cancelled = false
     setState(s => ({ ...s, loading: true, error: null }))
 
-    if (IS_DEMO_MODE) {
+    if (IS_PAYMENT_DEMO_MODE) {
       const job = getMockJob(Number(id))
       const mat = job?.materials ?? []
       // Demo: treat plan as approved (it is in the seed) so payment flow is reachable.
