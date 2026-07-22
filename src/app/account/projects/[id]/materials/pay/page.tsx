@@ -24,8 +24,8 @@ function useCustomerJob(id: string) {
       .then(([pr, mr, sr]: any) => {
         const project = pr.data?.project ?? null
         const plan    = Array.isArray(pr.data?.plan) ? pr.data.plan : []
-        const planStatus = plan[0]?.customer_status === 'approved' ? 'APPROVED'
-                         : plan[0]?.customer_status === 'revision_requested' ? 'REVISION_REQUESTED'
+        const planStatus = plan.length > 0 && plan.every((p: any) => p.customer_status === 'approved') ? 'APPROVED'
+                         : plan.some((p: any) => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
                          : plan.length ? 'SUBMITTED' : 'NOT_STARTED'
         const materials = (mr.data?.materials ?? []).map((m: any) => ({
           id: m.material_id, name: m.name, quantity: Number(m.quantity), unit: m.unit,
@@ -33,7 +33,7 @@ function useCustomerJob(id: string) {
           status: String(m.status).toUpperCase(),
         }))
         const settings = sr?.data?.data ?? sr?.data?.result ?? sr?.data ?? {}
-        setJob({ id: project?.order_id, plan_status: planStatus, materials, settings })
+        setJob({ id: project?.order_id, plan_status: mr.data?.locked ? 'SUBMITTED' : planStatus, materials, settings })
       })
       .catch(() => setJob(null))
       .finally(() => setLoading(false))
