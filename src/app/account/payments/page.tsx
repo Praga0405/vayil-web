@@ -11,31 +11,21 @@ export default function PaymentsPage() {
   const [loading,  setLoading]  = useState(true)
 
   useEffect(() => {
-    customerApi.getEnquiries()
-      .then(async r => {
-        const enquiries = r.data?.data || r.data?.result || []
-        const ongoing = Array.isArray(enquiries)
-          ? enquiries.filter((e: any) => ['ONGOING','COMPLETED'].includes(e.status))
-          : []
-        const payLoads = await Promise.allSettled(
-          ongoing.slice(0, 10).map((e: any) =>
-            customerApi.getPaymentDetails(e.order_id || e.id)
-          )
-        )
-        const all: any[] = []
-        payLoads.forEach(r => {
-          if (r.status === 'fulfilled') {
-            const d = r.value.data?.data || r.value.data?.result || []
-            if (Array.isArray(d)) all.push(...d)
-            else if (d) all.push(d)
-          }
-        })
-        setPayments(all)
+    customerApi.listPayments()
+      .then((r: any) => {
+        const rows = Array.isArray(r?.data?.payments) ? r.data.payments : []
+        setPayments(rows.map((p: any) => ({
+          ...p,
+          amount: Number(p.amount ?? p.payment_amount ?? 0),
+          type: p.type ?? p.purpose ?? p.payment_type ?? 'Payment',
+          status: String(p.status ?? p.payment_status ?? 'pending').toUpperCase(),
+        })))
       })
       .finally(() => setLoading(false))
   }, [])
 
-  const total = payments.filter(p => p.status === 'SUCCESS').reduce((s, p) => s + (p.amount || 0), 0)
+  const successful = new Set(['SUCCESS', 'ESCROW_HELD', 'RELEASED', 'PAID', 'COMPLETED'])
+  const total = payments.filter(p => successful.has(p.status)).reduce((s, p) => s + (p.amount || 0), 0)
 
   return (
     <div className="space-y-5">
@@ -45,7 +35,7 @@ export default function PaymentsPage() {
       <div className="bg-navy rounded-2xl p-5 text-white">
         <p className="text-white/60 text-sm mb-1">Total Paid</p>
         <p className="text-3xl font-bold">{formatCurrency(total)}</p>
-        <p className="text-white/40 text-xs mt-1">{payments.filter(p => p.status === 'SUCCESS').length} successful payments</p>
+        <p className="text-white/40 text-xs mt-1">{payments.filter(p => successful.has(p.status)).length} successful payments</p>
       </div>
 
       {loading ? <PageLoader /> : payments.length === 0 ? (
