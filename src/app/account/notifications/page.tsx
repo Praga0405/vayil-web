@@ -35,7 +35,7 @@ export default function NotificationsPage() {
               </div>
               <div className="flex-1">
                 <p className="font-semibold text-navy text-sm">{n.title}</p>
-                {n.body && <p className="text-xs text-gray-500 mt-0.5">{n.body}</p>}
+                {(n.body || n.description) && <p className="text-xs text-gray-500 mt-0.5">{n.body || n.description}</p>}
                 <p className="text-xs text-gray-400 mt-1">{formatRelative(n.created_at)}</p>
               </div>
             </div>
