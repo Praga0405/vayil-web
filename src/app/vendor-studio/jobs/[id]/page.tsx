@@ -32,7 +32,7 @@ export default function VendorJobDetailPage() {
         actions={
           <>
             <StatusBadge status={job.plan_status} />
-            {unpaidMilestones.length + unpaidMaterials.length > 0 && (
+            {job.paid < job.total && unpaidMilestones.length + unpaidMaterials.length > 0 && (
               <Button onClick={() => router.push(`/vendor-studio/jobs/${id}/ask-payment`)}>
                 <Wallet className="w-4 h-4" /> Request Payment
               </Button>
@@ -63,6 +63,13 @@ export default function VendorJobDetailPage() {
         ]}
       />
 
+      {job.plan_status === 'REVISION_REQUESTED' && job.revision_reason && (
+        <div className="bg-orange/5 border border-orange/30 rounded-2xl p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-orange">Customer change request</p>
+          <p className="mt-1 text-sm text-navy">{job.revision_reason}</p>
+        </div>
+      )}
+
       <TwoColumn
         leftWidth="lg:w-[300px]"
         left={
@@ -70,7 +77,7 @@ export default function VendorJobDetailPage() {
             <div className="space-y-2">
               <ActionLink href={`/vendor-studio/jobs/${id}/plan`}      icon={FileText} title="Plan & milestones" subtitle={`${job.milestones.length} milestone${job.milestones.length !== 1 ? 's' : ''}`} />
               <ActionLink href={`/vendor-studio/jobs/${id}/materials`} icon={Package}  title="Materials"          subtitle={`${job.materials.length} item${job.materials.length !== 1 ? 's' : ''}`} />
-              <ActionLink href={`/vendor-studio/jobs/${id}/ask-payment`} icon={Wallet} title="Ask for payment"    subtitle={`${unpaidMilestones.length + unpaidMaterials.length} item${unpaidMilestones.length + unpaidMaterials.length !== 1 ? 's' : ''} unpaid`} />
+              {job.paid < job.total && <ActionLink href={`/vendor-studio/jobs/${id}/ask-payment`} icon={Wallet} title="Ask for payment"    subtitle={`${unpaidMilestones.length + unpaidMaterials.length} item${unpaidMilestones.length + unpaidMaterials.length !== 1 ? 's' : ''} unpaid`} />}
             </div>
           </PageSection>
         }
