@@ -59,3 +59,17 @@ export async function paymentDemoOrLive<T>(realCall: () => Promise<T>, fakeDelay
   }
   return realCall()
 }
+
+/**
+ * Razorpay validates Indian contact numbers even in Test Mode. The scheduled
+ * demo login intentionally uses a non-routable 555... number, so give test-key
+ * checkouts Razorpay's standard dummy contact. Live keys never receive it.
+ */
+export function razorpayTestPrefill(key: string): Record<string, string> | undefined {
+  if (!key.startsWith('rzp_test_')) return undefined
+  return {
+    name: 'Demo Customer',
+    email: 'test@example.com',
+    contact: '9000090000',
+  }
+}

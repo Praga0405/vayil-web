@@ -72,6 +72,9 @@ Two independent frontend compatibility defects blocked the payment flow.
   always use the real backend.
 - The broader `IS_DEMO_MODE` behavior remains in place for the scheduled demo,
   so the visible OTP/demo login experience does not change.
+- For `rzp_test_` keys only, checkout is prefilled with Razorpay-valid dummy
+  contact details. This avoids the gateway rejecting the intentionally invalid
+  `555...` demo-login number. Live-key checkout receives no dummy prefill.
 
 ### Impact and Compatibility
 
@@ -94,7 +97,24 @@ Two independent frontend compatibility defects blocked the payment flow.
   was captured and no escrow/order completion was performed by that diagnostic.
 - The regression command `npm run check:july22-demo-payment` statically guards
   marker recognition, OTP endpoint reuse, concurrent promotion, production
-  payment mode, all four payment surfaces, and live quote accept/reject calls.
+  payment mode, all four payment surfaces, live quote accept/reject calls, and
+  the strict test-key-only boundary around Razorpay dummy contact details.
+
+### Production Verification
+
+- Vercel deployed commit `a0b4b90` to production successfully.
+- Using the supplied `555...` demo login, the marker exchange called
+  `/api/auth/otp/send` and `/api/auth/otp/verify` successfully. The protected
+  enquiry and quotation requests then changed from HTTP 401 to HTTP 200.
+- Clicking `Pay ₹212` called `/api/payments/create-order`, which returned HTTP
+  201, and opened the Razorpay checkout in Test Mode with the correct amount.
+- Gateway capture is not yet confirmed: Razorpay rejected its official Indian
+  Visa test card and two checkout-listed netbanking choices with `Payment could
+  not be completed` / `Please use another method`. No `/api/payments/verify`
+  request occurred, so no successful payment or escrow hold is being claimed.
+- This remaining failure is after Vayil authentication and order creation. The
+  Razorpay dashboard owner must verify that test card/netbanking methods are
+  enabled for the configured test account before the scheduled demo.
 
 ### Release Readiness
 

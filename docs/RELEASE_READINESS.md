@@ -90,10 +90,18 @@ Last updated: 2026-07-22 · v4.5.97.
 - The current one-step demo login is intentionally unchanged for the scheduled
   demo. Its synthetic token is promoted to a signed backend JWT on the first
   protected request, using the existing OTP bypass configuration.
+- Razorpay test-key checkout is prefilled with the non-routable test contact
+  `9000090000`, because the scheduled `555...` demo login is not a valid Indian
+  payment contact. Live keys do not receive any dummy prefill values.
 - Vercel runtime logs observed during the 2026-07-22 investigation warned that
   JWT secrets were missing/short and fallback demo values were active. Set and
   rotate both JWT secrets before a real-user launch even though the current
   demo remains operational.
+- The production verification created a real Razorpay Test Mode order, but the
+  configured Razorpay account rejected the official domestic test card and
+  listed netbanking methods with `Payment could not be completed`. Confirm test
+  payment-method enablement in the Razorpay dashboard before the demo; this is
+  external to application order creation and signature verification.
 
 ---
 

@@ -11,7 +11,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { customerApi, paymentsApi } from '@/lib/api/client'
-import { IS_PAYMENT_DEMO_MODE, paymentDemoOrLive } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE, paymentDemoOrLive, razorpayTestPrefill } from '@/lib/demoMode'
 import { PageLoader, InfoRow, StatusBadge, Amount, Button } from '@/components/ui'
 import { formatDate, formatCurrency, calculateFees } from '@/lib/utils'
 import {
@@ -170,6 +170,7 @@ export default function EnquiryDetailPage() {
         currency: 'INR',
         order_id: razorpayOrderId,
         name: 'Vayil',
+        prefill: razorpayTestPrefill(key),
         description: option === 'full' ? 'Quote payment (full)' : option === 'min' ? 'Quote advance (25%)' : 'Quote payment (custom)',
         theme: { color: '#E8943A' },
         handler: async (response: any) => {

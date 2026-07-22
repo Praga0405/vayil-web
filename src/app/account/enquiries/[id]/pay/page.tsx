@@ -6,7 +6,7 @@ import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
-import { IS_PAYMENT_DEMO_MODE } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE, razorpayTestPrefill } from '@/lib/demoMode'
 import {
   minimumQuoteAmount,
   paymentFeeSettings,
@@ -147,6 +147,7 @@ export default function PaymentOptionSheetPage() {
         currency: 'INR',
         order_id: razorpayOrderId,
         name:     'Vayil',
+        prefill:  razorpayTestPrefill(key),
         description: 'Service Advance Payment',
         theme:    { color: '#E8943A' },
         handler: async (response: any) => {

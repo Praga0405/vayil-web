@@ -6,7 +6,7 @@ import { formatCurrency, calculateFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
-import { IS_PAYMENT_DEMO_MODE } from '@/lib/demoMode'
+import { IS_PAYMENT_DEMO_MODE, razorpayTestPrefill } from '@/lib/demoMode'
 import { paymentFeeSettings } from '@/lib/quote-payment'
 
 // Customer-side projection of project + materials so we don't depend
@@ -133,6 +133,7 @@ export default function MaterialsPaymentPage() {
       new window.Razorpay({
         key, amount: Math.round(gatewayAmount * 100), currency: 'INR',
         order_id: orderData.razorpay_order_id, name: 'Vayil',
+        prefill: razorpayTestPrefill(key),
         description: `Materials payment for ${items.length} item${items.length !== 1 ? 's' : ''}`,
         theme: { color: '#E8943A' },
         handler: async (response: any) => {

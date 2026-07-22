@@ -29,6 +29,10 @@ assert.match(demoMode,
   'production builds must never simulate successful payments');
 assert.match(demoMode, /export async function paymentDemoOrLive/,
   'quote state changes need the payment-specific live-mode guard');
+assert.match(demoMode, /if \(!key\.startsWith\('rzp_test_'\)\) return undefined/,
+  'dummy Razorpay contact details must never reach a live-key checkout');
+assert.match(demoMode, /contact: '9000090000'/,
+  'test checkout must use a Razorpay-valid contact instead of the 555 demo login');
 
 const paymentSurfaces = [
   'src/app/account/enquiries/[id]/page.tsx',
@@ -50,5 +54,10 @@ assert.match(enquiryDetail, /paymentDemoOrLive\(\(\) => customerApi\.acceptQuote
   'production quote acceptance must reach the backend');
 assert.match(enquiryDetail, /paymentDemoOrLive\(\(\) => customerApi\.rejectQuote/,
   'production quote rejection must reach the backend');
+
+for (const file of [paymentSurfaces[0], paymentSurfaces[1], paymentSurfaces[3]]) {
+  assert.match(read(file), /prefill:\s+razorpayTestPrefill\(key\)/,
+    `${file} must prefill a valid contact for test-key checkout`);
+}
 
 console.log('July 22 demo-login payment compatibility checks passed.');
