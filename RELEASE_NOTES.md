@@ -1,3 +1,27 @@
+# Release Notes
+
+## v4.5.99 - July 22 mobile-flow parity and payment-state fixes (2026-07-22)
+
+### Scope
+
+Implemented all nine issues from `Vayil-July-22-2026.pdf` across Vendor Studio enquiries, customer quote/project/payment screens, material payment requests, notifications, and payment history. OTP/demo behavior and existing mobile legacy contracts remain unchanged.
+
+### Changes
+
+- Vendor Enquiries now renders counts beside every status immediately, including zero counts; it uses the already loaded workflow buckets and requires no tab clicks.
+- Accepted quote payment options are hidden after a successful canonical or legacy payment. The UI rechecks before opening Razorpay, and `POST /payments/create-order` rejects duplicate completed quote payments with HTTP 409.
+- Plan revision messages are preserved from `order_plan.revision_reason` and shown on customer Plan/Project pages and Vendor Job detail alongside `REVISION_REQUESTED`.
+- Approve Plan and Request Changes are replaced by an approved-version notice after approval. The vendor's next plan submission resets the latest version to pending, so approval becomes available again for a changed plan.
+- Ask Payment is unavailable when escrowed quote payment covers the project total. The milestone payment-request endpoint repeats this guard server-side.
+- Added `POST /vendors/projects/:id/materials/:materialId/payment-request`; it validates vendor ownership, rejects paid materials, marks the material `AWAITING_PAYMENT`, and creates a customer notification. The Vendor Ask Payment screen now submits selected material requests instead of silently ignoring them.
+- Material checkout uses the complete plan approval state and the materials API lock value, so a valid approved plan is not incorrectly blocked. Requested materials remain visible with their payment status.
+- Customer notifications render both canonical `body` and legacy `description` fields.
+- Customer Payment History now reads canonical `/customers/payments` rows and normalizes intent/legacy status and amount fields, so completed payments appear.
+
+### Impact and verification
+
+No database migration or existing request-body change is required. Existing material CRUD, Razorpay, plan approval, and OTP endpoints remain compatible. Backend TypeScript build, frontend production build, and `git diff --check` pass locally. Authenticated production smoke testing remains required for the nine scenarios, especially duplicate quote payment, material request notification, approved-plan checkout unlock, and payment-history display.
+
 ## v4.5.98 - Vendor Studio material save and list flow (2026-07-22)
 
 ### Why
@@ -48,28 +72,6 @@ committed row immediately.
 - `src/hooks/useVendorStudio.ts`
 - `RELEASE_NOTES.md`
 
-# Release Notes
-## v4.5.99 - July 22 mobile-flow parity and payment-state fixes (2026-07-22)
-
-### Scope
-
-Implemented all nine issues from `Vayil-July-22-2026.pdf` across Vendor Studio enquiries, customer quote/project/payment screens, material payment requests, notifications, and payment history. OTP/demo behavior and existing mobile legacy contracts remain unchanged.
-
-### Changes
-
-- Vendor Enquiries now renders counts beside every status immediately, including zero counts; it uses the already loaded workflow buckets and requires no tab clicks.
-- Accepted quote payment options are hidden after a successful canonical or legacy payment. The UI rechecks before opening Razorpay, and `POST /payments/create-order` rejects duplicate completed quote payments with HTTP 409.
-- Plan revision messages are preserved from `order_plan.revision_reason` and shown on customer Plan/Project pages and Vendor Job detail alongside `REVISION_REQUESTED`.
-- Approve Plan and Request Changes are replaced by an approved-version notice after approval. The vendor's next plan submission resets the latest version to pending, so approval becomes available again for a changed plan.
-- Ask Payment is unavailable when escrowed quote payment covers the project total. The milestone payment-request endpoint repeats this guard server-side.
-- Added `POST /vendors/projects/:id/materials/:materialId/payment-request`; it validates vendor ownership, rejects paid materials, marks the material `AWAITING_PAYMENT`, and creates a customer notification. The Vendor Ask Payment screen now submits selected material requests instead of silently ignoring them.
-- Material checkout uses the complete plan approval state and the materials API lock value, so a valid approved plan is not incorrectly blocked. Requested materials remain visible with their payment status.
-- Customer notifications render both canonical `body` and legacy `description` fields.
-- Customer Payment History now reads canonical `/customers/payments` rows and normalizes intent/legacy status and amount fields, so completed payments appear.
-
-### Impact and verification
-
-No database migration or existing request-body change is required. Existing material CRUD, Razorpay, plan approval, and OTP endpoints remain compatible. Backend TypeScript build, frontend production build, and `git diff --check` pass locally. Authenticated production smoke testing remains required for the nine scenarios, especially duplicate quote payment, material request notification, approved-plan checkout unlock, and payment-history display.
 
 
 ## v4.5.97 - Demo-login Razorpay compatibility (2026-07-22)
