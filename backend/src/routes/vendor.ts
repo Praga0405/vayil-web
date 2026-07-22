@@ -6,6 +6,7 @@ import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
 import * as vendorSvc from '../services/vendorService';
 import * as notifSvc from '../services/notificationService';
+import * as materialSvc from '../services/materialService';
 import { isAcceptedQuoteStatus } from '../services/quotePayment';
 import { calculateTax } from '../services/tax';
 
@@ -546,11 +547,17 @@ vendorRouter.post('/projects/:id/plan', async (req: AuthRequest, res, next) => {
     await transaction(async (conn) => {
       await conn.query(`DELETE FROM order_plan WHERE order_id = ?`, [orderId]);
       for (const m of milestones) {
-        await conn.query(
+        const [result]: any = await conn.query(
           `INSERT INTO order_plan (order_id, title, description, amount, days, percentage, mandatory,
-                                    vendor_status, customer_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'pending')`,
-          [orderId, m.title, m.description || null, m.amount, m.days, m.percentage, m.mandatory ? 1 : 0],
+                                    vendor_status, customer_status, completion_days,
+                                    amount_percentage, balance_cost, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'pending', ?, ?, ?, 1)`,
+          [orderId, m.title, m.description || null, m.amount, m.days, m.percentage,
+           m.mandatory ? 1 : 0, String(m.days), Math.round(m.percentage), m.amount],
+        );
+        await conn.query(
+          `UPDATE order_plan SET id = plan_id WHERE plan_id = ? AND (id IS NULL OR id = 0)`,
+          [result.insertId],
         );
       }
     });
@@ -569,9 +576,12 @@ vendorRouter.put('/projects/:id/plan', async (req: AuthRequest, res, next) => {
         if (!m.plan_id) continue;
         await conn.query(
           `UPDATE order_plan SET title = ?, description = ?, amount = ?, days = ?,
-                                  percentage = ?, mandatory = ?
+                                  percentage = ?, mandatory = ?, completion_days = ?,
+                                  amount_percentage = ?, balance_cost = ?
              WHERE plan_id = ? AND order_id = ?`,
-          [m.title, m.description || null, m.amount, m.days, m.percentage, m.mandatory ? 1 : 0, m.plan_id, orderId],
+          [m.title, m.description || null, m.amount, m.days, m.percentage,
+           m.mandatory ? 1 : 0, String(m.days), Math.round(m.percentage), m.amount,
+           m.plan_id, orderId],
         );
       }
     });
@@ -605,17 +615,27 @@ vendorRouter.post('/projects/:id/plan/submit', async (req: AuthRequest, res, nex
            WHERE order_id = ?`,
         [orderId],
       );
-      const [stepRows]: any = await conn.query(
-        `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 2 LIMIT 1`,
-        [orderId],
-      );
-      if (!Array.isArray(stepRows) || stepRows.length === 0) {
-        await conn.query(
-          `INSERT INTO order_step_logs
-             (order_id, step, step_status, performed_by, performed_by_id, remarks)
-           VALUES (?, 2, '1', 'VENDOR', ?, 'Implementation plan submitted')`,
-          [orderId, req.user!.id],
+      // Keep the canonical web submit flow structurally identical to the
+      // legacy mobile createAcceptPlan flow.  The Flutter project screen
+      // derives its four progress stages from order_step_logs, so writing
+      // only step 2 leaves website-created orders permanently truncated.
+      for (const step of [
+        { step: 2, status: '1', remarks: 'Implementation plan submitted' },
+        { step: 3, status: '1', remarks: 'Proposal approved & advance paid' },
+        { step: 4, status: '0', remarks: 'Core implementation' },
+      ]) {
+        const [stepRows]: any = await conn.query(
+          `SELECT id FROM order_step_logs WHERE order_id = ? AND step = ? LIMIT 1`,
+          [orderId, step.step],
         );
+        if (!Array.isArray(stepRows) || stepRows.length === 0) {
+          await conn.query(
+            `INSERT INTO order_step_logs
+               (order_id, step, step_status, performed_by, performed_by_id, remarks)
+             VALUES (?, ?, ?, 'VENDOR', ?, ?)`,
+            [orderId, step.step, step.status, req.user!.id, step.remarks],
+          );
+        }
       }
     });
     ok(res, { order_id: Number(orderId), status: 'submitted' });
@@ -646,13 +666,9 @@ vendorRouter.post('/projects/:id/materials', async (req: AuthRequest, res, next)
   try {
     await assertOrderBelongs(req.params.id, req.user!.id);
     const m = materialSchema.parse(req.body);
-    const total = Number((m.quantity * m.rate).toFixed(2));
-    const result: any = await exec(
-      `INSERT INTO materials (order_id, name, quantity, unit, rate, total, status)
-       VALUES (:orderId, :name, :quantity, :unit, :rate, :total, :status)`,
-      { orderId: req.params.id, ...m, total },
-    );
-    const material = await one<any>(`SELECT * FROM materials WHERE material_id = :id`, { id: result.insertId });
+    // Shared service dual-writes `materials` (web) and
+    // `order_plan_materials` (legacy Flutter/Node contract).
+    const material = await materialSvc.addMaterial(String(req.params.id), m);
     ok(res, { material }, 201);
   } catch (err) { next(err); }
 });
@@ -666,16 +682,11 @@ vendorRouter.put('/projects/:id/materials/:materialId', async (req: AuthRequest,
       { id: req.params.materialId, orderId: req.params.id },
     );
     if (!cur) throw new ApiError(404, 'Material not found');
-    const merged = { ...cur, ...m } as any;
-    const total = Number((Number(merged.quantity) * Number(merged.rate)).toFixed(2));
-    await exec(
-      `UPDATE materials SET name = :name, quantity = :quantity, unit = :unit, rate = :rate,
-                             total = :total, status = :status
-         WHERE material_id = :id`,
-      { id: req.params.materialId, name: merged.name, quantity: merged.quantity,
-        unit: merged.unit, rate: merged.rate, total, status: merged.status },
+    const material = await materialSvc.updateMaterial(
+      String(req.params.id),
+      String(req.params.materialId),
+      m,
     );
-    const material = await one<any>(`SELECT * FROM materials WHERE material_id = :id`, { id: req.params.materialId });
     ok(res, { material });
   } catch (err) { next(err); }
 });
@@ -742,7 +753,9 @@ vendorRouter.post('/milestones/:id/complete', async (req: AuthRequest, res, next
     );
     if (!owner || Number(owner.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Milestone not found');
     await exec(
-      `UPDATE order_plan SET vendor_status = 'completed', updated_at = NOW() WHERE plan_id = :id`,
+      `UPDATE order_plan
+          SET vendor_status = 'completed', status = 10, balance_cost = 0, updated_at = NOW()
+        WHERE plan_id = :id`,
       { id: req.params.id },
     );
     ok(res, { plan_id: Number(req.params.id), status: 'completed' });

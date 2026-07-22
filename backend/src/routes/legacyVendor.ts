@@ -759,14 +759,16 @@ async function legacyVendorProjectDetailPayload(orderId: number | string) {
     one<any>(
       `SELECT COALESCE(o.id, o.order_id) AS id,
               o.order_id,
-              CAST(o.vendor_id AS UNSIGNED) AS vendor_id,
-              CAST(o.service_id AS UNSIGNED) AS service_id,
+              CAST(COALESCE(o.vendor_id, e.vendor_id) AS UNSIGNED) AS vendor_id,
+              CAST(COALESCE(o.service_id, e.service_id) AS UNSIGNED) AS service_id,
               CAST(o.customer_id AS UNSIGNED) AS customer_id,
               c.name AS customer_name,
               COALESCE(c.phone, c.mobile) AS customer_phone,
               COALESCE(c.ph_code, '+91') AS customer_ph_code,
-              v.company_name,
-              COALESCE(vs.service_title, vs.title) AS service_title,
+              COALESCE(NULLIF(v.company_name, ''), NULLIF(vById.company_name, ''), 'Vendor') AS company_name,
+              COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
+                       NULLIF(vsById.service_title, ''), NULLIF(vsById.title, ''),
+                       NULLIF(e.category, ''), 'Home Service') AS service_title,
               vs.price,
               COALESCE(vs.unit_name, vs.unit) AS unit_name,
               vs.pricing_type,
@@ -774,9 +776,13 @@ async function legacyVendorProjectDetailPayload(orderId: number | string) {
               COALESCE(vs.service_image, vs.thumbnail, '') AS service_image,
               vs.minimum_fee
          FROM orders o
+         LEFT JOIN enquiries e ON e.enquiry_id = o.enquiry_id
          LEFT JOIN customers c ON c.customer_id = o.customer_id OR c.id = o.customer_id
-         LEFT JOIN vendors v ON v.vendor_id = o.vendor_id OR v.id = o.vendor_id
-         LEFT JOIN vendor_services vs ON vs.vendor_service_id = o.service_id OR vs.id = o.service_id
+         LEFT JOIN vendors v ON v.vendor_id = COALESCE(o.vendor_id, e.vendor_id)
+         LEFT JOIN vendors vById ON vById.id = COALESCE(o.vendor_id, e.vendor_id) AND v.vendor_id IS NULL
+         LEFT JOIN vendor_services vs ON vs.vendor_service_id = COALESCE(o.service_id, e.service_id)
+         LEFT JOIN vendor_services vsById ON vsById.id = COALESCE(o.service_id, e.service_id)
+                                           AND vs.vendor_service_id IS NULL
         WHERE o.order_id = :id
         LIMIT 1`,
       { id: orderId },

@@ -184,11 +184,54 @@ export async function holdVerifiedPayment(
       : JSON.parse(String(intent.material_ids));
     if (Array.isArray(ids) && ids.length > 0) {
       const placeholders = ids.map(() => '?').join(',');
+      const materialRows = resultRows<any>(await conn.query(
+        `SELECT material_id, order_id, name, quantity, unit, rate
+           FROM materials WHERE material_id IN (${placeholders})`,
+        ids,
+      ));
       await conn.query(
         `UPDATE materials SET status = 'PAID' WHERE material_id IN (${placeholders})`,
         ids,
       );
+      for (const material of materialRows) {
+        await conn.query(
+          `UPDATE order_plan_materials
+              SET payment_status = 'PAID', status = 'PAID', balance_cost = 0,
+                  updated_at = NOW()
+            WHERE order_id = ? AND title = ?
+              AND CAST(COALESCE(qty, '0') AS DECIMAL(18,4)) = ?
+              AND CAST(COALESCE(unit_cost, 0) AS DECIMAL(18,4)) = ?`,
+          [material.order_id, material.name, Number(material.quantity), Number(material.rate)],
+        );
+      }
     }
+  }
+
+  const existingLegacyPayment = resultRows<any>(await conn.query(
+    `SELECT id FROM payment_log
+      WHERE provider_payment_id = ? OR payment_id = ? LIMIT 1`,
+    [verification.razorpayPaymentId, verification.razorpayPaymentId],
+  ));
+  if (existingLegacyPayment.length === 0) {
+    const paymentType = intent.purpose === 'quote'
+      ? 'place_order'
+      : intent.purpose === 'milestone' ? 'plan' : 'material';
+    const paymentData = intent.material_ids
+      ? (Array.isArray(intent.material_ids) ? JSON.stringify(intent.material_ids) : String(intent.material_ids))
+      : null;
+    await conn.query(
+      `INSERT INTO payment_log
+         (order_id, customer_id, vendor_id, amount, status, provider,
+          provider_payment_id, payment_id, payment_status, currency,
+          base_amount, payment_amount, payment_date, payment_data,
+          payment_type, notes, created_at)
+       VALUES (?, ?, ?, ?, 'success', 'razorpay', ?, ?, 'success', 'INR',
+               ?, ?, NOW(), ?, ?, ?, NOW())`,
+      [orderId, intent.customer_id, vendorId, Number(intent.amount),
+       verification.razorpayPaymentId, verification.razorpayPaymentId,
+       Number(intent.base_amount ?? intent.amount), Number(intent.amount),
+       paymentData, paymentType, intent.purpose],
+    );
   }
 
   return { orderId, vendorId };

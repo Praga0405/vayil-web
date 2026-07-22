@@ -1,5 +1,101 @@
 # Release Notes
 
+## v4.5.100 - Project-detail, material-payment, and mobile-data parity (2026-07-22)
+
+### Summary
+
+This release fixes the customer and vendor project-detail discrepancies reported for website-created orders. Steps, milestones, materials, material-payment state, payment summaries, vendor company names, and service names now use the same stored projections and status conventions expected by the existing Node.js legacy endpoints and Flutter mobile application.
+
+The primary affected example was project `300001`, where the website could load selectable materials and calculate checkout totals, but mobile-facing records remained incomplete or stale. Mobile project screens consequently showed truncated progress, `UNKNOWN` milestone states, missing materials or payment summaries, and `null` company/service headings.
+
+### Root causes
+
+- Canonical web material creation wrote `materials`, while the mobile project APIs read `order_plan_materials`. The previous best-effort secondary write swallowed failures, permitting the two representations to diverge.
+- Razorpay verification marked canonical materials paid but did not update the equivalent legacy material rows.
+- Canonical verified payments updated `payment_intents` and `escrow_ledger`, while legacy customer/vendor payment summaries continued to read `payment_log`.
+- Website-created plans populated canonical text statuses but omitted the legacy numeric status and compatibility columns used by mobile response mapping. Numeric status `0` was displayed as `UNKNOWN`.
+- Canonical plan submission created only one progress log. The mobile flow expects the complete four-stage order-progress structure.
+- Several legacy detail and quotation queries relied on only one vendor/service identifier representation. Website-created or older rows with missing IDs therefore returned `null` company or service values even when the related enquiry contained the correct relationship.
+
+### Changes
+
+#### Atomic material compatibility
+
+- Canonical material create and update operations now run inside a database transaction.
+- Every successful web material save updates both `materials` and `order_plan_materials`.
+- Updating an older web-only material creates its missing legacy projection when necessary.
+- Material names, units, quantities, rates, totals, balances, final amounts, and payment statuses remain aligned across both representations.
+
+#### Material-payment and payment-summary synchronization
+
+- Successful material verification marks both canonical and legacy material rows `PAID` and clears the legacy balance.
+- Every successfully verified quote, milestone, or material payment creates an idempotent compatibility record in `payment_log`.
+- The compatibility record retains customer, vendor, order, amount, currency, Razorpay payment ID, payment purpose, and selected material IDs.
+- Duplicate verification cannot create duplicate legacy payment rows because existing provider/payment IDs are checked first.
+- Canonical `payment_intents` and escrow behavior remain the source of truth for the website; `payment_log` is maintained as the mobile-compatible projection.
+
+#### Milestone and project-progress parity
+
+- Website-created plan rows now populate `completion_days`, `amount_percentage`, `balance_cost`, numeric `status`, and the legacy `id` mirror.
+- New milestones begin with numeric status `1`, matching the existing mobile create-plan convention.
+- Completing a milestone sets `vendor_status = 'completed'`, numeric status `10`, and remaining balance `0`.
+- Plan submission idempotently ensures progress steps 2, 3, and 4 exist in addition to the order-placement step:
+  - Implementation plan submitted
+  - Proposal approved and advance paid
+  - Core implementation
+- Existing step rows are detected before insert, preventing duplicate progress stages on resubmission.
+
+#### Vendor company and service-name recovery
+
+- Customer quotation and project-detail responses now resolve relationships from the quote/order first and fall back to the associated enquiry.
+- Vendor and service lookups support both legacy `id` and canonical primary-ID representations.
+- Customer and vendor project payloads now return stable display fallbacks instead of raw `null` headings when old data remains incomplete.
+
+#### Existing-data repair migration
+
+Migration `013_web_mobile_project_parity.sql` performs an idempotent repair for existing records:
+
+- adds missing mobile progress steps;
+- projects canonical materials into `order_plan_materials`;
+- reconciles paid/unpaid material status and balance across both tables;
+- fills legacy milestone IDs, durations, percentages, balances, and numeric statuses;
+- restores missing order and quotation vendor/service/customer relationships from enquiries; and
+- creates missing `payment_log` rows for completed canonical payment intents.
+
+### API and data compatibility
+
+- Existing endpoint paths and request bodies are unchanged.
+- Existing Razorpay signature verification and escrow ledger behavior are unchanged.
+- Existing mobile response envelopes are unchanged; their backing data is now populated consistently.
+- Material dual-writes are atomic, so a database error rolls back both representations rather than leaving web and mobile in different states.
+- The migration and payment-log insertion are idempotent and safe to retry after a failed deployment.
+
+### Verification performed
+
+- Clean dependency installation completed successfully.
+- Backend TypeScript production build passed.
+- Next.js production build passed and generated all 50 application pages, including `/account/projects/[id]/materials/pay` and vendor project/material routes.
+- `git diff --check` passed.
+- Authenticated browser testing against `https://vayil-web.vercel.app/account/projects/300001/materials/pay` loaded Fan, Dust Cleaner, and Bolt without console errors.
+- Selecting Fan changed the disabled state into an enabled `Pay ₹741` action and produced the expected breakdown: ₹700 subtotal, ₹35 platform fee, ₹6 GST, ₹741 total.
+- No real financial charge was attempted.
+
+### Deployment and retest requirements
+
+1. Deploy the backend and run migration `013_web_mobile_project_parity.sql`.
+2. Open project `300001` from both customer and vendor web accounts and confirm identical steps, milestones, materials, and statuses.
+3. Open the same project/quote in the mobile application and verify that vendor company and service name are no longer `null`.
+4. Complete one Razorpay test-mode material payment and verify the matching rows in `payment_intents`, `payment_log`, `materials`, `order_plan_materials`, and `escrow_ledger`.
+5. Confirm the paid material and payment summary appear on customer web, vendor web, customer mobile, and vendor mobile.
+6. Repeat payment verification with the same provider payment ID and confirm no duplicate payment or ledger record is created.
+7. Create and resubmit a plan from the website and confirm mobile continues to show exactly four progress stages without duplicate steps.
+
+### Known limitations
+
+- Gateway capture and signed payment verification were not performed against the shared deployment before this commit.
+- Production database state could not be inspected without TiDB credentials; migration results must be validated during deployment.
+- Dependency installation reports 11 audit findings (2 low, 1 moderate, and 8 high), which are outside this compatibility fix and require separate dependency remediation.
+
 ## v4.5.99 - July 22 mobile-flow parity and payment-state fixes (2026-07-22)
 
 ### Scope
