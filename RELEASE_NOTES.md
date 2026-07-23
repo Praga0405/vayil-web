@@ -1,5 +1,135 @@
 # Release Notes
 
+## v4.5.104 - Firebase notifications and milestone-balance calculation parity (2026-07-23)
+
+### Scope
+
+This release addresses the July 23 backend/mobile feedback:
+
+1. Firebase push notifications need the old project's backend service-account configuration.
+2. Vendor-created milestone percentages must be calculated from the remaining quote balance after the customer's initial/advance payment, not from the original full quote amount.
+3. Customer enquiry list status must not show a completed/cancelled-style status immediately after the plan/final-step acceptance flow unless the actual enquiry/order status is completed.
+
+The demo OTP flow and `123456` behavior are intentionally unchanged.
+
+### Firebase notification configuration
+
+#### Issue
+
+The backend wrote rows into the `notifications` table, but it did not send Firebase Cloud Messaging pushes to the customer/vendor device tokens stored on the user records. The mobile team asked for the old Firebase JSON configuration to be added so notification delivery can work like the previous project.
+
+#### Implementation
+
+- Added `backend/src/services/firebasePushService.ts`.
+- `notificationService.notify(...)` still writes the database notification first, then triggers Firebase push delivery as a best-effort side effect.
+- Firebase failures are logged as `[notifications] firebase_push_failed` and do not fail the business API that created the notification. This prevents payment/order/quote flows from breaking if FCM is temporarily unavailable.
+- Push recipient token lookup supports:
+  - customer `fcm_token`, falling back to `device_id`
+  - vendor `fcm_token`, falling back to `device_id`
+- Push payload includes the same title/body plus stringified `data` fields used by the mobile notification list.
+- The service uses Firebase HTTP v1 directly with the service account JSON; no heavy Firebase Admin SDK dependency was added.
+
+#### Secret handling
+
+The provided `firebase-adminsdk-*.json` file is a private credential and was not committed to Git. The repo now ignores `firebase-adminsdk*.json` to prevent accidental credential commits.
+
+Set one of these backend environment variables in Vercel/production:
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON`: paste the full Firebase service-account JSON value.
+- `GOOGLE_APPLICATION_CREDENTIALS`: path to the service-account JSON file, for non-serverless/local deployments.
+
+Recommended Vercel setup is `FIREBASE_SERVICE_ACCOUNT_JSON`, because serverless deployments should not depend on a checked-in secret file.
+
+### Milestone payment calculation
+
+#### Issue
+
+Milestone amounts were being calculated against the full quote amount. Example: for a quote of `10000` and an initial/advance payment of `2500`, a 50% milestone was calculated from `10000`, producing `5000`, instead of from the remaining balance `7500`, which should produce `3750`.
+
+There was also drift between paths:
+
+- The web Vendor Studio plan builder sent milestone amounts calculated in the browser from `job.total`.
+- The mobile-compatible legacy plan paths recalculated amounts server-side but deducted all `payment_log.base_amount` rows, including later plan/material payments in some cases.
+- `vendorgetPlan` summary used full quote values, so the summary could disagree with the expected mobile payment balance.
+
+#### Implementation
+
+- Added shared server helper `orderMilestoneBaseAmount(orderId)` in `backend/src/services/projectService.ts`.
+- The helper resolves the quote amount from `orders` and `quotation`.
+- It deducts only successful initial/advance quote payments from the legacy
+  `payment_log` or the canonical `payment_intents` quote rows. When both
+  records exist for the same legacy payment, the helper uses the larger source
+  total instead of adding them together, so the advance is not double-counted.
+- Legacy `payment_log` matching uses `payment_type` values:
+  - `place_order`
+  - `quote`
+  - `initial`
+  - `advance`
+  - `minimum`
+- It intentionally does not deduct later milestone/material payments when calculating the base for milestone percentages.
+- `projectService.createPlan(...)` now recalculates milestone `amount` server-side from `remaining_amount * percentage / 100`, even if the web UI sends an amount based on the full quote.
+- Legacy mobile plan create/update paths in `backend/src/routes/legacyVendor.ts` now use the same helper.
+- `vendorgetPlan` summary now reports the remaining milestone base as `total_base_amount`, with `used_amount` and `balance_amount` calculated against that remaining base.
+
+#### Expected example after fix
+
+For:
+
+- quote amount: `10000`
+- initial/advance paid base: `2500`
+- remaining milestone base: `7500`
+
+Milestones:
+
+- `50%` => `3750`
+- `50%` => `3750`
+
+Total milestone amount: `7500`.
+
+### Customer enquiry list status projection
+
+#### Issue
+
+The July 23 PDF showed that after the customer accepts the final/plan step, the customer enquiry list could show an incorrect terminal status such as completed/cancelled-style text. The mobile team expects the old flow: after quote acceptance and project start, the enquiry remains ongoing until the actual completion conditions are met.
+
+#### Implementation
+
+- Updated customer legacy enquiry status derivation.
+- `step = 4` with an accepted-style `step_status` no longer forces `status_name = Completed`.
+- Rejected final-step status still maps to `Rejected`.
+- Completed is now shown only when the actual enquiry/order status resolves to legacy status `10`.
+- Existing response body shape is unchanged: `status`, `status_name`, `quotations`, and `orders[].ordersteps` remain present for the mobile app.
+
+### Files changed
+
+- `.gitignore`
+- `backend/src/config.ts`
+- `backend/src/services/firebasePushService.ts`
+- `backend/src/services/notificationService.ts`
+- `backend/src/services/projectService.ts`
+- `backend/src/routes/legacyVendor.ts`
+- `backend/src/routes/legacyCustomer.ts`
+- `RELEASE_NOTES.md`
+- `RELEASE_READINESS.md`
+- `docs/RELEASE_READINESS.md`
+
+### Verification
+
+- `git diff --check` passed.
+- Local full `npm run build` could not be completed in the original checkout because local `node_modules` was incomplete/corrupted (`client-only` and `denque` missing) and `npm install` hung in the desktop environment. A fresh checkout was created from `origin/main` and the patch was applied cleanly.
+- Deployment must run a clean Vercel install/build from `package-lock.json`.
+
+### Post-deploy smoke checks
+
+1. Set `FIREBASE_SERVICE_ACCOUNT_JSON` in Vercel using the Firebase service-account JSON.
+2. Trigger a notification-producing flow, such as Ask Payment or place-order payment update, and confirm:
+   - a row is inserted into `notifications`
+   - the device receives an FCM push
+   - API response still succeeds if a test token is missing
+3. Create a quote for `10000`, pay initial/minimum base `2500`, create two `50%` milestones, and confirm each milestone amount is `3750`.
+4. Call `POST /vendorgetPlan` and confirm `summary.total_base_amount` is the remaining milestone base, not the full quote amount.
+5. Accept the customer plan/final step and confirm `/customer/enquiryList` remains `Ongoing` until actual completion.
+
 ## v4.5.103 - Demo feedback workflow parity (2026-07-23)
 
 ### Scope

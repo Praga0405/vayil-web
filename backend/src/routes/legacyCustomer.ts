@@ -724,9 +724,6 @@ function deriveCustomerEnquiryStatus(row: any) {
   const steps = orders.flatMap((order: any) => Array.isArray(order.ordersteps) ? order.ordersteps : []);
   const finalStep = steps.find((step: any) => Number(step.step) === 4);
   const finalStatus = statusSlug(finalStep?.step_status);
-  if (finalStep && ['1', 'accepted', 'accept', 'completed', 'complete'].includes(finalStatus)) {
-    return { status: 10, status_name: 'Completed' };
-  }
   if (finalStep && ['2', 'rejected', 'reject'].includes(finalStatus)) {
     return { status: 3, status_name: 'Rejected' };
   }

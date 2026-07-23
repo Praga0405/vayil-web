@@ -4,7 +4,7 @@ This file is the single checklist for moving from dev/demo to
 production. Every flag below is a deliberate dev-mode convenience —
 **leaving any of them on in production is a bug**.
 
-Last updated: 2026-07-23 · v4.5.103.
+Last updated: 2026-07-23 · v4.5.104.
 
 ## ⚠ Critical — must be flipped
 
@@ -27,6 +27,23 @@ Before promoting the demo-feedback workflow:
 - [ ] Confirm the customer close action remains disabled until every milestone is complete.
 - [ ] Re-run customer and vendor demo login with `123456`; v4.5.103 intentionally does
   not modify OTP behavior.
+
+### v4.5.104 Firebase notification and milestone-balance gate
+
+Before promoting the July 23 notification/milestone fix:
+
+- [ ] Set `FIREBASE_SERVICE_ACCOUNT_JSON` in backend env with the Firebase
+  service-account JSON. Do not commit `firebase-adminsdk*.json`.
+- [ ] Trigger a notification-producing flow and confirm the notification row is
+  inserted and a Firebase push reaches a device with a valid `fcm_token`.
+- [ ] Confirm APIs still succeed when the recipient has no FCM token; push
+  delivery is best-effort and must not block payment/order flows.
+- [ ] Create a quote of `10000`, record an initial/advance paid base of `2500`,
+  create two `50%` milestones, and confirm milestone amounts are `3750` each.
+- [ ] Confirm `/vendorgetPlan` summary uses `7500` as the milestone base in that
+  scenario.
+- [ ] Confirm `/customer/enquiryList` stays `Ongoing` after plan/final-step
+  acceptance until the actual completion status is reached.
 
 
 | Env var | Where | Demo value | Production value | What it does |
@@ -60,6 +77,7 @@ Before promoting the demo-feedback workflow:
 | `JWT_SECRET`, `STAFF_JWT_SECRET` | Long random strings — `openssl rand -base64 32`. Demo defaults are placeholders. |
 | `CORS_ORIGIN` | The exact production domain(s). Don't ship with `*`. |
 | `ADMIN_PORTAL_NOTIFY_URL` / `ADMIN_PORTAL_NOTIFY_TOKEN` | If the admin portal expects vendor-review webhooks. |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Firebase service-account JSON used by backend notification writes to also send FCM HTTP v1 pushes. Keep this only in the secret store, never in Git. |
 
 ## Schema / DB
 

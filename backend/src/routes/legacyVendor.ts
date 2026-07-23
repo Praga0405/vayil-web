@@ -1959,23 +1959,8 @@ async function resolveOrderIdFromPlanBody(body: any): Promise<string> {
 }
 
 async function legacyOrderPlanFinancials(orderId: number | string, excludePlanId?: number | string | null) {
-  const [paymentLog, orderTotal, planUsage] = await Promise.all([
-    one<any>(
-      `SELECT COALESCE(SUM(base_amount), 0) AS total_base_amount
-         FROM payment_log
-        WHERE order_id = :id`,
-      { id: orderId },
-    ).catch(() => null),
-    one<any>(
-      `SELECT COALESCE(q.amount, o.order_amount, o.amount, 0) AS total_main
-         FROM orders o
-         LEFT JOIN quotation q
-           ON q.quotation_id = o.quotation_id OR q.id = o.quotation_id
-           OR q.quotation_id = o.quote_id OR q.id = o.quote_id
-        WHERE o.order_id = :id OR o.id = :id
-        LIMIT 1`,
-      { id: orderId },
-    ).catch(() => null),
+  const [base, planUsage] = await Promise.all([
+    projectSvc.orderMilestoneBaseAmount(orderId),
     one<any>(
       `SELECT COALESCE(SUM(COALESCE(amount_percentage, percentage, 0)), 0) AS used_percentage
          FROM order_plan
@@ -1984,13 +1969,11 @@ async function legacyOrderPlanFinancials(orderId: number | string, excludePlanId
       { orderId, excludePlanId: excludePlanId ?? null },
     ).catch(() => null),
   ]);
-  const totalMain = Number(orderTotal?.total_main ?? 0);
-  const paidBaseAmount = Number(paymentLog?.total_base_amount ?? 0);
   const usedPercentage = Number(planUsage?.used_percentage ?? 0);
   return {
-    totalMain,
-    paidBaseAmount,
-    remainingBaseAmount: Math.max(0, totalMain - paidBaseAmount),
+    totalMain: base.quote_amount,
+    paidBaseAmount: base.advance_paid,
+    remainingBaseAmount: base.remaining_amount,
     usedPercentage,
     balancePercentage: Math.max(0, 100 - usedPercentage),
   };
@@ -2014,28 +1997,7 @@ async function updateLegacyNodePlanRowsWithCalculation(rows: any[]) {
     ).catch(() => null);
     if (!planOrder?.order_id) continue;
 
-    const paymentLog = await one<any>(
-      `SELECT COALESCE(SUM(base_amount), 0) AS total_base_amount
-         FROM payment_log
-        WHERE order_id = :orderId`,
-      { orderId: planOrder.order_id },
-    ).catch(() => null);
-    const orderRow = await one<any>(
-      `SELECT COALESCE(quote_id, quotation_id) AS quote_id
-         FROM orders
-        WHERE id = :orderId OR order_id = :orderId
-        LIMIT 1`,
-      { orderId: planOrder.order_id },
-    ).catch(() => null);
-    const quoteRow = await one<any>(
-      `SELECT COALESCE(amount, final_amount, 0) AS amount
-         FROM quotation
-        WHERE id = :quoteId OR quotation_id = :quoteId
-        LIMIT 1`,
-      { quoteId: orderRow?.quote_id ?? 0 },
-    ).catch(() => null);
-
-    const amountBase = moneyNumber(quoteRow?.amount) - moneyNumber(paymentLog?.total_base_amount);
+    const amountBase = (await projectSvc.orderMilestoneBaseAmount(planOrder.order_id)).remaining_amount;
     const amount = (amountBase * Number(plan.amount_percentage)) / 100;
     await exec(
       `UPDATE order_plan
@@ -2098,28 +2060,7 @@ async function updateLegacyNodePlanRowsDirect(rows: any[]) {
 }
 
 async function legacyNodeVendorPlanDetails(orderId: number | string) {
-  const paymentLog = await one<any>(
-    `SELECT COALESCE(SUM(base_amount), 0) AS total_base_amount,
-            COALESCE(SUM(payment_amount), 0) AS total_paid_amount
-       FROM payment_log
-      WHERE order_id = :orderId`,
-    { orderId },
-  ).catch(() => null);
-
-  const order = await one<any>(
-    `SELECT *
-       FROM orders
-      WHERE id = :orderId OR order_id = :orderId
-      LIMIT 1`,
-    { orderId },
-  ).catch(() => null);
-  const quote = await one<any>(
-    `SELECT *
-       FROM quotation
-      WHERE id = :quoteId OR quotation_id = :quoteId
-      LIMIT 1`,
-    { quoteId: order?.quote_id ?? order?.quotation_id ?? 0 },
-  ).catch(() => null);
+  const base = await projectSvc.orderMilestoneBaseAmount(orderId);
   const plans = await query<any>(
     `SELECT *
        FROM order_plan
@@ -2128,9 +2069,7 @@ async function legacyNodeVendorPlanDetails(orderId: number | string) {
     { orderId },
   ).catch(() => []);
 
-  const totalMain = moneyNumber(quote?.amount);
-  const totalBaseAmount = moneyNumber(paymentLog?.total_base_amount);
-  if (totalBaseAmount >= totalMain && totalMain > 0) {
+  if (base.advance_paid >= base.quote_amount && base.quote_amount > 0) {
     return {
       summary: {
         total_base_amount: 0,
@@ -2146,11 +2085,11 @@ async function legacyNodeVendorPlanDetails(orderId: number | string) {
   if (!plans.length) {
     return {
       summary: {
-        total_base_amount: totalMain,
+        total_base_amount: base.remaining_amount,
         used_percentage: 0,
         used_amount: 0,
         balance_percentage: 100,
-        balance_amount: Math.max(0, totalMain - totalBaseAmount),
+        balance_amount: base.remaining_amount,
       },
       plans,
     };
@@ -2162,11 +2101,10 @@ async function legacyNodeVendorPlanDetails(orderId: number | string) {
   );
   const usedAmount = plans.reduce((sum: number, plan: any) => sum + moneyNumber(plan.amount), 0);
   const balancePercentage = Math.max(0, 100 - usedPercentage);
-  const mainBalanceAmount = Math.max(0, totalMain - totalBaseAmount);
-  const balanceAmount = Math.max(0, mainBalanceAmount - usedAmount);
+  const balanceAmount = Math.max(0, base.remaining_amount - usedAmount);
   return {
     summary: {
-      total_base_amount: totalMain,
+      total_base_amount: base.remaining_amount,
       used_percentage: usedPercentage,
       used_amount: usedAmount,
       balance_percentage: balancePercentage,

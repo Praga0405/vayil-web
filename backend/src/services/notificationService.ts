@@ -4,6 +4,7 @@
  * vendor inboxes.
  */
 import { exec, one, query } from '../db';
+import { sendPushNotification } from './firebasePushService';
 
 export type Recipient = 'customer' | 'vendor' | 'staff';
 
@@ -24,7 +25,22 @@ export async function notify(opts: {
       data: opts.data ? JSON.stringify(opts.data) : null,
     },
   );
-  return one<any>('SELECT * FROM notifications WHERE notification_id = :id', { id: result.insertId });
+  const row = await one<any>('SELECT * FROM notifications WHERE notification_id = :id', { id: result.insertId });
+  sendPushNotification({
+    recipient_type: opts.recipient_type,
+    recipient_id: opts.recipient_id,
+    title: opts.title,
+    body: opts.body,
+    data: opts.data,
+  }).catch((err: any) => {
+    // eslint-disable-next-line no-console
+    console.error('[notifications] firebase_push_failed', {
+      recipient_type: opts.recipient_type,
+      recipient_id: opts.recipient_id,
+      message: err?.message || String(err),
+    });
+  });
+  return row;
 }
 
 export async function list(recipientType: Recipient, recipientId: number | string, opts: { unreadOnly?: boolean; limit?: number } = {}) {

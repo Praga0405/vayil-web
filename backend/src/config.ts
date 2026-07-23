@@ -157,6 +157,11 @@ export const config = {
 
   razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+
+  firebase: {
+    serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+    credentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS || '',
+  },
 };
 
 /* ─── Post-config safety checks (warn or throw, per strictProd) ─── */

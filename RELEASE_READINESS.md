@@ -28,6 +28,10 @@ Update statuses inline as each lands.
 - [ ] Set env vars: DB_*, `JWT_SECRET`, `CORS_ORIGIN`,
   `OTP_BYPASS=true`, `OTP_BYPASS_CODE=123456` (replace with real OTP service later),
   `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` (test keys for now).
+- [ ] Set Firebase notification credentials as `FIREBASE_SERVICE_ACCOUNT_JSON`
+  in Vercel/backend env. Do not commit `firebase-adminsdk*.json` to Git; the
+  repo ignores that filename pattern because it is a private service-account
+  credential.
 - [ ] First-run from Render shell:
   ```
   npm run migrate
@@ -93,6 +97,21 @@ backend lands them, remove the offline branch in each spot.
 - [ ] Complete the final milestone, rate/close as customer, and confirm funds remain held.
 - [ ] Release through the authenticated Admin Fund Releases view and verify idempotent ledgers.
 - [ ] Keep demo OTP behavior unchanged until the separate production-auth cutover.
+
+## v4.5.104 Firebase + milestone-balance gate
+
+- [ ] Add `FIREBASE_SERVICE_ACCOUNT_JSON` to the backend production/preview env
+  using the Firebase service-account JSON supplied by the mobile/Firebase team.
+- [ ] Trigger one notification-producing flow and confirm both database
+  notification row creation and Firebase push delivery.
+- [ ] Verify notification failure logging does not fail the source API when the
+  recipient has no `fcm_token` or Firebase rejects a bad test token.
+- [ ] Test milestone calculation with quote `10000`, initial/advance paid base
+  `2500`, and two `50%` milestones; each milestone must be `3750`.
+- [ ] Confirm `/vendorgetPlan` summary uses the remaining milestone base after
+  the initial payment, not the original full quote.
+- [ ] Confirm `/customer/enquiryList` remains `Ongoing` after plan/final-step
+  acceptance until the actual project completion status is reached.
 
 ## Observability
 

@@ -54,19 +54,78 @@ export interface MilestoneInput {
   mandatory?: boolean;
 }
 
-/** Replace the entire plan for an order — milestone percentages must sum to 100. */
+function money(value: any): number {
+  if (value === undefined || value === null || value === '') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export async function orderMilestoneBaseAmount(orderId: number | string) {
+  const order = await one<any>(
+    `SELECT o.order_id, COALESCE(o.quote_id, o.quotation_id) AS quote_id,
+            COALESCE(q.amount, q.final_amount, o.order_amount, o.amount, 0) AS quote_amount
+       FROM orders o
+       LEFT JOIN quotation q
+         ON q.quotation_id = COALESCE(o.quote_id, o.quotation_id)
+         OR q.id = COALESCE(o.quote_id, o.quotation_id)
+      WHERE o.order_id = :id OR o.id = :id
+      LIMIT 1`,
+    { id: orderId },
+  );
+  if (!order) throw new ApiError(404, 'Order not found');
+
+  const [legacyInitialPaid, canonicalInitialPaid] = await Promise.all([
+    one<any>(
+      `SELECT COALESCE(SUM(COALESCE(base_amount, amount, payment_amount, 0)), 0) AS paid
+         FROM payment_log
+        WHERE order_id = :id
+          AND LOWER(COALESCE(payment_status, status, '')) IN ('success', 'paid', 'completed')
+          AND LOWER(COALESCE(payment_type, notes, 'place_order')) IN
+            ('place_order', 'quote', 'initial', 'advance', 'minimum')`,
+      { id: orderId },
+    ).catch(() => null),
+    one<any>(
+      `SELECT COALESCE(SUM(COALESCE(base_amount, amount, 0)), 0) AS paid
+         FROM payment_intents
+        WHERE order_id = :id
+          AND purpose = 'quote'
+          AND status IN ('escrow_held', 'released')`,
+      { id: orderId },
+    ).catch(() => null),
+  ]);
+
+  const quoteAmount = money(order.quote_amount);
+  const advancePaid = Math.min(
+    quoteAmount,
+    Math.max(money(legacyInitialPaid?.paid), money(canonicalInitialPaid?.paid)),
+  );
+  return {
+    quote_amount: quoteAmount,
+    advance_paid: advancePaid,
+    remaining_amount: Math.max(0, quoteAmount - advancePaid),
+  };
+}
+
+function amountFromPercentage(base: number, percentage?: number) {
+  if (percentage === undefined || percentage === null) return null;
+  return Math.round(((base * Number(percentage)) / 100) * 100) / 100;
+}
+
+/** Replace the entire plan for an order - milestone percentages must sum to 100. */
 export async function createPlan(orderId: number | string, milestones: MilestoneInput[]) {
   if (!milestones.length) throw new ApiError(400, 'milestones required');
   const total = milestones.reduce((s, m) => s + (m.percentage || 0), 0);
   if (Math.round(total) !== 100) throw new ApiError(400, `Milestone percentages must total 100 (got ${total})`);
+  const base = await orderMilestoneBaseAmount(orderId);
   await transaction(async (conn) => {
     await conn.query('DELETE FROM order_plan WHERE order_id = ?', [orderId]);
     for (const m of milestones) {
+      const amount = amountFromPercentage(base.remaining_amount, m.percentage) ?? m.amount;
       await conn.query(
         `INSERT INTO order_plan (order_id, title, description, amount, days, percentage, mandatory,
                                   vendor_status, customer_status)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'pending')`,
-        [orderId, m.title, m.description ?? null, m.amount, m.days ?? 0, m.percentage ?? 0, m.mandatory === false ? 0 : 1],
+        [orderId, m.title, m.description ?? null, amount, m.days ?? 0, m.percentage ?? 0, m.mandatory === false ? 0 : 1],
       );
     }
   });
