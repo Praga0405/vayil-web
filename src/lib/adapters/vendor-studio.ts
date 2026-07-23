@@ -105,7 +105,7 @@ export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | n
 export function adaptJob(
   order: BackendOrder,
   plan: BackendOrderPlan[] = [],
-  extra?: { escrow?: { held?: number; released?: number; total?: number } } | null,
+  extra?: { escrow?: { held?: number; released?: number; total?: number }; payment_summary?: Record<string, number> } | null,
 ): MockJob {
   // `order.amount` is the original quote total — does NOT include any
   // materials the customer paid for separately. To stop the vendor card
@@ -177,6 +177,7 @@ export function adaptJob(
     pending:      Math.max(0, total - paid),
     plan_status:  planStatus,
     revision_reason: revisionReason,
+    payment_summary: extra?.payment_summary ?? null,
     milestones,
     materials:    [],   // backend doesn't have a materials table yet
     created_at:   order.created_at ?? new Date().toISOString(),

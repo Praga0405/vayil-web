@@ -53,6 +53,19 @@ export default function VendorJobDetailPage() {
         }
       />
 
+      {job.payment_summary && (
+        <PageSection title="Payment summary" description="Payment state aligned with the mobile payment ledger.">
+          <div className="grid sm:grid-cols-2 gap-3 text-sm">
+            <SummaryRow label="Total quote amount" value={formatCurrency(job.payment_summary.total_quote_amount)} />
+            <SummaryRow label="Initial payment" value={formatCurrency(job.payment_summary.initial_payment)} />
+            <SummaryRow label="Milestone payments" value={formatCurrency(job.payment_summary.milestone_payments)} />
+            <SummaryRow label="Material payments" value={formatCurrency(job.payment_summary.material_payments)} />
+            <SummaryRow label="Total paid" value={formatCurrency(job.payment_summary.total_paid)} />
+            <SummaryRow label="Remaining quote balance" value={formatCurrency(Math.max(Number(job.payment_summary.total_quote_amount) - Number(job.payment_summary.initial_payment) - Number(job.payment_summary.milestone_payments), 0))} />
+          </div>
+        </PageSection>
+      )}
+
       <StatGrid
         columns={4}
         items={[
@@ -153,6 +166,10 @@ export default function VendorJobDetailPage() {
       />
     </div>
   )
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2"><span className="text-gray-500">{label}</span><span className="font-semibold text-navy">{value}</span></div>
 }
 
 function ActionLink({ href, icon: Icon, title, subtitle }: { href: string; icon: any; title: string; subtitle: string }) {

@@ -90,8 +90,8 @@ export default function CustomerMaterialsPage() {
     return () => { cancelled = true }
   }, [id, nonce])
 
-  const unpaid    = state.materials.filter(m => m.status === 'UNPAID')
-  const awaiting  = state.materials.filter(m => m.status === 'AWAITING_PAYMENT')
+  const unpaid    = state.materials.filter(m => m.status === 'UNPAID' || m.status === 'AWAITING_PAYMENT')
+  const awaiting  = state.materials.filter(m => m.status === 'AWAITING_PAYMENT') // requested items remain payable
   const paid      = state.materials.filter(m => m.status === 'PAID')
 
   const selectedItems = unpaid.filter(m => selected.includes(m.id))
@@ -180,11 +180,11 @@ export default function CustomerMaterialsPage() {
         </div>
       )}
 
-      {(awaiting.length > 0 || paid.length > 0) && (
+      {paid.length > 0 && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5">
-          <h2 className="text-base font-bold text-navy mb-3">Already paid / awaiting</h2>
+          <h2 className="text-base font-bold text-navy mb-3">Paid items</h2>
           <div className="space-y-2">
-            {[...awaiting, ...paid].map(m => (
+            {paid.map(m => (
               <div key={m.id} className="flex flex-col xs:flex-row xs:items-center gap-3 p-3 rounded-xl border border-gray-100 opacity-70">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-navy">{m.name}</p>

@@ -63,6 +63,13 @@ export interface MockJob {
   pending: number
   plan_status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REVISION_REQUESTED'
   revision_reason?: string | null
+  payment_summary?: {
+    total_quote_amount: number
+    initial_payment: number
+    milestone_payments: number
+    material_payments: number
+    total_paid: number
+  } | null
   milestones: MockMilestone[]
   materials: MockMaterial[]
   created_at: string

@@ -1,5 +1,47 @@
 # Release Notes
 
+## v4.5.101 - Ask Payment workflow and payment-summary parity (2026-07-23)
+
+### Issue
+
+Vendor Ask Payment requests for milestones and materials were not reaching the customer UI as payable items. A milestone request changed `order_plan.customer_status` to `awaiting_payment`, but the website interpreted every value other than `approved` as an unapproved plan. Customers therefore saw `Approve Plan` / `Review & Approve Plan` again instead of a payment action.
+
+Accepted quotes could also remain displayed as `New Quote` when the enquiry row was stale, and the web payment summaries did not expose the same initial, milestone, material, paid, and remaining breakdown used by the mobile-compatible payment projections.
+
+### Root Cause
+
+- `awaiting_payment` was treated as a plan approval failure instead of an approved plan with a payment request pending.
+- Customer material lock and material checkout gates checked only `customer_status = 'approved'`.
+- Milestone payment verification did not finalize the requested milestone state, allowing the same request to reappear.
+- Vendor enquiry hydration relied only on the stored enquiry status and did not derive accepted status from accepted quotations.
+- Vendor detail returned only aggregate escrow values; the website did not show payment-purpose totals.
+
+### Changes
+
+- Treat `approved`, `awaiting_payment`, and `paid` as approved plan states in customer plan review, project detail, and material checkout.
+- Keep milestone Ask Payment as a payment-state transition; after successful verification, mark only the requested milestone `paid` without reopening the plan approval flow.
+- Allow customer material checkout for both `UNPAID` and vendor-requested `AWAITING_PAYMENT` materials, while keeping already-paid materials non-payable.
+- Derive vendor enquiry workflow status as `accepted` when an accepted/approved quotation exists, preventing an accepted quote from remaining `New Quote`.
+- Add vendor payment-summary projections for total quote amount, initial payment, milestone payments, material payments, total paid, and remaining quote balance.
+- Display milestone Pay actions on the customer project page and show purpose-level payment rows on the customer and vendor project views.
+- Preserve existing Razorpay verification, escrow, OTP/demo login, request bodies, and mobile response envelopes.
+
+### Impact
+
+- Customers can pay a requested milestone without seeing plan approval controls again.
+- Customers can pay materials explicitly requested by the vendor.
+- Successful milestone payment requests no longer remain indefinitely payable.
+- Vendor and customer payment summaries now expose the same payment categories needed for reconciliation.
+- Existing unpaid material selection and normal plan approval remain unchanged.
+
+### Verification
+
+- Backend and frontend production builds are required before merge.
+- Payment request state transitions are covered at the API and UI mapping points.
+- Release must be smoke-tested with one milestone request, one material request, accepted quote status, and duplicate-payment retry.
+- TiDB production migration/data verification remains required before declaring the release fully production-ready.
+
+
 ## v4.5.100 - Project-detail, material-payment, and mobile-data parity (2026-07-22)
 
 ### Summary

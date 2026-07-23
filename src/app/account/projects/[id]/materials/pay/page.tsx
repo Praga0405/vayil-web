@@ -24,7 +24,7 @@ function useCustomerJob(id: string) {
       .then(([pr, mr, sr]: any) => {
         const project = pr.data?.project ?? null
         const plan    = Array.isArray(pr.data?.plan) ? pr.data.plan : []
-        const planStatus = plan.length > 0 && plan.every((p: any) => p.customer_status === 'approved') ? 'APPROVED'
+        const planStatus = plan.length > 0 && plan.every((p: any) => ['approved', 'awaiting_payment', 'paid'].includes(String(p.customer_status).toLowerCase())) ? 'APPROVED'
                          : plan.some((p: any) => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
                          : plan.length ? 'SUBMITTED' : 'NOT_STARTED'
         const materials = (mr.data?.materials ?? []).map((m: any) => ({
