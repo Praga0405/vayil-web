@@ -63,7 +63,7 @@ Migration `014_demo_feedback_workflow.sql` adds:
 - `quotation.rejected_at`
 - `quotation.quote_version`
 
-The existing `quotation.parent_id` is used to link a revised quote to the most recent rejected quote. Existing quote rows remain at version `1`; newly created revised quotes increment from the rejected parent. Rejected-history indicators continue to be derived from the retained quote rows, so historical rejected enquiries remain visible without requiring an unsupported window-function backfill.
+The existing `quotation.parent_id` is used to link a revised quote to the most recent rejected quote. Existing positive `quote_version` values are retained, while unversioned legacy rows default to `1`; newly created revised quotes increment from the rejected parent. Rejected-history indicators continue to be derived from the retained quote rows, so historical rejected enquiries remain visible without depending on a window-function backfill.
 
 #### API behavior
 
@@ -243,15 +243,33 @@ Frontend/shared:
 - Admin operations panel
 - Canonical API client and shared workflow types
 
+### Preview build RCA and hotfix
+
+#### Failed preview symptom
+
+Vercel deployment `915f2f0` completed every database migration and compiled the Next.js application successfully, then failed while prerendering `/search` with `TypeError: Cannot read properties of undefined (reading '0')`.
+
+#### Root cause
+
+The release added Kitchen Renovation, Waterproofing, Bathroom Renovation, AC Install & Maintenance, and Transport to `SERVICE_CATEGORIES` so live listings could resolve a category image. The static search fixture generator still assumed every category slug had matching entries in `VENDOR_NAME_POOL`, `TAGLINES`, `SERVICE_BLUEPRINTS`, `PORTFOLIO_IMAGES`, and `REVIEW_TEMPLATES`. During static generation, `VENDOR_NAME_POOL[service.slug][index]` dereferenced an undefined map for the first newly added category.
+
+#### Fix and impact protection
+
+- `buildVendor` now uses optional fixture lookup and deterministic category-aware defaults.
+- Missing fixture sets use the category label, starting price, short description, and `hero_image`; the category-based image requirement is preserved.
+- Existing categories with bespoke fixtures continue using their original names, services, portfolios, taglines, and reviews.
+- Live API vendor/listing adaptation is unchanged.
+- Future category-master additions can no longer break `/search` static generation merely because optional demo fixtures have not yet been authored.
+
 ### Validation completed before merge
 
 - TypeScript parser validation completed for all changed TypeScript and TSX files.
 - Ownership and state transitions were reviewed across customer, vendor, payment, and admin routes.
+- Vercel logs confirmed migration `014` completed and `next build` compiled successfully before the `/search` prerender failure.
 - Migration is additive; no tables or existing columns are removed.
-- The first Vercel preview exposed a TiDB compatibility issue in migration `014`: multi-column `ALTER TABLE ... ADD COLUMN` statements could be rejected as an unsupported operation and leave subsequent backfills referencing columns that were never added.
-- Migration `014` now follows the repository's established TiDB pattern: one `ADD COLUMN` per `ALTER TABLE`, allowing the migration runner to retry or skip each column independently after a partial deployment.
-- The historical `ROW_NUMBER()` update was removed because TiDB Serverless does not guarantee the required update-from-window behavior. Runtime re-quotes still receive deterministic parent/version values, while existing rows safely retain version `1`.
-- The GitHub/Vercel production build and live workflow smoke tests must complete before this release is marked deployed.
+- During failure analysis, migration `014` was also hardened to the repository's TiDB retry pattern: one `ADD COLUMN` per `ALTER TABLE`, allowing each column to be skipped independently after a partial deployment.
+- The historical `ROW_NUMBER()` update was removed from repeatable migration execution. Existing positive versions are preserved and runtime re-quotes still receive deterministic parent/version values.
+- A fresh GitHub/Vercel preview and live workflow smoke tests must complete before this release is marked deployed.
 
 ### Production smoke-test checklist
 
@@ -268,7 +286,7 @@ Frontend/shared:
 ### Known operational follow-up
 
 - Production migration `014_demo_feedback_workflow.sql` must complete before application traffic reaches routes that select the new columns.
-- Historical rejected quotes receive the best available rejection timestamp and remain visible through status history. They retain version `1`; a historical rejection reason cannot be reconstructed if it was previously stored only by overwriting the quote message.
+- Historical rejected quotes receive the best available rejection timestamp and remain visible through status history. Legacy rows without a positive version default to `1`; a historical rejection reason cannot be reconstructed if it was previously stored only by overwriting the quote message.
 - Razorpay provider checkout, wallet credit, and admin release require a production smoke test with a real test-mode payment after deployment.
 
 ## v4.5.102 - Vercel build hotfix (2026-07-23)
