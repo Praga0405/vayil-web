@@ -19,7 +19,7 @@ function adaptProject(payload: any) {
   return {
     id: project?.order_id ?? null,
     title: project?.title ?? `Project #${project?.order_id ?? ''}`,
-    plan_status: planRows.length > 0 && planRows.every((p: any) => p.customer_status === 'approved') ? 'APPROVED'
+    plan_status: planRows.length > 0 && planRows.every((p: any) => ['approved', 'awaiting_payment', 'paid'].includes(String(p.customer_status).toLowerCase())) ? 'APPROVED'
                 : planRows.some((p: any) => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
                 : planRows.length ? 'SUBMITTED' : 'NOT_STARTED',
     revision_reason: planRows.find((p: any) => p.customer_status === 'revision_requested')?.revision_reason ?? null,
