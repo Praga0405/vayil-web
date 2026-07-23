@@ -63,7 +63,7 @@ Migration `014_demo_feedback_workflow.sql` adds:
 - `quotation.rejected_at`
 - `quotation.quote_version`
 
-The existing `quotation.parent_id` is used to link a revised quote to the most recent rejected quote. Existing quote rows are backfilled with deterministic per-enquiry/vendor version numbers.
+The existing `quotation.parent_id` is used to link a revised quote to the most recent rejected quote. Existing quote rows remain at version `1`; newly created revised quotes increment from the rejected parent. Rejected-history indicators continue to be derived from the retained quote rows, so historical rejected enquiries remain visible without requiring an unsupported window-function backfill.
 
 #### API behavior
 
@@ -248,6 +248,9 @@ Frontend/shared:
 - TypeScript parser validation completed for all changed TypeScript and TSX files.
 - Ownership and state transitions were reviewed across customer, vendor, payment, and admin routes.
 - Migration is additive; no tables or existing columns are removed.
+- The first Vercel preview exposed a TiDB compatibility issue in migration `014`: multi-column `ALTER TABLE ... ADD COLUMN` statements could be rejected as an unsupported operation and leave subsequent backfills referencing columns that were never added.
+- Migration `014` now follows the repository's established TiDB pattern: one `ADD COLUMN` per `ALTER TABLE`, allowing the migration runner to retry or skip each column independently after a partial deployment.
+- The historical `ROW_NUMBER()` update was removed because TiDB Serverless does not guarantee the required update-from-window behavior. Runtime re-quotes still receive deterministic parent/version values, while existing rows safely retain version `1`.
 - The GitHub/Vercel production build and live workflow smoke tests must complete before this release is marked deployed.
 
 ### Production smoke-test checklist
@@ -265,7 +268,7 @@ Frontend/shared:
 ### Known operational follow-up
 
 - Production migration `014_demo_feedback_workflow.sql` must complete before application traffic reaches routes that select the new columns.
-- Historical rejected quotes can be versioned and timestamped, but a historical rejection reason cannot be reconstructed if it was previously stored only by overwriting the quote message.
+- Historical rejected quotes receive the best available rejection timestamp and remain visible through status history. They retain version `1`; a historical rejection reason cannot be reconstructed if it was previously stored only by overwriting the quote message.
 - Razorpay provider checkout, wallet credit, and admin release require a production smoke test with a real test-mode payment after deployment.
 
 ## v4.5.102 - Vercel build hotfix (2026-07-23)
