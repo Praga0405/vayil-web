@@ -156,7 +156,7 @@ async function resolveExpectedAmount(
     // PRD §10.5 — plan must be approved before any material payment.
     const planApproved = await one<{ n: number }>(
       `SELECT COUNT(*) AS n FROM order_plan
-        WHERE order_id = :id AND customer_status = 'approved'`,
+        WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment')`,
       { id: args.order_id },
     );
     if (!planApproved || Number(planApproved.n) === 0) {
