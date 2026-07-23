@@ -198,7 +198,15 @@ vendorRouter.get('/dashboard', async (req: AuthRequest, res, next) => {
   try {
     const [projects, enquiries, wallet] = await Promise.all([
       query<any>('SELECT * FROM orders WHERE vendor_id = :id ORDER BY order_id DESC LIMIT 10', { id: req.user!.id }),
-      query<any>('SELECT * FROM enquiries WHERE vendor_id = :id ORDER BY enquiry_id DESC LIMIT 10', { id: req.user!.id }),
+      query<any>('SELECT e.*,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM quotation q
+                 WHERE q.enquiry_id = e.enquiry_id
+                   AND LOWER(COALESCE(q.status, '')) IN ('accepted', 'approved')
+              ) THEN 'accepted' ELSE e.status END AS workflow_status
+         FROM enquiries e
+        WHERE e.vendor_id = :id
+        ORDER BY e.enquiry_id DESC LIMIT 10', { id: req.user!.id }),
       one<any>('SELECT * FROM vendor_wallet WHERE vendor_id = :id', { id: req.user!.id }),
     ]);
     ok(res, { projects, enquiries, wallet });
@@ -374,7 +382,7 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
            SELECT order_id,
                   COUNT(*) AS total_count,
                   SUM(CASE WHEN customer_status = 'pending'             THEN 1 ELSE 0 END) AS pending_count,
-                  SUM(CASE WHEN customer_status = 'approved'            THEN 1 ELSE 0 END) AS all_approved,
+                  SUM(CASE WHEN customer_status IN ('approved', 'awaiting_payment', 'paid') THEN 1 ELSE 0 END) AS all_approved,
                   SUM(CASE WHEN customer_status = 'revision_requested'  THEN 1 ELSE 0 END) AS has_revision
              FROM order_plan
             GROUP BY order_id
@@ -411,8 +419,15 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
                                   .reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0);
     const escrow_released = intents.filter((i: any) => i.status === 'released')
                                   .reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0);
+    const payment_summary = {
+      total_quote_amount: Number(project?.amount ?? 0),
+      initial_payment: intents.filter((i: any) => i.purpose === 'quote').reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
+      milestone_payments: intents.filter((i: any) => i.purpose === 'milestone').reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
+      material_payments: intents.filter((i: any) => i.purpose === 'materials').reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
+      total_paid: intents.reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
+    };
     ok(res, {
-      project, plan,
+      project, plan, payment_summary,
       escrow: { held: escrow_held, released: escrow_released, total: escrow_held + escrow_released },
     });
   } catch (err) { next(err); }
