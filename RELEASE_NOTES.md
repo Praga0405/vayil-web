@@ -1,5 +1,27 @@
 # Release Notes
 
+## v4.5.102 - Vercel build hotfix (2026-07-23)
+
+### Issue
+
+The v4.5.101 deployment failed during the Next.js build. The failure occurred in `backend/src/routes/vendor.ts` because a newly added multiline SQL query used a single-quoted TypeScript string while the SQL itself contained single-quoted literals.
+
+### Root Cause
+
+The vendor dashboard workflow-status query was syntactically invalid TypeScript. Vercel stopped at the compile stage before the application build completed; database migrations had already completed successfully.
+
+### Fix
+
+- Converted the multiline vendor dashboard SQL query to a template literal.
+- Preserved the accepted-quote workflow-status logic and query behavior.
+- No database schema, authentication, OTP, Razorpay, or API response contract changes were made in this hotfix.
+
+### Verification
+
+- Confirm the Vercel build completes through `next build`.
+- Smoke-test vendor dashboard and enquiry loading after deployment.
+- Re-run the Ask Payment and payment-summary scenarios from v4.5.101.
+
 ## v4.5.101 - Ask Payment workflow and payment-summary parity (2026-07-23)
 
 ### Issue
