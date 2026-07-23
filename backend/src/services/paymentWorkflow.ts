@@ -178,6 +178,16 @@ export async function holdVerifiedPayment(
     );
   }
 
+  if (intent.purpose === 'milestone' && intent.milestone_id && orderId) {
+    // A milestone payment request is a payment-state transition only. It
+    // must never reopen the already approved plan.
+    await conn.query(
+      `UPDATE order_plan SET customer_status = 'paid', updated_at = NOW()
+        WHERE plan_id = ? AND order_id = ?`,
+      [intent.milestone_id, orderId],
+    );
+  }
+
   if (intent.purpose === 'materials' && intent.material_ids) {
     const ids = Array.isArray(intent.material_ids)
       ? intent.material_ids
