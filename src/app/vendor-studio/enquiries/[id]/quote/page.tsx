@@ -78,7 +78,7 @@ export default function SendQuotePage() {
         quoteId ? vendorApi.updateQuote(id, quoteId, payload) : vendorApi.postQuote(id, payload),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
       ]))
-      toast.success(quoteId ? 'Quote updated' : 'Quote sent to customer')
+      toast.success(quoteId ? 'Quote updated' : enquiry.had_rejected_quote ? 'Revised quote sent to customer' : 'Quote sent to customer')
       router.push(`/vendor-studio/enquiries/${id}`)
     } catch (err: any) {
       toast.error(err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to send quote')
@@ -87,6 +87,8 @@ export default function SendQuotePage() {
     }
   }
 
+  const isRequote = Boolean(enquiry.had_rejected_quote && !quoteId)
+
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-10">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-gray-500 hover:text-navy transition">
@@ -94,9 +96,18 @@ export default function SendQuotePage() {
       </button>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-6">
-        <h1 className="text-2xl font-bold text-navy">{quoteId ? 'Edit Quote' : 'Send Quote'}</h1>
+        <h1 className="text-2xl font-bold text-navy">{quoteId ? 'Edit Quote' : isRequote ? 'Send Revised Quote' : 'Send Quote'}</h1>
         <p className="text-sm text-gray-500 mt-1">For <span className="font-semibold">{enquiry.customer_name}</span> — {enquiry.service_title}</p>
       </div>
+
+      {isRequote && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-red-700">Previous quote rejected</p>
+          <p className="text-sm text-red-800 mt-1">
+            {enquiry.rejection_reason || 'Review the previous pricing and terms before sending this new quote version.'}
+          </p>
+        </div>
+      )}
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
         <Input label="Price (₹) *" type="number" value={form.price}
@@ -126,7 +137,7 @@ export default function SendQuotePage() {
         </div>
 
         <Button full loading={submitting} onClick={submit}>
-          <FileText className="w-4 h-4" /> {quoteId ? 'Update Quote' : 'Send Quote'}
+          <FileText className="w-4 h-4" /> {quoteId ? 'Update Quote' : isRequote ? 'Send Revised Quote' : 'Send Quote'}
         </Button>
         <p className="text-center text-xs text-gray-400">Customer will be notified instantly via app and SMS.</p>
       </div>

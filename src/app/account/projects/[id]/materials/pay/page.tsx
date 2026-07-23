@@ -2,12 +2,11 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, StatusBadge, PageLoader } from '@/components/ui'
-import { formatCurrency, calculateFees } from '@/lib/utils'
+import { formatCurrency, calculateMaterialFees } from '@/lib/utils'
 import { ChevronLeft, CreditCard, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { customerApi, paymentsApi } from '@/lib/api/client'
 import { IS_PAYMENT_DEMO_MODE, razorpayTestPrefill } from '@/lib/demoMode'
-import { paymentFeeSettings } from '@/lib/quote-payment'
 
 // Customer-side projection of project + materials so we don't depend
 // on the vendor-only useLiveJob hook (was triggering 403s).
@@ -98,9 +97,8 @@ export default function MaterialsPaymentPage() {
   const unpaid: any[] = job.materials.filter((m: any) => m.status !== 'PAID')
   const toggle = (mid: number) => setSelected(s => s.includes(mid) ? s.filter(x => x !== mid) : [...s, mid])
   const items   = unpaid.filter((m: any) => selected.includes(m.id))
-  const subtotal = items.reduce((s: any, m: any) => s + m.total, 0)
-  const feeSettings = paymentFeeSettings(job.settings)
-  const fees     = calculateFees(subtotal, feeSettings.platformFeePct, feeSettings.gstPct, feeSettings.tdsPct)
+  const subtotal = items.reduce((sum: number, material: any) => sum + Number(material.total), 0)
+  const fees = calculateMaterialFees(subtotal)
 
   const pay = async () => {
     if (items.length === 0) { toast.error('Select at least one material item'); return }
@@ -118,14 +116,14 @@ export default function MaterialsPaymentPage() {
       ? (crypto as any).randomUUID() : `mat-${id}-${Date.now()}`
     try {
       const orderRes: any = await paymentsApi.createOrder({
-        amount:          fees.total,
+        amount:          fees.customerTotal,
         purpose:         'materials',
         order_id:        Number(id),
         material_ids:    items.map((m: any) => m.id),
         idempotency_key: idempotencyKey,
       })
       const orderData = orderRes?.data?.data || orderRes?.data || {}
-      const gatewayAmount = Number(orderData.amount ?? fees.total)
+      const gatewayAmount = Number(orderData.amount ?? fees.customerTotal)
       const key = job.settings?.razorpay_key
               ?? job.settings?.payment_key
               ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? ''
@@ -200,11 +198,13 @@ export default function MaterialsPaymentPage() {
         <div className="space-y-4 lg:sticky lg:top-24">
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-2 text-sm">
             <h3 className="font-bold text-navy mb-1">Payment summary</h3>
-            <Row label="Subtotal"            value={formatCurrency(fees.base)} />
-            <Row label={`Platform Fee (${feeSettings.platformFeePct}%)`} value={formatCurrency(fees.platformFee)} />
-            <Row label={`GST (${feeSettings.gstPct}%)`} value={formatCurrency(fees.gst)} />
+            <Row label="Materials subtotal" value={formatCurrency(fees.base)} />
+            <Row label="Customer platform fee" value={formatCurrency(fees.customerPlatformFee)} />
             <div className="h-px bg-gray-100 my-2" />
-            <Row label="Total Payable"       value={formatCurrency(fees.total)} bold />
+            <Row label="Total Payable" value={formatCurrency(fees.customerTotal)} bold />
+            <p className="pt-1 text-xs text-gray-500">
+              The marketplace fee is deducted from the vendor settlement, not added to your bill.
+            </p>
           </div>
 
           <div className="bg-navy/5 border border-navy/10 rounded-2xl p-4 flex gap-3">
@@ -227,7 +227,7 @@ export default function MaterialsPaymentPage() {
             <CreditCard className="w-4 h-4" />
             {payError ? 'Retry payment'
               : items.length === 0 ? 'Select items to pay'
-              : `Pay ${formatCurrency(fees.total)}`}
+              : `Pay ${formatCurrency(fees.customerTotal)}`}
           </Button>
         </div>
       </div>

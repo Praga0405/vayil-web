@@ -14,9 +14,9 @@ export default function EnquiriesPage() {
   const [filter, setFilter] = useState('ALL')
 
   useEffect(() => {
-    customerApi.getEnquiries()
+    customerApi.listEnquiries()
       .then(r => {
-        const d = r.data?.data || r.data?.result || []
+        const d = r.data?.enquiries ?? r.data?.data?.enquiries ?? r.data?.data ?? r.data?.result ?? []
         setEnquiries(Array.isArray(d) ? d.map(normalizeCustomerEnquiry) : [])
       })
       .finally(() => setLoading(false))
@@ -75,6 +75,11 @@ export default function EnquiriesPage() {
                   <p className="text-xs text-gray-500 mt-0.5">
                     {e.category_name || e.service_category || 'Home Service'} · {formatRelative(e.created_at)}
                   </p>
+                  {e.had_rejected_quote && (
+                    <p className="text-xs font-medium text-red-600 mt-1">
+                      {e.re_quote_received ? 'Revised quote received after an earlier rejection' : 'Previous vendor quote rejected'}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <StatusBadge status={e.status} />

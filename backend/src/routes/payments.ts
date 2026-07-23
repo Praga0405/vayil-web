@@ -24,7 +24,7 @@ import { requireAuth } from '../middleware/auth';
 import { idempotent } from '../middleware/idempotency';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
-import { calculateTax } from '../services/tax';
+import { calculateMaterialSettlement, calculateTax } from '../services/tax';
 import { createRazorpayOrder, verifyRazorpaySignature, verifyWebhookSignature } from '../utils/razorpay';
 import {
   isAcceptedQuoteStatus,
@@ -82,6 +82,8 @@ async function resolveExpectedAmount(
   orderId: number | null;
   vendorId: number | null;
   quotationId: number | null;
+  platformFeeAmount: number;
+  vendorPayoutAmount: number | null;
 }> {
   const settings = await one<any>(
     `SELECT platform_fee_percentage, gst_percentage FROM settings ORDER BY id ASC LIMIT 1`,
@@ -141,6 +143,8 @@ async function resolveExpectedAmount(
       orderId: null,
       vendorId: enquiry.vendor_id ?? null,
       quotationId: Number(quote.quotation_id),
+      platformFeeAmount: tax.platformFee,
+      vendorPayoutAmount: null,
     };
   }
 
@@ -156,7 +160,7 @@ async function resolveExpectedAmount(
     // PRD §10.5 — plan must be approved before any material payment.
     const planApproved = await one<{ n: number }>(
       `SELECT COUNT(*) AS n FROM order_plan
-        WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment')`,
+        WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment', 'paid')`,
       { id: args.order_id },
     );
     if (!planApproved || Number(planApproved.n) === 0) {
@@ -177,13 +181,18 @@ async function resolveExpectedAmount(
       }
     }
     const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const tax = taxFor(subtotal);
+    const settlement = calculateMaterialSettlement(
+      subtotal,
+      Number(settings?.platform_fee_percentage ?? 5),
+    );
     return {
-      expected: tax.customerTotal,
+      expected: settlement.customerTotal,
       baseAmount: subtotal,
       orderId: args.order_id,
       vendorId: order.vendor_id ?? null,
       quotationId: null,
+      platformFeeAmount: settlement.vendorPlatformFee,
+      vendorPayoutAmount: settlement.vendorNetPayout,
     };
   }
 
@@ -208,6 +217,8 @@ async function resolveExpectedAmount(
     orderId: milestone.order_id,
     vendorId: milestone.vendor_id ?? null,
     quotationId: null,
+    platformFeeAmount: tax.platformFee,
+    vendorPayoutAmount: null,
   };
 }
 
@@ -241,7 +252,7 @@ paymentsRouter.post('/create-order',
 
       // 1) Ownership + state validation.
       // 2) Recompute expected amount; reject if client lied about the total.
-      const { expected, baseAmount, orderId, quotationId } = await resolveExpectedAmount(body.purpose, {
+      const { expected, baseAmount, orderId, quotationId, platformFeeAmount, vendorPayoutAmount } = await resolveExpectedAmount(body.purpose, {
         customerId,
         enquiry_id:   body.enquiry_id,
         quotation_id: body.quotation_id,
@@ -277,9 +288,11 @@ paymentsRouter.post('/create-order',
         `INSERT INTO payment_intents
            (idempotency_key, customer_id, order_id, enquiry_id, quotation_id,
             milestone_id, material_ids, base_amount, amount, payment_option,
+            platform_fee_amount, vendor_payout_amount,
             purpose, status, razorpay_order_id)
          VALUES (:key, :customerId, :orderId, :enquiryId, :quotationId,
             :milestoneId, :materialIds, :baseAmount, :amount, :paymentOption,
+            :platformFeeAmount, :vendorPayoutAmount,
             :purpose, 'initiated', :razorpayOrderId)`,
         {
           key:          idempotencyKey,
@@ -292,6 +305,8 @@ paymentsRouter.post('/create-order',
           baseAmount,
           amount:       expected,
           paymentOption: body.purpose === 'quote' ? (body.payment_option ?? 'full') : null,
+          platformFeeAmount,
+          vendorPayoutAmount,
           purpose:      body.purpose,
           razorpayOrderId: rzOrder.id,
         },
@@ -304,6 +319,7 @@ paymentsRouter.post('/create-order',
         base_amount:       baseAmount,
         quotation_id:      quotationId,
         payment_option:    body.purpose === 'quote' ? (body.payment_option ?? 'full') : null,
+        customer_platform_fee: body.purpose === 'materials' ? 0 : platformFeeAmount,
         currency:          body.currency,
         status:            'initiated',
       }, 201);
@@ -440,31 +456,40 @@ paymentsWebhookRouter.post('/razorpay',
  *  before crediting it, so a brand-new vendor never silently
  *  swallows an escrow release.
  * ───────────────────────────────────────────────────────────── */
-export async function releaseEscrow(intentId: number) {
+export async function releaseEscrow(intentId: number, reason = 'escrow_release') {
   const intent = await one<any>(`SELECT * FROM payment_intents WHERE intent_id = :id`, { id: intentId });
-  if (!intent || intent.status !== 'escrow_held') return;
+  if (!intent || intent.status !== 'escrow_held') {
+    return { released: false, amount: 0, platform_fee: 0 };
+  }
 
-  // Resolve the vendor_id outside the transaction so we can pre-ensure
-  // a wallet row exists.
   const vendor = intent.order_id ? await one<{ vendor_id: number | null }>(
     `SELECT vendor_id FROM orders WHERE order_id = :id LIMIT 1`,
     { id: intent.order_id },
   ) : null;
   const vendorId = vendor?.vendor_id ?? null;
+  const isMaterial = String(intent.purpose).toLowerCase() === 'materials';
+  const baseAmount = Number(intent.base_amount ?? intent.amount ?? 0);
+  const platformFee = isMaterial
+    ? Number(intent.platform_fee_amount ?? Math.round(baseAmount * 0.05))
+    : 0;
+  const releaseAmount = isMaterial
+    ? Number(intent.vendor_payout_amount ?? Math.max(0, baseAmount - platformFee))
+    : Number(intent.amount ?? 0);
 
   await transaction(async (conn) => {
-    await conn.query(
-      `UPDATE payment_intents SET status = 'released' WHERE intent_id = ?`,
+    const [updated]: any = await conn.query(
+      `UPDATE payment_intents SET status = 'released'
+        WHERE intent_id = ? AND status = 'escrow_held'`,
       [intentId],
     );
+    if (!updated?.affectedRows) return;
+
     await conn.query(
       `INSERT INTO escrow_ledger (intent_id, order_id, vendor_id, amount, direction, reason)
-       VALUES (?, ?, ?, ?, 'release', 'milestone_complete')`,
-      [intentId, intent.order_id, vendorId, intent.amount],
+       VALUES (?, ?, ?, ?, 'release', ?)`,
+      [intentId, intent.order_id, vendorId, releaseAmount, reason],
     );
     if (vendorId) {
-      // Make sure the wallet row exists, then credit it. Two-step keeps the
-      // SQL portable across MySQL versions.
       await conn.query(
         `INSERT INTO vendor_wallet (vendor_id, balance, total_earning)
          VALUES (?, 0, 0)
@@ -475,8 +500,38 @@ export async function releaseEscrow(intentId: number) {
         `UPDATE vendor_wallet
             SET balance = balance + ?, total_earning = total_earning + ?
           WHERE vendor_id = ?`,
-        [intent.amount, intent.amount, vendorId],
+        [releaseAmount, releaseAmount, vendorId],
       );
+      await conn.query(
+        `INSERT INTO vendor_transactions
+           (vendor_id, order_id, type, amount, status, reference_id, description, created_at)
+         SELECT ?, ?, 'earning', ?, 'completed', ?, ?, NOW()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM vendor_transactions WHERE reference_id = ? LIMIT 1
+          )`,
+        [
+          vendorId, intent.order_id, releaseAmount, `admin-release:${intentId}`,
+          `Admin escrow release for order #${intent.order_id}`,
+          `admin-release:${intentId}`,
+        ],
+      ).catch(() => undefined);
+      if (platformFee > 0) {
+        await conn.query(
+          `INSERT INTO platform_transactions
+             (order_id, amount, description, transaction_type, reference_id)
+           SELECT ?, ?, ?, 'credit', ?
+            WHERE NOT EXISTS (
+              SELECT 1 FROM platform_transactions WHERE reference_id = ? LIMIT 1
+            )`,
+          [
+            intent.order_id, platformFee,
+            `Vendor material platform fee for order #${intent.order_id}`,
+            `material-fee:${intentId}`, `material-fee:${intentId}`,
+          ],
+        ).catch(() => undefined);
+      }
     }
   });
+
+  return { released: true, amount: releaseAmount, platform_fee: platformFee };
 }

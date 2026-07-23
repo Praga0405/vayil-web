@@ -59,11 +59,28 @@ export default function VendorJobDetailPage() {
             <SummaryRow label="Total quote amount" value={formatCurrency(job.payment_summary.total_quote_amount)} />
             <SummaryRow label="Initial payment" value={formatCurrency(job.payment_summary.initial_payment)} />
             <SummaryRow label="Milestone payments" value={formatCurrency(job.payment_summary.milestone_payments)} />
-            <SummaryRow label="Material payments" value={formatCurrency(job.payment_summary.material_payments)} />
+            <SummaryRow label="Material payments (customer)" value={formatCurrency(job.payment_summary.material_payments)} />
+            <SummaryRow label="Material marketplace fee (vendor)" value={formatCurrency(job.payment_summary.material_platform_fees ?? 0)} />
+            <SummaryRow label="Material net payout" value={formatCurrency(job.payment_summary.material_vendor_payout ?? job.payment_summary.material_payments)} />
             <SummaryRow label="Total paid" value={formatCurrency(job.payment_summary.total_paid)} />
             <SummaryRow label="Remaining quote balance" value={formatCurrency(Math.max(Number(job.payment_summary.total_quote_amount) - Number(job.payment_summary.initial_payment) - Number(job.payment_summary.milestone_payments), 0))} />
           </div>
         </PageSection>
+      )}
+
+      {job.release_status === 'awaiting_release' && (
+        <div className="bg-orange/5 border border-orange/30 rounded-2xl p-4">
+          <p className="text-sm font-semibold text-navy">Customer closed and rated this project</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Funds remain in escrow until Vayil staff complete the release from the admin panel.
+          </p>
+        </div>
+      )}
+      {job.release_status === 'released' && (
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
+          <p className="text-sm font-semibold text-green-800">Funds released by Vayil</p>
+          {job.customer_rating && <p className="text-xs text-green-700 mt-1">Customer rating: {job.customer_rating} / 5</p>}
+        </div>
       )}
 
       <StatGrid

@@ -5,8 +5,8 @@ import { requireAuth } from '../middleware/auth';
 import { idempotent } from '../middleware/idempotency';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
-import { calculateTax } from '../services/tax';
-import { releaseEscrow } from './payments';
+import { calculateMaterialSettlement, calculateTax } from '../services/tax';
+import * as projectSvc from '../services/projectService';
 import * as customerSvc from '../services/customerService';
 import * as enquirySvc from '../services/enquiryService';
 
@@ -83,7 +83,40 @@ customerRouter.get('/vendors/:id', async (req, res, next) => {
 
 customerRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
   try {
-    const enquiries = await query<any>('SELECT * FROM enquiries WHERE customer_id = :id ORDER BY enquiry_id DESC', { id: req.user!.id });
+    const enquiries = await query<any>(
+      `SELECT e.*,
+              COALESCE(qs.quote_count, 0) AS quote_count,
+              COALESCE(qs.rejected_quote_count, 0) AS rejected_quote_count,
+              COALESCE(qs.active_quote_count, 0) AS active_quote_count,
+              lq.quotation_id AS latest_quotation_id,
+              lq.status AS latest_quote_status,
+              lq.rejection_reason AS latest_rejection_reason,
+              lq.rejected_at AS latest_quote_rejected_at,
+              CASE
+                WHEN LOWER(COALESCE(e.status, '')) = 'completed' OR e.status_int = 10 THEN 'COMPLETED'
+                WHEN COALESCE(qs.accepted_quote_count, 0) > 0 THEN 'AWAITING_PAYMENT'
+                WHEN COALESCE(qs.active_quote_count, 0) > 0 THEN 'QUOTED'
+                WHEN COALESCE(qs.rejected_quote_count, 0) > 0 THEN 'REJECTED_QUOTE'
+                ELSE UPPER(COALESCE(NULLIF(e.status, ''), 'NEW'))
+              END AS workflow_status,
+              CASE WHEN COALESCE(qs.rejected_quote_count, 0) > 0 THEN 1 ELSE 0 END AS had_rejected_quote
+         FROM enquiries e
+         LEFT JOIN (
+           SELECT enquiry_id,
+                  COUNT(*) AS quote_count,
+                  SUM(CASE WHEN LOWER(COALESCE(status, '')) = 'rejected' OR status_int = 3 THEN 1 ELSE 0 END) AS rejected_quote_count,
+                  SUM(CASE WHEN LOWER(COALESCE(status, '')) NOT IN ('rejected','cancelled','deleted','inactive')
+                            AND COALESCE(amount, 0) > 0 THEN 1 ELSE 0 END) AS active_quote_count,
+                  SUM(CASE WHEN LOWER(COALESCE(status, '')) IN ('accepted','approved') OR status_int = 2 THEN 1 ELSE 0 END) AS accepted_quote_count,
+                  MAX(quotation_id) AS latest_quote_id
+             FROM quotation
+            GROUP BY enquiry_id
+         ) qs ON qs.enquiry_id = e.enquiry_id
+         LEFT JOIN quotation lq ON lq.quotation_id = qs.latest_quote_id
+        WHERE e.customer_id = :id
+        ORDER BY e.enquiry_id DESC`,
+      { id: req.user!.id },
+    );
     ok(res, { enquiries });
   } catch (err) { next(err); }
 });
@@ -155,8 +188,35 @@ customerRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
       { id: req.params.id, customerId: req.user!.id },
     );
     if (!enquiry) throw new ApiError(404, 'Enquiry not found');
-    const quotes = await query<any>('SELECT * FROM quotation WHERE enquiry_id = :id ORDER BY quotation_id DESC', { id: req.params.id });
-    ok(res, { enquiry, quotes });
+    const quotes = await query<any>(
+      'SELECT * FROM quotation WHERE enquiry_id = :id ORDER BY quotation_id DESC',
+      { id: req.params.id },
+    );
+    const rejectedQuotes = quotes.filter((quote: any) =>
+      String(quote.status ?? '').toLowerCase() === 'rejected' || Number(quote.status_int) === 3,
+    );
+    const activeQuotes = quotes.filter((quote: any) =>
+      !['rejected', 'cancelled', 'deleted', 'inactive'].includes(String(quote.status ?? '').toLowerCase()),
+    );
+    const latestRejected = rejectedQuotes[0] ?? null;
+    ok(res, {
+      enquiry: {
+        ...enquiry,
+        quote_count: quotes.length,
+        rejected_quote_count: rejectedQuotes.length,
+        had_rejected_quote: rejectedQuotes.length > 0,
+        re_quote_received: rejectedQuotes.length > 0 && activeQuotes.length > 0,
+        latest_rejection_reason: latestRejected?.rejection_reason ?? null,
+        latest_quote_rejected_at: latestRejected?.rejected_at ?? null,
+      },
+      quotes,
+      quote_history: {
+        rejected_count: rejectedQuotes.length,
+        had_rejected_quote: rejectedQuotes.length > 0,
+        re_quote_received: rejectedQuotes.length > 0 && activeQuotes.length > 0,
+        latest_rejected_quote: latestRejected,
+      },
+    });
   } catch (err) { next(err); }
 });
 
@@ -189,9 +249,34 @@ customerRouter.get('/projects', async (req: AuthRequest, res, next) => {
 
 customerRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
   try {
-    const project = await one<any>('SELECT * FROM orders WHERE order_id = :id AND customer_id = :customerId', { id: req.params.id, customerId: req.user!.id });
-    const plan = await query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: req.params.id });
-    ok(res, { project, plan });
+    const project = await one<any>(
+      'SELECT * FROM orders WHERE order_id = :id AND customer_id = :customerId',
+      { id: req.params.id, customerId: req.user!.id },
+    );
+    if (!project) throw new ApiError(404, 'Project not found');
+    const [plan, signoff, finalStep] = await Promise.all([
+      query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: req.params.id }),
+      one<any>('SELECT * FROM signoffs WHERE order_id = :id LIMIT 1', { id: req.params.id }),
+      one<any>(
+        `SELECT * FROM order_step_logs
+          WHERE order_id = :id AND step = 4
+          ORDER BY id DESC LIMIT 1`,
+        { id: req.params.id },
+      ),
+    ]);
+    const finalStepReady = plan.length > 0 && plan.every((milestone: any) =>
+      String(milestone.vendor_status ?? '').toLowerCase() === 'completed'
+        || Number(milestone.status) === 10,
+    );
+    ok(res, {
+      project,
+      plan,
+      signoff,
+      final_step: finalStep,
+      final_step_ready: finalStepReady,
+      can_rate_and_close: finalStepReady && !signoff,
+      release_status: signoff?.release_status ?? null,
+    });
   } catch (err) { next(err); }
 });
 
@@ -227,6 +312,7 @@ customerRouter.get('/payments', async (req: AuthRequest, res, next) => {
       `SELECT intent_id AS id, customer_id, order_id, enquiry_id, milestone_id,
               quotation_id, COALESCE(base_amount, amount) AS base_amount,
               amount, payment_option, purpose, status,
+              platform_fee_amount, vendor_payout_amount,
               razorpay_order_id, razorpay_payment_id, created_at
          FROM payment_intents
         WHERE customer_id = :id
@@ -320,12 +406,28 @@ customerRouter.post('/quotes/:quoteId/reject', async (req: AuthRequest, res, nex
   try {
     const { quotation_id, enquiry_id } = await assertQuoteBelongs(req.params.quoteId, req.user!.id);
     const reason = z.object({ reason: z.string().optional() }).parse(req.body || {}).reason ?? null;
-    await exec(
-      `UPDATE quotation SET status = 'rejected', status_int = 3, message = COALESCE(:reason, message)
-         WHERE quotation_id = :id`,
-      { id: quotation_id, reason },
-    );
-    ok(res, { quotation_id, enquiry_id, status: 'rejected', reason });
+    await transaction(async (conn) => {
+      await conn.query(
+        `UPDATE quotation
+            SET status = 'rejected',
+                status_int = 3,
+                rejection_reason = ?,
+                rejected_at = NOW()
+          WHERE quotation_id = ?`,
+        [reason, quotation_id],
+      );
+      await conn.query(
+        `UPDATE enquiries SET status = 'quote_rejected', status_int = 3 WHERE enquiry_id = ?`,
+        [enquiry_id],
+      );
+    });
+    ok(res, {
+      quotation_id,
+      enquiry_id,
+      status: 'rejected',
+      reason,
+      re_quote_available: true,
+    });
   } catch (err) { next(err); }
 });
 
@@ -399,54 +501,36 @@ customerRouter.post('/projects/:id/materials/payment-order',
       { id: req.params.id, ids: material_ids } as any,
     );
     if (rows.length !== material_ids.length) throw new ApiError(400, 'One or more materials not found');
-    const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const tax = calculateTax({ baseAmount: subtotal });
+    const subtotal = rows.reduce((sum, row) => sum + Number(row.total), 0);
+    const settlement = calculateMaterialSettlement(subtotal);
     // Mark items awaiting_payment optimistically — payment verification flips to PAID.
     await exec(
       `UPDATE materials SET status = 'AWAITING_PAYMENT' WHERE material_id IN (:ids)`,
       { ids: material_ids } as any,
     );
-    ok(res, { subtotal, tax, total: tax.customerTotal, material_ids });
+    ok(res, {
+      subtotal: settlement.baseAmount,
+      total: settlement.customerTotal,
+      customer_platform_fee: settlement.customerPlatformFee,
+      material_ids,
+    });
   } catch (err) { next(err); }
 });
 
 /* ── Sign-off / rework ───────────────────────────────────── */
 customerRouter.post('/projects/:id/signoff', async (req: AuthRequest, res, next) => {
   try {
-    await assertProjectBelongs(req.params.id, req.user!.id);
     const { rating, comment } = z.object({
-      rating: z.number().int().min(1).max(5).optional(),
-      comment: z.string().optional(),
+      rating: z.number().int().min(1).max(5),
+      comment: z.string().max(2000).optional(),
     }).parse(req.body);
-
-    await transaction(async (conn) => {
-      await conn.query(
-        `INSERT INTO signoffs (order_id, customer_id, rating, comment)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment)`,
-        [req.params.id, req.user!.id, rating ?? null, comment ?? null],
-      );
-      await conn.query(
-        `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
-        [req.params.id],
-      );
-      // Flip the parent enquiry so the vendor's Enquiries → Completed
-      // tab populates (matches projectService.signoffOrder).
-      await conn.query(
-        `UPDATE enquiries e JOIN orders o ON o.enquiry_id = e.enquiry_id
-            SET e.status = 'completed' WHERE o.order_id = ?`,
-        [req.params.id],
-      );
-    });
-
-    // Release any held escrow for this order.
-    const intents = await query<any>(
-      `SELECT intent_id FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
-      { id: req.params.id },
+    const result = await projectSvc.closeProjectByCustomer(
+      req.params.id,
+      req.user!.id,
+      rating,
+      comment,
     );
-    for (const i of intents) await releaseEscrow(i.intent_id);
-
-    ok(res, { order_id: Number(req.params.id), status: 'completed' });
+    ok(res, result);
   } catch (err) { next(err); }
 });
 

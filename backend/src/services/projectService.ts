@@ -5,6 +5,7 @@
  */
 import { exec, one, query, transaction } from '../db';
 import { ApiError } from '../utils/http';
+import * as reviewSvc from './reviewService';
 
 export async function assertOrderBelongsToVendor(orderId: number | string, vendorId: number | string) {
   const row = await one<any>(
@@ -160,16 +161,64 @@ export async function postMilestoneUpdate(planId: number | string, vendorId: num
 
 export async function completeMilestone(planId: number | string, vendorId: number | string) {
   const owner = await one<any>(
-    `SELECT o.vendor_id FROM order_plan p JOIN orders o ON o.order_id = p.order_id
-      WHERE p.plan_id = :id LIMIT 1`,
+    `SELECT o.vendor_id, p.order_id
+       FROM order_plan p
+       JOIN orders o ON o.order_id = p.order_id
+      WHERE p.plan_id = :id
+      LIMIT 1`,
     { id: planId },
   );
   if (!owner || Number(owner.vendor_id) !== Number(vendorId)) throw new ApiError(404, 'Milestone not found');
-  await exec(
-    `UPDATE order_plan SET vendor_status = 'completed', updated_at = NOW() WHERE plan_id = :id`,
-    { id: planId },
-  );
-  return { plan_id: Number(planId), status: 'completed' };
+
+  let finalStepReady = false;
+  await transaction(async (conn) => {
+    await conn.query(
+      `UPDATE order_plan
+          SET vendor_status = 'completed', status = 10, balance_cost = 0, updated_at = NOW()
+        WHERE plan_id = ?`,
+      [planId],
+    );
+    const [pendingRows]: any = await conn.query(
+      `SELECT COUNT(*) AS pending_count
+         FROM order_plan
+        WHERE order_id = ?
+          AND NOT (vendor_status = 'completed' OR status = 10)`,
+      [owner.order_id],
+    );
+    finalStepReady = Number(pendingRows?.[0]?.pending_count ?? 0) === 0;
+    if (finalStepReady) {
+      const [stepRows]: any = await conn.query(
+        `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 4 LIMIT 1`,
+        [owner.order_id],
+      );
+      if (Array.isArray(stepRows) && stepRows.length) {
+        await conn.query(
+          `UPDATE order_step_logs
+              SET step_status = '1', performed_by = 'VENDOR',
+                  performed_by_id = ?, remarks = 'All milestones completed'
+            WHERE id = ?`,
+          [vendorId, stepRows[0].id],
+        );
+      } else {
+        await conn.query(
+          `INSERT INTO order_step_logs
+             (order_id, step, step_status, performed_by, performed_by_id, remarks)
+           VALUES (?, 4, '1', 'VENDOR', ?, 'All milestones completed')`,
+          [owner.order_id, vendorId],
+        );
+      }
+      await conn.query(
+        `UPDATE orders SET status = 'awaiting_customer_close' WHERE order_id = ?`,
+        [owner.order_id],
+      );
+    }
+  });
+  return {
+    plan_id: Number(planId),
+    order_id: Number(owner.order_id),
+    status: 'completed',
+    final_step_ready: finalStepReady,
+  };
 }
 
 export async function requestMilestonePayment(planId: number | string, vendorId: number | string) {
@@ -186,66 +235,200 @@ export async function requestMilestonePayment(planId: number | string, vendorId:
   return { plan_id: Number(planId), status: 'awaiting_payment', amount: Number(owner.amount) };
 }
 
-export async function signoffOrder(orderId: number | string, customerId: number | string, rating?: number, comment?: string) {
+export async function closeProjectByCustomer(
+  orderId: number | string,
+  customerId: number | string,
+  rating: number,
+  comment?: string,
+) {
+  if (!Number.isFinite(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
+    throw new ApiError(400, 'rating must be 1-5');
+  }
   await assertOrderBelongsToCustomer(orderId, customerId);
-  await transaction(async (conn) => {
-    await conn.query(
-      `INSERT INTO signoffs (order_id, customer_id, rating, comment)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment)`,
-      [orderId, customerId, rating ?? null, comment ?? null],
-    );
-    await conn.query(`UPDATE orders SET status = 'completed' WHERE order_id = ?`, [orderId]);
-    // Also flip the parent enquiry so the vendor's Enquiries → Completed
-    // tab populates. Without this the enquiry sits at 'accepted'/'quoted'
-    // forever and the Completed tab is always empty even after signoff.
-    await conn.query(
-      `UPDATE enquiries e
-          JOIN orders o ON o.enquiry_id = e.enquiry_id
-          SET e.status = 'completed'
-        WHERE o.order_id = ?`,
-      [orderId],
-    );
-  });
-  // Release every held payment_intent for canonical project signoff.
-  // The mobile /customer/finalStep route is only a plan-confirmation
-  // step update and must not call this service.
-  const { releaseEscrow } = await import('../routes/payments');
-  const intents = await query<any>(
-    `SELECT intent_id, amount FROM payment_intents WHERE order_id = :id AND status = 'escrow_held'`,
+
+  const order = await one<any>(
+    `SELECT o.order_id, o.vendor_id, o.service_id, o.enquiry_id, o.status
+       FROM orders o
+      WHERE o.order_id = :id AND o.customer_id = :customerId
+      LIMIT 1`,
+    { id: orderId, customerId },
+  );
+  if (!order) throw new ApiError(404, 'Order not found');
+
+  const existingSignoff = await one<any>(
+    `SELECT * FROM signoffs WHERE order_id = :id LIMIT 1`,
     { id: orderId },
   );
-  for (const i of intents) await releaseEscrow(i.intent_id);
-
-  // Mirror the escrow release into the mobile team's vendor_transactions
-  // + platform_transactions tables so mobile clients see consistent
-  // earnings + platform-fee numbers without needing escrow_ledger.
-  const order = await one<any>(`SELECT vendor_id, amount FROM orders WHERE order_id = :id`, { id: orderId });
-  if (order?.vendor_id) {
-    const totalReleased = intents.reduce((s: number, i: any) => s + Number(i.amount), 0);
-    if (totalReleased > 0) {
-      const wallet = await one<any>(`SELECT balance FROM vendor_wallet WHERE vendor_id = :id`, { id: order.vendor_id });
-      await exec(
-        `INSERT INTO vendor_transactions (vendor_id, order_id, type, amount, balance_after, description, created_at)
-         VALUES (:vid, :oid, 'earning', :amt, :bal, :desc, NOW())`,
-        {
-          vid: order.vendor_id, oid: orderId, amt: totalReleased,
-          bal: Number(wallet?.balance ?? 0),
-          desc: `Earning from order #${orderId} signoff`,
-        },
-      ).catch(() => {});
-      // Platform earned: the customer paid customerTotal but the vendor
-      // gets baseAmount-platformFee. Difference = platform earning.
-      const baseAmount = Number(order.amount ?? 0);
-      const platformShare = Math.max(0, totalReleased - baseAmount);
-      if (platformShare > 0) {
-        await exec(
-          `INSERT INTO platform_transactions (order_id, amount, description, transaction_type)
-           VALUES (:oid, :amt, :desc, 'credit')`,
-          { oid: orderId, amt: platformShare, desc: `Platform fee for order #${orderId}` },
-        ).catch(() => {});
-      }
-    }
+  if (String(existingSignoff?.release_status ?? '').toLowerCase() === 'released') {
+    return {
+      order_id: Number(orderId),
+      status: 'completed',
+      release_status: 'released',
+      rating: Number(existingSignoff.rating ?? rating),
+      reused: true,
+    };
   }
-  return { order_id: Number(orderId), status: 'completed' };
+
+  const milestoneState = await one<any>(
+    `SELECT COUNT(*) AS total_count,
+            SUM(CASE WHEN vendor_status = 'completed' OR status = 10 THEN 0 ELSE 1 END) AS pending_count
+       FROM order_plan
+      WHERE order_id = :id`,
+    { id: orderId },
+  );
+  if (Number(milestoneState?.total_count ?? 0) === 0) {
+    throw new ApiError(409, 'The implementation plan has no milestones to close');
+  }
+  if (Number(milestoneState?.pending_count ?? 0) > 0) {
+    throw new ApiError(409, 'All milestones must be completed before the project can be closed');
+  }
+
+  await transaction(async (conn) => {
+    const [stepRows]: any = await conn.query(
+      `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 4 LIMIT 1`,
+      [orderId],
+    );
+    if (Array.isArray(stepRows) && stepRows.length) {
+      await conn.query(
+        `UPDATE order_step_logs
+            SET step_status = '1', performed_by = 'CUSTOMER',
+                performed_by_id = ?, remarks = 'Customer rated and closed the project'
+          WHERE id = ?`,
+        [customerId, stepRows[0].id],
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO order_step_logs
+           (order_id, step, step_status, performed_by, performed_by_id, remarks)
+         VALUES (?, 4, '1', 'CUSTOMER', ?, 'Customer rated and closed the project')`,
+        [orderId, customerId],
+      );
+    }
+    await conn.query(
+      `INSERT INTO signoffs
+         (order_id, customer_id, rating, comment, release_status, released_at, released_by, release_note)
+       VALUES (?, ?, ?, ?, 'awaiting_release', NULL, NULL, NULL)
+       ON DUPLICATE KEY UPDATE
+         rating = VALUES(rating),
+         comment = VALUES(comment),
+         release_status = CASE
+           WHEN release_status = 'released' THEN release_status
+           ELSE 'awaiting_release'
+         END`,
+      [orderId, customerId, Number(rating), comment ?? null],
+    );
+    await conn.query(
+      `UPDATE orders SET status = 'awaiting_release' WHERE order_id = ?`,
+      [orderId],
+    );
+    await conn.query(
+      `UPDATE enquiries
+          SET status = 'completed', status_int = 10
+        WHERE enquiry_id = ?`,
+      [order.enquiry_id],
+    );
+  });
+
+  const review = await reviewSvc.addReview({
+    customer_id: customerId,
+    vendor_id: order.vendor_id,
+    order_id: orderId,
+    rating: Number(rating),
+    title: 'Project completion',
+    comment,
+  });
+
+  return {
+    order_id: Number(orderId),
+    status: 'awaiting_release',
+    release_status: 'awaiting_release',
+    rating: Number(rating),
+    review,
+  };
+}
+
+export async function releaseSignedOffOrder(
+  orderId: number | string,
+  staffId: number | string,
+  note?: string,
+) {
+  const signoff = await one<any>(
+    `SELECT s.*, o.vendor_id, o.enquiry_id
+       FROM signoffs s
+       JOIN orders o ON o.order_id = s.order_id
+      WHERE s.order_id = :id
+      LIMIT 1`,
+    { id: orderId },
+  );
+  if (!signoff) throw new ApiError(404, 'Customer project close request not found');
+  if (String(signoff.release_status).toLowerCase() === 'released') {
+    return {
+      order_id: Number(orderId),
+      status: 'completed',
+      release_status: 'released',
+      released_at: signoff.released_at,
+      reused: true,
+    };
+  }
+  if (String(signoff.release_status).toLowerCase() !== 'awaiting_release') {
+    throw new ApiError(409, 'Project is not awaiting fund release');
+  }
+
+  const intents = await query<any>(
+    `SELECT intent_id
+       FROM payment_intents
+      WHERE order_id = :id AND status = 'escrow_held'
+      ORDER BY intent_id ASC`,
+    { id: orderId },
+  );
+  const { releaseEscrow } = await import('../routes/payments');
+  const releases = [];
+  for (const intent of intents) {
+    releases.push(await releaseEscrow(intent.intent_id, 'admin_project_release'));
+  }
+
+  await transaction(async (conn) => {
+    await conn.query(
+      `UPDATE signoffs
+          SET release_status = 'released',
+              released_at = NOW(),
+              released_by = ?,
+              release_note = ?
+        WHERE order_id = ? AND release_status = 'awaiting_release'`,
+      [staffId, note ?? null, orderId],
+    );
+    await conn.query(
+      `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
+      [orderId],
+    );
+    await conn.query(
+      `UPDATE enquiries SET status = 'completed', status_int = 10 WHERE enquiry_id = ?`,
+      [signoff.enquiry_id],
+    );
+  });
+
+  return {
+    order_id: Number(orderId),
+    status: 'completed',
+    release_status: 'released',
+    released_intents: releases.length,
+    released_amount: releases.reduce(
+      (sum: number, release: any) => sum + Number(release?.vendor_payout_amount ?? release?.amount ?? 0),
+      0,
+    ),
+    reused: false,
+  };
+}
+
+/**
+ * Backwards-compatible service name. Customer signoff now records the rating
+ * and closes the project; only the protected admin release endpoint moves funds.
+ */
+export async function signoffOrder(
+  orderId: number | string,
+  customerId: number | string,
+  rating?: number,
+  comment?: string,
+) {
+  return closeProjectByCustomer(orderId, customerId, Number(rating), comment);
 }

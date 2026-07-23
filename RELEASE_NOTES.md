@@ -1,5 +1,273 @@
 # Release Notes
 
+## v4.5.103 - Demo feedback workflow parity (2026-07-23)
+
+### Scope
+
+This release implements the five workflow gaps identified during the July 22 demo:
+
+1. Category-aware fallback images for vendor services.
+2. Persistent re-quote history after a customer rejects a quote.
+3. Rejected quote visibility in Customer and Vendor My Enquiries.
+4. Customer-at-cost material checkout with the 5% marketplace fee deducted only from the vendor settlement.
+5. Customer rating/project closure separated from staff-controlled escrow release.
+
+The demo customer/vendor OTP flow, the `123456` demo code behavior, token promotion, vendor onboarding, and existing mobile compatibility endpoints were intentionally not changed.
+
+### 1. Category-based default service images
+
+#### Issue
+
+Listings with `service_image = null`, an empty string, `[]`, nested/encoded arrays, or an invalid comma-separated image value rendered a broken image or a generic cleaning image. Numeric category IDs from the mobile/backend master data were not mapped to the website category slugs.
+
+#### Root cause
+
+The website adapter treated any non-empty `service_image` string as usable. A value such as `"[]"` is truthy, so category fallback was never reached. The fallback resolver also compared numeric category IDs to text slugs and therefore failed for the production category master IDs.
+
+#### Implementation
+
+- Added robust first-image extraction for arrays, JSON-encoded arrays, nested arrays, comma-separated URLs, and direct URLs.
+- Empty, `null`, and `[]` values are ignored.
+- Added category-ID mapping for:
+  - `2` Electrical
+  - `3` Kitchen Renovation
+  - `4` Painting
+  - `5` Waterproofing
+  - `6` Bathroom Renovation
+  - `15` Plumbing
+  - `16` AC Install & Maintenance
+  - `17` Transport
+  - `23` Interior Design
+- Added category artwork/catalog metadata for Kitchen Renovation, Waterproofing, Bathroom Renovation, AC Install & Maintenance, and Transport.
+- Vendor-level category data is used when a listing-level category is unavailable.
+
+#### Functional impact
+
+Customer search, category results, vendor cards, vendor detail covers, and service cards now show the category default image instead of a broken image whenever the vendor has not uploaded a valid service image.
+
+### 2. Re-quote lineage and rejected-quote history
+
+#### Issue
+
+A rejected quote disappeared from the active quote selector. Sending another quote replaced the user-visible context, so neither side could tell that the new quote followed an earlier customer rejection.
+
+#### Root cause
+
+The workflow read models filtered rejected quotes before deriving enquiry state. Quote creation did not persist a parent/version relationship, and customer rejection overwrote the original quote message with the rejection reason.
+
+#### Database contract
+
+Migration `014_demo_feedback_workflow.sql` adds:
+
+- `quotation.rejection_reason`
+- `quotation.rejected_at`
+- `quotation.quote_version`
+
+The existing `quotation.parent_id` is used to link a revised quote to the most recent rejected quote. Existing quote rows are backfilled with deterministic per-enquiry/vendor version numbers.
+
+#### API behavior
+
+- Customer rejection preserves the original quote message.
+- Rejection reason and timestamp are stored separately.
+- The enquiry moves to `quote_rejected` while remaining open for a revised quote.
+- Vendor quote creation is allowed after quote rejection.
+- A revised quote is inserted as a new row; the rejected row is never overwritten.
+- New quote responses include:
+  - `re_quote`
+  - `previous_rejected_quote_id`
+- Vendor enquiry responses include:
+  - `rejected_quote_count`
+  - `had_rejected_quote`
+  - `re_quote_available`
+  - `re_quote_sent`
+  - `rejection_reason`
+  - `latest_rejected_quote`
+- Customer enquiry/detail responses include the equivalent rejected-history flags and retain the full `quotes` array.
+
+#### UI behavior
+
+- Customer My Enquiries keeps rejected entries visible in the Rejected filter.
+- Vendor My Enquiries keeps rejected entries visible in the Rejected tab.
+- Both lists display whether an earlier quote was rejected.
+- Customer enquiry detail displays the retained rejected-quote history and identifies a later offer as a revised quote.
+- Vendor enquiry detail displays the rejection reason and exposes **Send Revised Quote** when allowed.
+- The quote form identifies re-quote mode and creates a new version rather than editing the rejected record.
+
+### 3. Material payment settlement
+
+#### Issue
+
+The customer material checkout added the normal 5% platform fee and GST preview. The requirement is for the customer to pay only the material cost; Vayil's 5% fee belongs on the vendor settlement side.
+
+#### Root cause
+
+Material payment reused the quote/milestone `calculateTax` path. Escrow release also credited the full customer payment without a persisted vendor settlement amount.
+
+#### New calculation
+
+For a material subtotal of `M`:
+
+- Customer material subtotal: `M`
+- Customer platform fee: `0`
+- Customer total: `M`
+- Vendor marketplace fee: `round(M * 5%)` (or the configured platform percentage on the server)
+- Vendor payout: `M - vendor marketplace fee`
+
+No customer-side platform fee or fee GST is added to a material Razorpay order.
+
+#### Persistence and release
+
+Migration `014_demo_feedback_workflow.sql` adds:
+
+- `payment_intents.platform_fee_amount`
+- `payment_intents.vendor_payout_amount`
+
+The values are written when the payment intent is created, so a later settings change cannot alter an existing settlement. Historical material intents are backfilled at 5%.
+
+At staff release:
+
+- The vendor wallet receives `vendor_payout_amount`.
+- The vendor transaction records the net earning once.
+- The platform transaction records the material marketplace fee once.
+- Reference IDs make repeated release calls idempotent.
+- Customer payment responses expose only the customer total and customer fee (`0`); vendor deductions are shown only on vendor/admin surfaces.
+
+#### UI behavior
+
+- Customer material payment summary shows material subtotal, customer platform fee `₹0`, and total payable equal to the subtotal.
+- Vendor Materials shows customer material total, the 5% vendor-side deduction, and estimated vendor payout.
+- Vendor project payment summary shows material customer payments, material marketplace fees, and material net payout.
+
+### 4. Final-step customer close and admin-only fund release
+
+#### Issue
+
+The customer button combined sign-off and escrow release. It was enabled based on plan approval rather than final milestone completion, allowing premature closure and bypassing staff review.
+
+#### Root cause
+
+`POST /customer/projects/:id/signoff` inserted the signoff, marked the order complete, and immediately called `releaseEscrow`. There was no explicit release state or admin queue.
+
+#### New state model
+
+1. Vendor completes milestones.
+2. When every milestone is complete, order step 4 is marked complete and the order moves to `awaiting_customer_close`.
+3. Customer submits a required 1-5 rating and optional comment.
+4. The customer workflow closes and the order moves to `awaiting_release`.
+5. Staff reviews the close record in the Admin Fund Releases tab.
+6. Staff releases all held intents.
+7. The signoff and order move to `released` / `completed`.
+
+#### Database contract
+
+Migration `014_demo_feedback_workflow.sql` adds to `signoffs`:
+
+- `release_status`
+- `released_at`
+- `released_by`
+- `release_note`
+
+Historical signoffs default to `released`, matching the old behavior. New customer close records explicitly use `awaiting_release`.
+
+#### API changes
+
+- `POST /customer/projects/:id/signoff`
+  - Rating is required and must be 1-5.
+  - All milestones must be complete.
+  - Records/updates the customer review in both web and mobile review tables.
+  - Returns `release_status: "awaiting_release"`.
+  - Does not release escrow.
+- `GET /customer/projects/:id`
+  - Returns `signoff`, `final_step`, `final_step_ready`, `can_rate_and_close`, and `release_status`.
+- `POST /vendor/milestones/:id/complete`
+  - Detects the final completed milestone.
+  - Synchronizes mobile-compatible step 4.
+  - Returns `final_step_ready`.
+- `GET /vendor/projects/:id`
+  - Returns customer rating/comment and release status.
+  - Includes vendor material settlement totals.
+- `GET /Admin/fund-releases`
+  - Protected by staff/admin authentication.
+  - Lists customer-closed projects with rating, held amount, vendor payout, and platform fee.
+- `POST /Admin/fund-releases/:orderId/release`
+  - Protected by staff/admin authentication.
+  - Performs idempotent escrow release and records staff ID, timestamp, and optional note.
+
+#### UI behavior
+
+- Customer sees **Rate & close project**, not **Sign off & release funds**.
+- The action is disabled until the final milestone is complete.
+- After submission, the customer sees **Project closed - awaiting admin fund release**.
+- Vendor sees the customer close/rating and whether funds are awaiting release or released.
+- Admin now has two work views:
+  - Vendor approvals
+  - Fund releases
+
+### Review consistency
+
+Customer close uses the shared review service. The mobile `customer_review` mirror is now upserted by order/customer/vendor instead of inserting duplicates on retries. The web review lookup also handles MySQL upsert responses where `insertId` is zero.
+
+### Idempotency and safety
+
+- Rejected quote rows are immutable history; revised quotes are new rows.
+- Repeated customer close requests cannot move an already released order back to `awaiting_release`.
+- Repeated admin release requests return the prior released state.
+- Payment intent status is atomically changed from `escrow_held` before wallet credit.
+- Vendor and platform ledger mirrors use deterministic reference IDs.
+- Ownership checks remain in place for customer projects, vendor enquiries, milestones, materials, and quotes.
+- Admin release endpoints remain behind staff/admin JWT validation.
+- No OTP, demo-login, onboarding, KYC, or vendor-status testing bypass logic changed.
+
+### Files and surfaces covered
+
+Backend:
+
+- `backend/src/routes/customer.ts`
+- `backend/src/routes/vendor.ts`
+- `backend/src/routes/payments.ts`
+- `backend/src/routes/admin.ts`
+- `backend/src/services/projectService.ts`
+- `backend/src/services/paymentService.ts`
+- `backend/src/services/reviewService.ts`
+- `backend/src/services/tax.ts`
+- `backend/migrations/014_demo_feedback_workflow.sql`
+
+Frontend/shared:
+
+- Public vendor/service adapters and category catalog
+- Customer enquiry list and detail
+- Vendor enquiry list, detail, and quote form
+- Customer material checkout
+- Vendor material editor and project payment summary
+- Customer project final action
+- Admin operations panel
+- Canonical API client and shared workflow types
+
+### Validation completed before merge
+
+- TypeScript parser validation completed for all changed TypeScript and TSX files.
+- Ownership and state transitions were reviewed across customer, vendor, payment, and admin routes.
+- Migration is additive; no tables or existing columns are removed.
+- The GitHub/Vercel production build and live workflow smoke tests must complete before this release is marked deployed.
+
+### Production smoke-test checklist
+
+1. Open a service with `service_image = null` and confirm its category image appears.
+2. Reject a quote as customer; confirm it remains in both Rejected views.
+3. Send a revised quote as vendor; confirm both sides show the prior rejection and new version.
+4. Select `₹1,000` of materials; confirm customer Razorpay order is `₹1,000`, vendor fee is `₹50`, and expected payout is `₹950`.
+5. Confirm customer cannot close before all milestones are complete.
+6. Complete the final milestone and submit a customer rating.
+7. Confirm no wallet credit occurs until staff uses Admin > Fund releases.
+8. Release from Admin; confirm one wallet credit, one material fee ledger entry where applicable, and idempotent retry behavior.
+9. Re-run the existing demo OTP login with `123456` to confirm no authentication regression.
+
+### Known operational follow-up
+
+- Production migration `014_demo_feedback_workflow.sql` must complete before application traffic reaches routes that select the new columns.
+- Historical rejected quotes can be versioned and timestamped, but a historical rejection reason cannot be reconstructed if it was previously stored only by overwriting the quote message.
+- Razorpay provider checkout, wallet credit, and admin release require a production smoke test with a real test-mode payment after deployment.
+
 ## v4.5.102 - Vercel build hotfix (2026-07-23)
 
 ### Issue

@@ -55,6 +55,7 @@ export default function EnquiryDetailPage() {
   /* ── All hooks up-front (PRD audit P0-1) ── */
   const [enquiry, setEnquiry]       = useState<any>(null)
   const [quote, setQuote]           = useState<any>(null)
+  const [quotes, setQuotes]         = useState<any[]>([])
   const [settings, setSettings]     = useState<any>(null)
   const [loading, setLoading]       = useState(true)
   const [paying, setPaying]         = useState(false)
@@ -72,8 +73,10 @@ export default function EnquiryDetailPage() {
     ]).then(([er, sr, pr]: any[]) => {
       const payload = er?.data?.data || er?.data?.result || er?.data || {}
       const e = payload?.enquiry ?? payload
-      setEnquiry(normalizeCustomerEnquiry({ ...e, quotes: payload?.quotes ?? e?.quotes }))
-      const currentQuote = selectCurrentQuote(payload?.quotes)
+      const allQuotes = Array.isArray(payload?.quotes) ? payload.quotes : Array.isArray(e?.quotes) ? e.quotes : []
+      setQuotes(allQuotes)
+      setEnquiry(normalizeCustomerEnquiry({ ...e, quotes: allQuotes }))
+      const currentQuote = selectCurrentQuote(allQuotes)
       if (currentQuote) setQuote(currentQuote)
       else if (e.quote) setQuote(e.quote)
       setSettings(sr?.data?.data || sr?.data?.result || sr?.data || {})
@@ -88,7 +91,9 @@ export default function EnquiryDetailPage() {
     customerApi.getQuote(Number(id)).then((r: any) => {
       // New REST endpoint returns { enquiry, quotes:[...] }; legacy returns array.
       const body = r?.data?.data || r?.data?.result || r?.data || {}
-      const currentQuote = selectCurrentQuote(body?.quotes)
+      const allQuotes = Array.isArray(body?.quotes) ? body.quotes : []
+      if (allQuotes.length) setQuotes(allQuotes)
+      const currentQuote = selectCurrentQuote(allQuotes)
       if (currentQuote) setQuote(currentQuote)
       else if (body && !Array.isArray(body) && body.amount) setQuote(body)
     }).catch(() => {})
@@ -118,6 +123,9 @@ export default function EnquiryDetailPage() {
       await paymentDemoOrLive(() => customerApi.rejectQuote(quoteId))
       toast.success('Quote rejected')
       setQuote((q: any) => ({ ...q, status: 'rejected' }))
+      setQuotes((rows: any[]) => rows.map((row: any) =>
+        Number(getQuoteId(row)) === Number(quoteId) ? { ...row, status: 'rejected' } : row,
+      ))
     } catch (err: any) {
       toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to reject quote')
     } finally { setActing(null) }
@@ -217,6 +225,12 @@ export default function EnquiryDetailPage() {
     }
   }
 
+  const rejectedQuotes = quotes.filter((row: any) =>
+    String(row?.status ?? '').toLowerCase() === 'rejected' || Number(row?.status_int) === 3,
+  )
+  const revisedQuote = Boolean(quote) && rejectedQuotes.length > 0
+  const latestRejectedReason = rejectedQuotes[0]?.rejection_reason ?? enquiry.latest_rejection_reason ?? null
+
   /* ── Render ── */
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-10">
@@ -241,11 +255,30 @@ export default function EnquiryDetailPage() {
         )}
       </div>
 
+      {rejectedQuotes.length > 0 && (
+        <div className="bg-white border border-red-100 rounded-2xl p-5">
+          <div className="flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-sm font-bold text-navy">
+                {revisedQuote ? 'Earlier quote rejected, revised quote received' : 'Vendor quote rejected'}
+              </h2>
+              <p className="text-xs text-gray-500 mt-1">
+                {latestRejectedReason || 'This quote remains in the enquiry history for reference.'}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                {rejectedQuotes.length} rejected quote{rejectedQuotes.length === 1 ? '' : 's'} retained
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {quote && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Receipt className="w-5 h-5 text-orange" />
-            <h2 className="text-base font-bold text-navy">Quote from Vendor</h2>
+            <h2 className="text-base font-bold text-navy">{revisedQuote ? 'Revised Quote from Vendor' : 'Quote from Vendor'}</h2>
             <StatusBadge status={quote.status || 'PENDING'} />
           </div>
 

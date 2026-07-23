@@ -25,11 +25,23 @@ export async function addReview(b: AddReviewInput) {
     );
     // Mirror to mobile-team's `customer_review` (singular) table so mobile
     // clients see the same review.
-    await conn.query(
-      `INSERT INTO customer_review (order_id, customer_id, vendor_id, service_id, rating, review_description, status)
-       VALUES (?, ?, ?, COALESCE((SELECT service_id FROM orders WHERE order_id = ? LIMIT 1), 0), ?, ?, 1)`,
-      [b.order_id ?? null, b.customer_id, b.vendor_id, b.order_id ?? null, b.rating, b.comment ?? null],
-    ).catch(() => {});
+    const [legacyRows]: any = await conn.query(
+      `SELECT id FROM customer_review
+        WHERE order_id = ? AND customer_id = ? AND vendor_id = ? LIMIT 1`,
+      [b.order_id ?? null, b.customer_id, b.vendor_id],
+    );
+    if (!Array.isArray(legacyRows) || legacyRows.length === 0) {
+      await conn.query(
+        `INSERT INTO customer_review (order_id, customer_id, vendor_id, service_id, rating, review_description, status)
+         VALUES (?, ?, ?, COALESCE((SELECT service_id FROM orders WHERE order_id = ? LIMIT 1), 0), ?, ?, 1)`,
+        [b.order_id ?? null, b.customer_id, b.vendor_id, b.order_id ?? null, b.rating, b.comment ?? null],
+      ).catch(() => {});
+    } else {
+      await conn.query(
+        `UPDATE customer_review SET rating = ?, review_description = ?, status = 1 WHERE id = ?`,
+        [b.rating, b.comment ?? null, legacyRows[0].id],
+      ).catch(() => {});
+    }
     // Recompute vendor.rating from all visible reviews across both tables.
     await conn.query(
       `UPDATE vendors v SET v.rating = (
@@ -41,9 +53,24 @@ export async function addReview(b: AddReviewInput) {
        ) WHERE v.vendor_id = ?`,
       [b.vendor_id, b.vendor_id, b.vendor_id],
     );
-    return insRes.insertId;
+    return Number(insRes.insertId ?? 0);
   });
-  return one<any>('SELECT * FROM customer_reviews WHERE review_id = :id', { id: review });
+  if (review > 0) {
+    return one<any>('SELECT * FROM customer_reviews WHERE review_id = :id', { id: review });
+  }
+  return one<any>(
+    `SELECT * FROM customer_reviews
+      WHERE customer_id = :customerId
+        AND vendor_id = :vendorId
+        AND ((:orderId IS NULL AND order_id IS NULL) OR order_id = :orderId)
+      ORDER BY review_id DESC
+      LIMIT 1`,
+    {
+      customerId: b.customer_id,
+      vendorId: b.vendor_id,
+      orderId: b.order_id ?? null,
+    },
+  );
 }
 
 export async function listVendorReviews(vendorId: number | string, limit = 50) {

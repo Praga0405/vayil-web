@@ -16,7 +16,7 @@
  */
 import { exec, one, query, transaction } from '../db';
 import { ApiError } from '../utils/http';
-import { calculateTax } from './tax';
+import { calculateMaterialSettlement, calculateTax } from './tax';
 import { createRazorpayOrder, verifyRazorpaySignature } from '../utils/razorpay';
 import { isAcceptedQuoteStatus, resolveQuotePaymentBase, type QuotePaymentOption } from './quotePayment';
 import { holdVerifiedPayment } from './paymentWorkflow';
@@ -52,6 +52,7 @@ export async function resolveExpectedAmount(opts: {
 }): Promise<{
   expected: number; baseAmount: number; orderId: number | null;
   vendorId: number | null; quotationId: number | null;
+  platformFeeAmount: number; vendorPayoutAmount: number | null;
 }> {
   const { purpose, customerId } = opts;
   const settings = await one<any>(
@@ -90,6 +91,7 @@ export async function resolveExpectedAmount(opts: {
     return {
       expected: tax.customerTotal, baseAmount, orderId: null,
       vendorId: enquiry.vendor_id ?? null, quotationId: Number(quote.quotation_id),
+      platformFeeAmount: tax.platformFee, vendorPayoutAmount: null,
     };
   }
   if (purpose === 'materials') {
@@ -102,7 +104,7 @@ export async function resolveExpectedAmount(opts: {
     );
     if (!order) throw new ApiError(403, 'Order not found');
     const planApproved = await one<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status = 'approved'`,
+      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment', 'paid')`,
       { id: opts.order_id },
     );
     if (!planApproved || Number(planApproved.n) === 0) {
@@ -121,10 +123,15 @@ export async function resolveExpectedAmount(opts: {
       }
     }
     const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const tax = taxFor(subtotal);
+    const settlement = calculateMaterialSettlement(
+      subtotal,
+      Number(settings?.platform_fee_percentage ?? 5),
+    );
     return {
-      expected: tax.customerTotal, baseAmount: subtotal, orderId: opts.order_id,
+      expected: settlement.customerTotal, baseAmount: subtotal, orderId: opts.order_id,
       vendorId: order.vendor_id ?? null, quotationId: null,
+      platformFeeAmount: settlement.vendorPlatformFee,
+      vendorPayoutAmount: settlement.vendorNetPayout,
     };
   }
   // milestone
@@ -144,6 +151,7 @@ export async function resolveExpectedAmount(opts: {
   return {
     expected: tax.customerTotal, baseAmount, orderId: m.order_id,
     vendorId: m.vendor_id ?? null, quotationId: null,
+    platformFeeAmount: tax.platformFee, vendorPayoutAmount: null,
   };
 }
 
@@ -164,7 +172,7 @@ export async function createPaymentIntent(b: CreateIntentInput) {
       reused: true,
     };
   }
-  const { expected, baseAmount, orderId, quotationId } = await resolveExpectedAmount({
+  const { expected, baseAmount, orderId, quotationId, platformFeeAmount, vendorPayoutAmount } = await resolveExpectedAmount({
     purpose: b.purpose, customerId: b.customerId,
     enquiry_id: b.enquiry_id, quotation_id: b.quotation_id,
     base_amount: b.base_amount, payment_option: b.payment_option,
@@ -191,15 +199,18 @@ export async function createPaymentIntent(b: CreateIntentInput) {
     `INSERT INTO payment_intents
        (idempotency_key, customer_id, order_id, enquiry_id, quotation_id,
         milestone_id, material_ids, base_amount, amount, payment_option,
+        platform_fee_amount, vendor_payout_amount,
         purpose, status, razorpay_order_id)
      VALUES (:key, :cid, :oid, :eid, :qid, :mid, :mids, :base, :amt,
-             :option, :p, 'initiated', :rz)`,
+             :option, :platformFeeAmount, :vendorPayoutAmount,
+             :p, 'initiated', :rz)`,
     {
       key: b.idempotency_key, cid: b.customerId, oid: finalOrderId,
       eid: b.enquiry_id ?? null, qid: quotationId, mid: b.milestone_id ?? null,
       mids: b.material_ids ? JSON.stringify(b.material_ids) : null,
       base: baseAmount, amt: expected,
       option: b.purpose === 'quote' ? (b.payment_option ?? 'full') : null,
+      platformFeeAmount, vendorPayoutAmount,
       p: b.purpose, rz: rzOrder.id,
     },
   );
@@ -210,6 +221,7 @@ export async function createPaymentIntent(b: CreateIntentInput) {
     base_amount: baseAmount,
     quotation_id: quotationId,
     payment_option: b.purpose === 'quote' ? (b.payment_option ?? 'full') : null,
+    customer_platform_fee: b.purpose === 'materials' ? 0 : platformFeeAmount,
     currency: b.currency ?? 'INR',
     status: 'initiated' as const,
   };
@@ -263,7 +275,8 @@ export async function listCustomerPayments(customerId: number | string) {
   return query<any>(
     `SELECT intent_id AS id, order_id, enquiry_id, quotation_id,
             COALESCE(base_amount, amount) AS base_amount, amount,
-            payment_option, purpose, status, razorpay_order_id,
+            payment_option, platform_fee_amount, vendor_payout_amount,
+            purpose, status, razorpay_order_id,
             razorpay_payment_id, created_at
        FROM payment_intents
       WHERE customer_id = :id

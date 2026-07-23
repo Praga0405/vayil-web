@@ -84,6 +84,16 @@ backend lands them, remove the offline branch in each spot.
 - [ ] Add `Idempotency-Key` header on every `placeOrder` and respect it on
   the backend for 5 minutes minimum.
 
+## v4.5.103 demo-feedback workflow gate
+
+- [ ] Apply `backend/migrations/014_demo_feedback_workflow.sql` before the application build.
+- [ ] Smoke-test rejected quote history and a revised quote on both customer and vendor views.
+- [ ] Verify material checkout charges the customer only the material subtotal.
+- [ ] Verify vendor/admin settlement shows the marketplace fee and net payout.
+- [ ] Complete the final milestone, rate/close as customer, and confirm funds remain held.
+- [ ] Release through the authenticated Admin Fund Releases view and verify idempotent ledgers.
+- [ ] Keep demo OTP behavior unchanged until the separate production-auth cutover.
+
 ## Observability
 
 - [ ] Wire Sentry on web (DSN as env var) — capture page errors + failed

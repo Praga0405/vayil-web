@@ -58,6 +58,11 @@ export default function VendorEnquiriesListPage() {
                   {e.service_title} · {e.location} · {formatRelative(e.created_at)}
                 </p>
                 <p className="text-xs text-gray-400 line-clamp-1 mt-0.5">{e.description}</p>
+                {e.had_rejected_quote && (
+                  <p className="text-xs font-medium text-red-600 mt-1">
+                    {e.re_quote_sent ? 'Revised quote sent after customer rejection' : 'Previous quote rejected by customer'}
+                  </p>
+                )}
               </div>
               <StatusBadge status={e.status} />
               <ChevronRight className="w-4 h-4 text-gray-400" />

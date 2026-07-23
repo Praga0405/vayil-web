@@ -75,6 +75,15 @@ export default function VendorEnquiryDetailPage() {
         </div>
       </div>
 
+      {enquiry.had_rejected_quote && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-red-700">Previous quote rejected</p>
+          <p className="text-sm text-red-800 mt-1">
+            {enquiry.rejection_reason || 'The customer rejected the previous quote. You can send a revised quote while the enquiry remains open.'}
+          </p>
+        </div>
+      )}
+
       {/* Two-column workspace: details on the left, action panel on the right. */}
       <div className="grid lg:grid-cols-[1fr,320px] gap-6 items-start">
         <div className="bg-white border border-gray-100 rounded-2xl p-6 space-y-4">
@@ -133,6 +142,15 @@ export default function VendorEnquiryDetailPage() {
             <p className="text-sm text-gray-500 text-center py-2">
               Quote accepted. Waiting for the customer payment.
             </p>
+          ) : displayStatus === 'REJECTED' && enquiry.re_quote_available ? (
+            <>
+              <Button full onClick={() => router.push(`/vendor-studio/enquiries/${id}/quote`)}>
+                <FileText className="w-4 h-4" /> Send Revised Quote
+              </Button>
+              <p className="text-xs text-gray-500 leading-relaxed pt-1">
+                The previous quote remains visible in history. This creates a new quote version.
+              </p>
+            </>
           ) : (displayStatus === 'REJECTED' || displayStatus === 'CANCELLED') ? (
             <p className="text-sm text-gray-500 text-center py-2">
               This enquiry was {displayStatus.toLowerCase()}.

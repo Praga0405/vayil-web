@@ -25,6 +25,9 @@ type BackendEnquiry = {
   attachments?: unknown; images?: unknown; image_urls?: unknown;
   workflow_status?: string | null; workflow_bucket?: MockEnquiry['workflow_bucket'];
   quote_status?: string | null; quote_count?: number | string | null;
+  rejected_quote_count?: number | string | null; had_rejected_quote?: boolean | number | null;
+  re_quote_available?: boolean | number | null; re_quote_sent?: boolean | number | null;
+  rejection_reason?: string | null; latest_rejected_quote?: Record<string, unknown> | null;
   quotation_id?: number | string | null; order_id?: number | string | null;
   latest_step?: number | string | null;
 }
@@ -95,6 +98,12 @@ export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | n
     workflow_bucket:  workflowBucket,
     quote_status:     row.quote_status ?? null,
     quote_count:      Number(row.quote_count ?? 0),
+    rejected_quote_count: Number(row.rejected_quote_count ?? 0),
+    had_rejected_quote: Boolean(row.had_rejected_quote) || Number(row.rejected_quote_count ?? 0) > 0,
+    re_quote_available: Boolean(row.re_quote_available),
+    re_quote_sent: Boolean(row.re_quote_sent),
+    rejection_reason: row.rejection_reason ?? null,
+    latest_rejected_quote: row.latest_rejected_quote ?? null,
     quotation_id:     row.quotation_id ? Number(row.quotation_id) : null,
     order_id:         row.order_id ? Number(row.order_id) : null,
     latest_step:      row.latest_step ? Number(row.latest_step) : null,
@@ -105,7 +114,7 @@ export function adaptEnquiry(row: BackendEnquiry & { customer_phone?: string | n
 export function adaptJob(
   order: BackendOrder,
   plan: BackendOrderPlan[] = [],
-  extra?: { escrow?: { held?: number; released?: number; total?: number }; payment_summary?: Record<string, number> } | null,
+  extra?: { escrow?: { held?: number; released?: number; total?: number }; payment_summary?: Record<string, any> } | null,
 ): MockJob {
   // `order.amount` is the original quote total — does NOT include any
   // materials the customer paid for separately. To stop the vendor card
@@ -178,6 +187,9 @@ export function adaptJob(
     plan_status:  planStatus,
     revision_reason: revisionReason,
     payment_summary: extra?.payment_summary ?? null,
+    release_status: (order as any).release_status ?? extra?.payment_summary?.release_status ?? null,
+    customer_rating: (order as any).customer_rating == null ? null : Number((order as any).customer_rating),
+    customer_close_comment: (order as any).customer_close_comment ?? null,
     milestones,
     materials:    [],   // backend doesn't have a materials table yet
     created_at:   order.created_at ?? new Date().toISOString(),
