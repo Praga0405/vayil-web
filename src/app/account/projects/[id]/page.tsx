@@ -2,12 +2,27 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { customerApi } from '@/lib/api/client'
+import { customerApi, paymentsApi } from '@/lib/api/client'
 import { demoOrLive } from '@/lib/demoMode'
 import { PageLoader, StatusBadge, Button, Modal } from '@/components/ui'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, calculateFees, cn } from '@/lib/utils'
+import { IS_PAYMENT_DEMO_MODE, razorpayTestPrefill } from '@/lib/demoMode'
 import { ChevronLeft, Star, FileText, Briefcase, Boxes, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+declare global { interface Window { Razorpay: any } }
+
+async function loadRazorpay() {
+  if (typeof window === 'undefined') return
+  if (window.Razorpay) return
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('Unable to load Razorpay'))
+    document.head.appendChild(script)
+  })
+}
 
 // Customer project detail — canonical REST source of truth.
 //
@@ -32,6 +47,7 @@ export default function ProjectDetailPage() {
   const [rating,   setRating]    = useState(5)
   const [comment,  setComment]   = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [payingMilestone, setPayingMilestone] = useState<number | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -61,15 +77,62 @@ export default function ProjectDetailPage() {
     .filter((p: any) => ['escrow_held', 'released'].includes(p.status))
     .reduce((s: number, p: any) => s + Number(p.base_amount ?? p.amount ?? 0), 0)
   const remaining = Math.max(totalCharged - paid, 0)
-  const approvedCount = plan.filter(p => p.customer_status === 'approved').length
+  const quotePaid = payments.filter((p: any) => p.purpose === 'quote').reduce((s: number, p: any) => s + Number(p.base_amount ?? p.amount ?? 0), 0)
+  const milestonePaid = payments.filter((p: any) => p.purpose === 'milestone').reduce((s: number, p: any) => s + Number(p.base_amount ?? p.amount ?? 0), 0)
+  const materialPaid = payments.filter((p: any) => p.purpose === 'materials').reduce((s: number, p: any) => s + Number(p.base_amount ?? p.amount ?? 0), 0)
+  const awaitingMilestones = plan.filter((p: any) => String(p.customer_status).toLowerCase() === 'awaiting_payment')
+  const approvedCount = plan.filter(p => ['approved', 'awaiting_payment', 'paid'].includes(String(p.customer_status).toLowerCase())).length
   const completedCount = plan.filter(p => p.vendor_status === 'completed').length
   const planStatus = plan.length === 0
     ? 'NOT_STARTED'
     : plan.some(p => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
-    : plan.every(p => p.customer_status === 'approved') ? 'APPROVED'
+    : plan.every(p => ['approved', 'awaiting_payment', 'paid'].includes(String(p.customer_status).toLowerCase())) ? 'APPROVED'
     : 'SUBMITTED'
   const orderStatus = (order.status || 'active').toString().toUpperCase()
   const finished = orderStatus === 'COMPLETED'
+
+  const payMilestone = async (milestone: any) => {
+    const milestoneId = Number(milestone.plan_id)
+    setPayingMilestone(milestoneId)
+    try {
+      const base = Number(milestone.amount ?? 0)
+      const fees = calculateFees(base, 5, 18, 0)
+      if (IS_PAYMENT_DEMO_MODE) {
+        toast.success('Milestone payment successful (demo)')
+        return
+      }
+      const idempotencyKey = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+        ? (crypto as any).randomUUID() : `milestone-${id}-${milestoneId}-${Date.now()}`
+      const orderRes: any = await paymentsApi.createOrder({
+        amount: fees.total, purpose: 'milestone', order_id: Number(id), milestone_id: milestoneId,
+        idempotency_key: idempotencyKey,
+      })
+      const orderData = orderRes?.data?.data || orderRes?.data || {}
+      const settings: any = await customerApi.getSettings().catch(() => ({}))
+      const key = settings?.data?.data?.razorpay_key ?? settings?.data?.result?.razorpay_key
+        ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? ''
+      await loadRazorpay()
+      new window.Razorpay({
+        key, amount: Math.round(Number(orderData.amount ?? fees.total) * 100), currency: 'INR',
+        order_id: orderData.razorpay_order_id, name: 'Vayil',
+        prefill: razorpayTestPrefill(key), description: `Milestone payment: ${milestone.title}`,
+        theme: { color: '#E8943A' },
+        handler: async (response: any) => {
+          try {
+            await paymentsApi.verify({ ...response, idempotency_key: idempotencyKey })
+            toast.success('Milestone payment successful')
+            window.location.reload()
+          } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Payment verification failed')
+          } finally { setPayingMilestone(null) }
+        },
+        modal: { ondismiss: () => setPayingMilestone(null) },
+      }).open()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to start payment')
+      setPayingMilestone(null)
+    }
+  }
 
   const submitSignoff = async () => {
     setSubmitting(true)
@@ -143,7 +206,14 @@ export default function ProjectDetailPage() {
                         <p className="font-semibold text-navy text-sm">{m.title}</p>
                         <p className="text-xs text-gray-500">{m.days || 0} day{(m.days ?? 0) === 1 ? '' : 's'} · {m.percentage || 0}% of total</p>
                       </div>
-                      <p className="font-bold text-navy text-sm xs:ml-auto">{formatCurrency(Number(m.amount || 0))}</p>
+                      <div className="flex items-center gap-2 xs:ml-auto">
+                        <p className="font-bold text-navy text-sm">{formatCurrency(Number(m.amount || 0))}</p>
+                        {String(m.customer_status).toLowerCase() === 'awaiting_payment' && (
+                          <Button size="sm" onClick={() => payMilestone(m)} loading={payingMilestone === Number(m.plan_id)}>
+                            Pay
+                          </Button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ol>
@@ -198,6 +268,9 @@ export default function ProjectDetailPage() {
             </div>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-gray-500">Project total</dt><dd className="font-semibold text-navy">{formatCurrency(totalCharged)}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-500">Initial / quote payment</dt><dd className="font-semibold text-navy">{formatCurrency(quotePaid)}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-500">Milestone payments</dt><dd className="font-semibold text-navy">{formatCurrency(milestonePaid)}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-500">Material payments</dt><dd className="font-semibold text-navy">{formatCurrency(materialPaid)}</dd></div>
               <div className="flex justify-between"><dt className="text-gray-500">Paid (in escrow)</dt><dd className="font-semibold text-navy">{formatCurrency(paid)}</dd></div>
               <div className="flex justify-between border-t border-gray-100 pt-2"><dt className="text-gray-500">Remaining</dt><dd className="font-bold text-orange">{formatCurrency(remaining)}</dd></div>
             </dl>
