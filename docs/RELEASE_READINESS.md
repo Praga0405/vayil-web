@@ -4,9 +4,30 @@ This file is the single checklist for moving from dev/demo to
 production. Every flag below is a deliberate dev-mode convenience —
 **leaving any of them on in production is a bug**.
 
-Last updated: 2026-07-22 · v4.5.97.
+Last updated: 2026-07-23 · v4.5.103.
 
 ## ⚠ Critical — must be flipped
+
+### v4.5.103 workflow release gate
+
+Before promoting the demo-feedback workflow:
+
+- [ ] Run `backend/migrations/014_demo_feedback_workflow.sql` before routing traffic to the new build.
+- [ ] Confirm `quotation.quote_version`, `payment_intents.platform_fee_amount`,
+  `payment_intents.vendor_payout_amount`, and `signoffs.release_status` exist.
+- [ ] Use a staff JWT to confirm `GET /Admin/fund-releases` is protected and returns
+  the customer close queue.
+- [ ] Complete one test-mode material payment and verify customer total equals the
+  material subtotal (no customer 5% fee).
+- [ ] Confirm the same payment intent shows the 5% fee only in vendor/admin settlement
+  and credits only the persisted vendor payout.
+- [ ] Confirm customer rating/close does not credit the vendor wallet.
+- [ ] Release the project from Admin and verify exactly one wallet credit and one
+  platform-fee ledger row. Retry release and confirm balances do not change.
+- [ ] Confirm the customer close action remains disabled until every milestone is complete.
+- [ ] Re-run customer and vendor demo login with `123456`; v4.5.103 intentionally does
+  not modify OTP behavior.
+
 
 | Env var | Where | Demo value | Production value | What it does |
 |---|---|---|---|---|

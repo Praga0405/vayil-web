@@ -24,6 +24,7 @@ import { z } from 'zod';
 import { exec, one, query, transaction } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { ApiError, ok } from '../utils/http';
+import * as projectSvc from '../services/projectService';
 
 export const adminRouter = Router();
 
@@ -78,6 +79,54 @@ async function handleVendorStatusUpdate(req: any, res: any, next: any) {
 adminRouter.post('/VendorStatusUpdate', handleVendorStatusUpdate)
 
 adminRouter.use(requireAuth(['staff', 'admin']));
+
+/* ── Customer close queue + staff-only escrow release ───────── */
+adminRouter.get('/fund-releases', async (req, res, next) => {
+  try {
+    const status = String(req.query?.status ?? 'awaiting_release').trim().toLowerCase();
+    const releases = await query<any>(
+      `SELECT s.order_id, s.customer_id, s.rating, s.comment,
+              s.release_status, s.created_at AS customer_closed_at,
+              s.released_at, s.released_by, s.release_note,
+              o.enquiry_id, o.vendor_id, o.amount AS order_amount, o.status AS order_status,
+              COALESCE(NULLIF(c.name, ''), CONCAT('Customer #', s.customer_id)) AS customer_name,
+              COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), CONCAT('Vendor #', o.vendor_id)) AS vendor_name,
+              COALESCE(pay.held_intents, 0) AS held_intents,
+              COALESCE(pay.held_customer_amount, 0) AS held_customer_amount,
+              COALESCE(pay.vendor_payout_amount, 0) AS vendor_payout_amount,
+              COALESCE(pay.platform_fee_amount, 0) AS platform_fee_amount
+         FROM signoffs s
+         JOIN orders o ON o.order_id = s.order_id
+         LEFT JOIN customers c ON c.customer_id = s.customer_id
+         LEFT JOIN vendors v ON v.vendor_id = o.vendor_id
+         LEFT JOIN (
+           SELECT order_id,
+                  SUM(CASE WHEN status = 'escrow_held' THEN 1 ELSE 0 END) AS held_intents,
+                  SUM(CASE WHEN status = 'escrow_held' THEN amount ELSE 0 END) AS held_customer_amount,
+                  SUM(CASE WHEN status = 'escrow_held'
+                           THEN COALESCE(vendor_payout_amount, amount) ELSE 0 END) AS vendor_payout_amount,
+                  SUM(CASE WHEN status = 'escrow_held'
+                           THEN COALESCE(platform_fee_amount, 0) ELSE 0 END) AS platform_fee_amount
+             FROM payment_intents
+            GROUP BY order_id
+         ) pay ON pay.order_id = s.order_id
+        WHERE (:status = '' OR s.release_status = :status)
+        ORDER BY COALESCE(s.released_at, s.created_at) DESC`,
+      { status },
+    );
+    ok(res, { releases, total: releases.length, status: status || 'all' });
+  } catch (err) { next(err); }
+});
+
+adminRouter.post('/fund-releases/:id/release', async (req, res, next) => {
+  try {
+    const { note } = z.object({ note: z.string().max(2000).optional() }).parse(req.body || {});
+    const staffId = Number((req as any).user?.id);
+    if (!staffId) throw new ApiError(401, 'Unauthorized');
+    const release = await projectSvc.releaseSignedOffOrder(req.params.id, staffId, note);
+    ok(res, { message: release.reused ? 'Funds were already released' : 'Funds released successfully', release });
+  } catch (err) { next(err); }
+});
 
 /* ── Vendor list with optional filters ─────────────────────── */
 adminRouter.post('/GetVendorList', async (req, res, next) => {

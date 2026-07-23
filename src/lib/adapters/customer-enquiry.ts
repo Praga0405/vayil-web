@@ -27,14 +27,22 @@ export function validEnquiryQuotes(row: any): any[] {
  * tabs and StatusBadge consume semantic strings, so adapt once at the edge.
  */
 export function normalizeCustomerEnquiry(row: any): any {
-  const text = statusText(row)
+  const workflowText = String(row?.workflow_status ?? '').trim().toLowerCase()
+  const text = workflowText || statusText(row)
   const code = numericStatus(row)
   const orders = Array.isArray(row?.orders) ? row.orders : []
+  const allQuotes = Array.isArray(row?.quotations ?? row?.quotes) ? (row.quotations ?? row.quotes) : []
   const quotes = validEnquiryQuotes(row)
+  const rejectedQuoteCount = Number(
+    row?.rejected_quote_count
+      ?? allQuotes.filter((quote: any) =>
+        String(quote?.status ?? '').toLowerCase() === 'rejected' || Number(quote?.status_int) === 3,
+      ).length,
+  )
 
   let status: CustomerEnquiryStatus
   if (code === 10 || ['completed', 'complete'].includes(text)) status = 'COMPLETED'
-  else if (code === 3 || ['rejected', 'reject'].includes(text)) status = 'REJECTED'
+  else if (code === 3 || ['rejected', 'reject', 'rejected_quote'].includes(text)) status = 'REJECTED'
   else if (['cancelled', 'canceled'].includes(text)) status = 'CANCELLED'
   else if (orders.length > 0 || code === 9 || ['ongoing', 'in progress', 'active'].includes(text)) status = 'ONGOING'
   else if (quotes.length > 0 || (code === 11 && quotes.length > 0) || ['quoted', 'quote received'].includes(text) && quotes.length > 0) status = 'QUOTED'
@@ -45,5 +53,8 @@ export function normalizeCustomerEnquiry(row: any): any {
     raw_status: row?.status,
     status,
     valid_quote_count: quotes.length,
+    rejected_quote_count: rejectedQuoteCount,
+    had_rejected_quote: Boolean(row?.had_rejected_quote) || rejectedQuoteCount > 0,
+    re_quote_received: Boolean(row?.re_quote_received) || (rejectedQuoteCount > 0 && quotes.length > 0),
   }
 }

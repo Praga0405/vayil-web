@@ -207,6 +207,10 @@ export const adminApi = {
     adminClient.post('/GetVendorList', data),
   updateVendorKyc: (vendorId: string | number, status: 'approved' | 'rejected' | 'pending', reason?: string) =>
     adminClient.post('/VendorKycUpdate', { vendor_id: vendorId, status, reason }),
+  listFundReleases: (status: 'awaiting_release' | 'released' | '' = 'awaiting_release') =>
+    adminClient.get('/fund-releases', { params: { status } }),
+  releaseFunds: (orderId: string | number, note?: string) =>
+    adminClient.post(`/fund-releases/${orderId}/release`, note ? { note } : {}),
 }
 
 /* ═════════════════════════════════════════════════════════════════
@@ -251,7 +255,7 @@ export const customerApi = {
                                           { headers: idemHeader(idempotencyKey) }),
 
   // Signoff / rework
-  signoff:          (id: string | number, data: { rating?: number; comment?: string }) =>
+  signoff:          (id: string | number, data: { rating: number; comment?: string }) =>
                       customerClient.post(`/projects/${id}/signoff`, data),
   requestRework:    (id: string | number, reason: string) =>
                       customerClient.post(`/projects/${id}/rework-request`, { reason }),

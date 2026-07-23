@@ -92,9 +92,13 @@ async function vendorWorkflowEnquiries(vendorId: number | string, enquiryId?: nu
 
   return rows.map((row: any) => {
     const rowQuotes = quotes.filter((quote: any) => Number(quote.enquiry_id) === Number(row.enquiry_id));
+    const rejectedQuotes = rowQuotes.filter((quote: any) =>
+      lowerStatus(quote.status) === 'rejected' || Number(quote.status_int) === 3,
+    );
     const activeQuotes = rowQuotes.filter(validWorkflowQuote);
     const acceptedQuote = activeQuotes.find((quote: any) => isAcceptedQuoteStatus(quote.status, quote.status_int));
-    const latestQuote = acceptedQuote ?? activeQuotes[0] ?? null;
+    const latestQuote = acceptedQuote ?? activeQuotes[0] ?? rowQuotes[0] ?? null;
+    const latestRejectedQuote = rejectedQuotes[0] ?? null;
     const rowOrders = orders.filter((order: any) => Number(order.enquiry_id) === Number(row.enquiry_id));
     const latestOrder = rowOrders[0] ?? null;
     const orderSteps = latestOrder
@@ -107,11 +111,12 @@ async function vendorWorkflowEnquiries(vendorId: number | string, enquiryId?: nu
 
     let workflowStatus: string;
     if (terminal === 'COMPLETED' || rawCode === 10 || rawStatus === 'completed') workflowStatus = 'COMPLETED';
-    else if (terminal === 'REJECTED' || rawCode === 3 || rawStatus === 'rejected') workflowStatus = 'REJECTED';
+    else if (terminal === 'REJECTED') workflowStatus = 'REJECTED';
     else if (latestOrder && Number(latestStep?.step) === 2) workflowStatus = 'ONGOING';
     else if (latestOrder) workflowStatus = 'NEW';
     else if (acceptedQuote) workflowStatus = 'AWAITING_PAYMENT';
-    else if (latestQuote) workflowStatus = 'QUOTED';
+    else if (activeQuotes.length > 0) workflowStatus = 'QUOTED';
+    else if (rejectedQuotes.length > 0 || rawCode === 3 || rawStatus === 'rejected' || rawStatus === 'quote_rejected') workflowStatus = 'REJECTED';
     else if (rawCode === 2 || rawStatus === 'accepted') workflowStatus = 'ACCEPTED';
     else workflowStatus = 'NEW';
 
@@ -128,7 +133,14 @@ async function vendorWorkflowEnquiries(vendorId: number | string, enquiryId?: nu
       status: workflowStatus,
       workflow_status: workflowStatus,
       workflow_bucket: workflowBucket,
-      quote_count: activeQuotes.length,
+      quote_count: rowQuotes.length,
+      active_quote_count: activeQuotes.length,
+      rejected_quote_count: rejectedQuotes.length,
+      had_rejected_quote: rejectedQuotes.length > 0,
+      re_quote_available: rejectedQuotes.length > 0 && !latestOrder,
+      re_quote_sent: rejectedQuotes.length > 0 && activeQuotes.length > 0,
+      rejection_reason: latestRejectedQuote?.rejection_reason ?? row.reject_reason ?? null,
+      latest_rejected_quote: latestRejectedQuote,
       quote_status: latestQuote?.status ?? null,
       quotation_id: latestQuote?.quotation_id ?? null,
       order_id: latestOrder?.order_id ?? null,
@@ -246,9 +258,19 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
       { id: req.params.id, vendorId: req.user!.id },
     );
     if (!enquiry) throw new ApiError(404, 'Enquiry not found');
-    if (['rejected', 'cancelled', 'completed'].includes(String(enquiry.status).toLowerCase())) {
+    if (['cancelled', 'completed'].includes(String(enquiry.status).toLowerCase())) {
       throw new ApiError(400, `Cannot quote on a ${enquiry.status} enquiry`);
     }
+    const previousRejectedQuote = await one<any>(
+      `SELECT quotation_id, COALESCE(quote_version, 1) AS quote_version
+         FROM quotation
+        WHERE enquiry_id = :enquiryId
+          AND vendor_id = :vendorId
+          AND (LOWER(COALESCE(status, '')) = 'rejected' OR status_int = 3)
+        ORDER BY quotation_id DESC
+        LIMIT 1`,
+      { enquiryId: req.params.id, vendorId: req.user!.id },
+    );
 
     const tax = calculateTax({ baseAmount: body.amount });
     const totalGst = tax.gstOnPlatformFee + tax.gstOnProject;
@@ -259,11 +281,11 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
          (enquiry_id, customer_id, vendor_id, sender_role, sender_id, receiver_id,
           service_id, amount, subtotal, platform_fee, gst_amount, total, final_amount,
           message, estimated_days, service_time, valid_until, files,
-          status, status_int, created_at)
+          parent_id, quote_version, status, status_int, created_at)
        VALUES (:enquiryId, :customerId, :vendorId, 'VENDOR', :vendorId, :customerId,
           :serviceId, :amount, :amount, :platformFee, :gstAmount, :total, :total,
           :message, :estimatedDays, :serviceTime, :validUntil, :files,
-          'sent', 11, NOW())`,
+          :parentId, :quoteVersion, 'sent', 11, NOW())`,
       {
         enquiryId:     req.params.id,
         customerId:    enquiry.customer_id,
@@ -278,11 +300,17 @@ vendorRouter.post('/enquiries/:id/quotes', async (req: AuthRequest, res, next) =
         serviceTime:   body.estimatedDays !== undefined ? String(body.estimatedDays) : null,
         validUntil:    body.validUntil    ?? null,
         files:         body.files         ?? null,
+        parentId:      previousRejectedQuote?.quotation_id ?? null,
+        quoteVersion:  Number(previousRejectedQuote?.quote_version ?? 0) + 1,
       },
     );
     await exec(`UPDATE quotation SET id = quotation_id WHERE quotation_id = :id AND (id IS NULL OR id = 0)`, { id: result.insertId });
     await exec(`UPDATE enquiries SET status = 'quoted', status_int = 11 WHERE enquiry_id = :id`, { id: req.params.id });
-    ok(res, { quote: await one<any>('SELECT * FROM quotation WHERE quotation_id = :id', { id: result.insertId }) }, 201);
+    ok(res, {
+      quote: await one<any>('SELECT * FROM quotation WHERE quotation_id = :id', { id: result.insertId }),
+      re_quote: Boolean(previousRejectedQuote),
+      previous_rejected_quote_id: previousRejectedQuote?.quotation_id ?? null,
+    }, 201);
   } catch (err) { next(err); }
 });
 
@@ -398,9 +426,12 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
 vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
   try {
     const project = await one<any>(
-      `SELECT o.*, c.name AS customer_name, c.profile_image AS customer_profile_image
+      `SELECT o.*, c.name AS customer_name, c.profile_image AS customer_profile_image,
+              s.rating AS customer_rating, s.comment AS customer_close_comment,
+              s.release_status, s.released_at, s.release_note
          FROM orders o
          LEFT JOIN customers c ON c.customer_id = o.customer_id
+         LEFT JOIN signoffs s ON s.order_id = o.order_id
         WHERE o.order_id = :id AND o.vendor_id = :vendorId`,
       { id: req.params.id, vendorId: req.user!.id },
     );
@@ -411,7 +442,7 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
     // Roll up payment_intents so the vendor's dashboard shows
     // "Paid in escrow" rather than ₹0 until milestones complete.
     const intents = await query<any>(
-      `SELECT amount, base_amount, status, purpose FROM payment_intents
+      `SELECT amount, base_amount, status, purpose, platform_fee_amount, vendor_payout_amount FROM payment_intents
         WHERE order_id = :id AND status IN ('escrow_held','released')`,
       { id: req.params.id },
     );
@@ -423,8 +454,11 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
       total_quote_amount: Number(project?.amount ?? 0),
       initial_payment: intents.filter((i: any) => i.purpose === 'quote').reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
       milestone_payments: intents.filter((i: any) => i.purpose === 'milestone').reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
-      material_payments: intents.filter((i: any) => i.purpose === 'materials').reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
-      total_paid: intents.reduce((s: number, i: any) => s + Number(i.base_amount ?? i.amount), 0),
+      material_payments: intents.filter((i: any) => i.purpose === 'materials').reduce((sum: number, intent: any) => sum + Number(intent.base_amount ?? intent.amount), 0),
+      material_platform_fees: intents.filter((i: any) => i.purpose === 'materials').reduce((sum: number, intent: any) => sum + Number(intent.platform_fee_amount ?? 0), 0),
+      material_vendor_payout: intents.filter((i: any) => i.purpose === 'materials').reduce((sum: number, intent: any) => sum + Number(intent.vendor_payout_amount ?? intent.base_amount ?? intent.amount), 0),
+      total_paid: intents.reduce((sum: number, intent: any) => sum + Number(intent.base_amount ?? intent.amount), 0),
+      release_status: project?.release_status ?? null,
     };
     ok(res, {
       project, plan, payment_summary,
@@ -767,13 +801,55 @@ vendorRouter.post('/milestones/:id/complete', async (req: AuthRequest, res, next
       { id: req.params.id },
     );
     if (!owner || Number(owner.vendor_id) !== Number(req.user!.id)) throw new ApiError(404, 'Milestone not found');
-    await exec(
-      `UPDATE order_plan
-          SET vendor_status = 'completed', status = 10, balance_cost = 0, updated_at = NOW()
-        WHERE plan_id = :id`,
-      { id: req.params.id },
-    );
-    ok(res, { plan_id: Number(req.params.id), status: 'completed' });
+    let finalStepReady = false;
+    await transaction(async (conn) => {
+      await conn.query(
+        `UPDATE order_plan
+            SET vendor_status = 'completed', status = 10, balance_cost = 0, updated_at = NOW()
+          WHERE plan_id = ?`,
+        [req.params.id],
+      );
+      const [pendingRows]: any = await conn.query(
+        `SELECT COUNT(*) AS pending_count
+           FROM order_plan
+          WHERE order_id = ?
+            AND NOT (vendor_status = 'completed' OR status = 10)`,
+        [owner.order_id],
+      );
+      finalStepReady = Number(pendingRows?.[0]?.pending_count ?? 0) === 0;
+      if (finalStepReady) {
+        const [stepRows]: any = await conn.query(
+          `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 4 LIMIT 1`,
+          [owner.order_id],
+        );
+        if (Array.isArray(stepRows) && stepRows.length) {
+          await conn.query(
+            `UPDATE order_step_logs
+                SET step_status = '1', performed_by = 'VENDOR',
+                    performed_by_id = ?, remarks = 'All milestones completed'
+              WHERE id = ?`,
+            [req.user!.id, stepRows[0].id],
+          );
+        } else {
+          await conn.query(
+            `INSERT INTO order_step_logs
+               (order_id, step, step_status, performed_by, performed_by_id, remarks)
+             VALUES (?, 4, '1', 'VENDOR', ?, 'All milestones completed')`,
+            [owner.order_id, req.user!.id],
+          );
+        }
+        await conn.query(
+          `UPDATE orders SET status = 'awaiting_customer_close' WHERE order_id = ?`,
+          [owner.order_id],
+        );
+      }
+    });
+    ok(res, {
+      plan_id: Number(req.params.id),
+      order_id: Number(owner.order_id),
+      status: 'completed',
+      final_step_ready: finalStepReady,
+    });
   } catch (err) { next(err); }
 });
 

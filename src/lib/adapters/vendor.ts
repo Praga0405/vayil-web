@@ -32,6 +32,9 @@ type BackendVendor = {
   is_gst_registered?: boolean | null
   gst_number?: string | null
   created_at?: string | null
+  service_category?: number | string | null
+  category_id?: number | string | null
+  category_name?: string | null
 }
 
 type BackendListing = {
@@ -106,27 +109,68 @@ const slugify = (value?: string | null) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
 
+const CATEGORY_SLUG_BY_ID: Record<string, string> = {
+  '2': 'electrical',
+  '3': 'kitchen-renovation',
+  '4': 'painting',
+  '5': 'waterproofing',
+  '6': 'bathroom-renovation',
+  '15': 'plumbing',
+  '16': 'ac-install-maintenance',
+  '17': 'transport',
+  '23': 'interior-design',
+}
+
+function firstMediaUrl(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  if (Array.isArray(value)) {
+    for (const item of value.flat(Infinity)) {
+      const resolved = firstMediaUrl(item)
+      if (resolved) return resolved
+    }
+    return null
+  }
+
+  const text = String(value).trim()
+  if (!text || text === '[]' || text.toLowerCase() === 'null') return null
+  if (text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text)
+      const resolved = firstMediaUrl(parsed)
+      if (resolved) return resolved
+    } catch {
+      const unwrapped = text.replace(/^\[+|\]+$/g, '')
+      const candidate = unwrapped.split(',')[0]?.trim().replace(/^["']|["']$/g, '')
+      return /^https?:\/\//i.test(candidate) ? candidate : null
+    }
+  }
+  const candidate = text.split(',')[0]?.trim().replace(/^["']|["']$/g, '')
+  return /^https?:\/\//i.test(candidate) ? candidate : null
+}
+
 function resolveCategory(row?: BackendListing | null) {
   if (!row) return null
   const rawSlug = slugify(row.category_slug)
   const rawName = row.category_name ?? ''
   const categoryValue = row.category_id ?? row.service_category
-  const rawCategory = categoryValue ? `category-${categoryValue}` : ''
   const categoryText = categoryValue == null ? '' : String(categoryValue)
+  const mappedSlug = CATEGORY_SLUG_BY_ID[categoryText]
   return (
     SERVICE_CATEGORIES.find(c => c.slug === rawSlug) ||
+    SERVICE_CATEGORIES.find(c => c.slug === mappedSlug) ||
     SERVICE_CATEGORIES.find(c => c.label.toLowerCase() === rawName.toLowerCase()) ||
     SERVICE_CATEGORIES.find(c => c.slug === slugify(rawName)) ||
-    SERVICE_CATEGORIES.find(c => c.slug === slugify(categoryText)) ||
-    SERVICE_CATEGORIES.find(c => c.label.toLowerCase() === categoryText.toLowerCase()) ||
-    SERVICE_CATEGORIES.find(c => c.slug === rawCategory) ||
     null
   )
 }
 
 function listingImage(row: BackendListing, category: ReturnType<typeof resolveCategory>) {
-  return row.service_image || row.service_image_url || row.thumbnail || row.cover_image ||
-    category?.hero_image || 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=400&fit=crop'
+  return firstMediaUrl(row.service_image)
+    || firstMediaUrl(row.service_image_url)
+    || firstMediaUrl(row.thumbnail)
+    || firstMediaUrl(row.cover_image)
+    || category?.hero_image
+    || placeholderCover
 }
 
 export function adaptListingToService(row: BackendListing): DummyService {
@@ -172,7 +216,12 @@ export function adaptVendorDetail(
     ? Math.min(...services.map(s => s.price).filter(n => n > 0)) || 0
     : 0
 
-  const firstCategory = resolveCategory(listings[0])
+  const vendorCategory = {
+    category_id: vendor.category_id ?? vendor.service_category,
+    service_category: vendor.service_category,
+    category_name: vendor.category_name,
+  } as BackendListing
+  const firstCategory = resolveCategory(listings[0]) ?? resolveCategory(vendorCategory)
   const cityName = vendor.city_name || vendor.city || 'Coimbatore'
 
   return {

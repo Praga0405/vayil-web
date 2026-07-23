@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useLiveJob } from '@/hooks/useVendorStudio'
 import { type MockMaterial } from '@/lib/mockData'
 import { Button, Input, StatusBadge, PageLoader } from '@/components/ui'
-import { formatCurrency } from '@/lib/utils'
+import { calculateMaterialFees, formatCurrency } from '@/lib/utils'
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { vendorApi } from '@/lib/api/client'
@@ -34,7 +34,8 @@ export default function MaterialsManagerPage() {
   const update = (i: number, k: keyof Draft, v: any) => setItems(items.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
   const add = () => setItems([...items, { name: '', quantity: 1, unit: 'pc', rate: 0, status: 'UNPAID' }])
   const remove = (i: number) => setItems(items.filter((_, idx) => idx !== i))
-  const total = items.reduce((s, m) => s + (m.quantity * m.rate), 0)
+  const total = items.reduce((sum, material) => sum + (material.quantity * material.rate), 0)
+  const settlement = calculateMaterialFees(total, 5)
 
   const save = async () => {
     if (items.some(m => !m.name.trim() || m.quantity <= 0 || m.rate < 0)) {
@@ -109,9 +110,19 @@ export default function MaterialsManagerPage() {
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-5 sticky bottom-4 space-y-3">
-        <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1">
-          <span className="text-sm text-gray-500">Materials Total</span>
-          <span className="text-lg font-bold text-navy">{formatCurrency(total)}</span>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-500">Customer material total</span>
+            <span className="font-semibold text-navy">{formatCurrency(settlement.customerTotal)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-gray-500">Vayil fee (5%, vendor)</span>
+            <span className="font-semibold text-navy">-{formatCurrency(settlement.vendorPlatformFee)}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-gray-100 pt-2">
+            <span className="font-semibold text-navy">Estimated vendor payout</span>
+            <span className="text-lg font-bold text-navy">{formatCurrency(settlement.vendorNetPayout)}</span>
+          </div>
         </div>
         <Button full onClick={save} loading={saving}>Save Materials</Button>
       </div>

@@ -10,7 +10,7 @@ bank.** Every paisa passes through Vayil's escrow first. The lifecycle
 of every payment is:
 
 ```
-   customer ──Razorpay──► Vayil escrow ──signoff──► vendor_wallet ──payout──► vendor bank
+   customer ──Razorpay──► Vayil escrow ──admin release──► vendor_wallet ──payout──► vendor bank
 ```
 
 The four states a payment can be in:
@@ -19,7 +19,7 @@ The four states a payment can be in:
 |---|---|
 | `initiated`    | Razorpay order created, customer hasn't paid yet |
 | `escrow_held`  | Customer paid, Razorpay signature verified, Vayil holds the funds |
-| `released`     | Customer signed off / milestone completed; credited to `vendor_wallet` |
+| `released`     | Staff approved the customer-closed project; net settlement credited to `vendor_wallet` |
 | `failed` / `cancelled` | Razorpay reported failure or customer closed the modal |
 
 Every state transition writes an `escrow_ledger` row so the audit trail
@@ -50,16 +50,16 @@ is reconstructible from `escrow_ledger` alone.
    ◄─ { status:'escrow_held', intent_id }
 ```
 
-The "backfill order_id" step is critical — without it, `releaseEscrow`
-on signoff has no way to find the held intents and the vendor wallet
-never gets credited. Added in v4.4.
+The "backfill order_id" step is critical — without it, the staff release
+cannot find the held intents and the vendor wallet never gets credited.
+Added in v4.4; customer close and staff release were separated in v4.5.103.
 
 ## Three `purpose` values
 
 | Purpose | When | Server re-derives from |
 |---|---|---|
 | `quote` | Customer pays full, configured minimum/25%, or a valid custom amount after accepting a quote | the explicitly supplied accepted `quotation_id`; `base_amount` is validated against `payment_option`, then fees are calculated server-side |
-| `materials` | Customer pays for selected materials | sum of `materials.total` for the supplied ids (all must be UNPAID/AWAITING_PAYMENT, plan must be approved) |
+| `materials` | Customer pays for selected materials | sum of `materials.total` for the supplied ids (all must be UNPAID/AWAITING_PAYMENT, plan must be approved). Customer total equals this subtotal; the configured marketplace fee is persisted as a vendor-side deduction. |
 | `milestone` | Customer pays for a specific completed milestone | `order_plan.amount` for the milestone (must be `customer_status='awaiting_payment'`) |
 
 Each path is implemented in `paymentService.resolveExpectedAmount`.
@@ -120,27 +120,42 @@ POST /payments/webhooks/razorpay     ← mounted BEFORE express.json()
 - On `payment.failed`: marks the intent `failed` with the error
   message.
 
-## Release escrow → vendor wallet
+## Customer close and staff escrow release
+
+Customer closure and money movement are separate audited actions.
 
 ```
-POST /customers/projects/:id/signoff     (or POST /customer/finalStep)
-  ─► INSERT signoffs(rating, comment)
-  ─► UPDATE orders SET status='completed'
-  ─► UPDATE enquiries SET status='completed' (joined via orders)
-  ─► for every payment_intent on this order WHERE status='escrow_held':
-       releaseEscrow(intent_id)
-         ─► UPDATE payment_intents SET status='released'
-         ─► INSERT escrow_ledger { direction='release', reason='milestone_complete' }
-         ─► INSERT vendor_wallet ON DUPLICATE KEY UPDATE (ensures row exists)
-         ─► UPDATE vendor_wallet
-              SET balance       = balance       + intent.amount,
-                  total_earning = total_earning + intent.amount
-            WHERE vendor_id = ?
+Vendor completes every milestone
+  ─► order_step_logs step 4 = complete
+  ─► orders.status = 'awaiting_customer_close'
+
+POST /customer/projects/:id/signoff
+  ─► require rating 1..5
+  ─► require every milestone completed
+  ─► UPSERT signoffs { release_status='awaiting_release' }
+  ─► UPSERT customer review in web + mobile review tables
+  ─► orders.status = 'awaiting_release'
+  ─► no wallet or escrow mutation
+
+POST /Admin/fund-releases/:orderId/release   (staff/admin JWT)
+  ─► require signoffs.release_status='awaiting_release'
+  ─► for every held intent, atomically transition to 'released'
+  ─► quote/milestone: release existing intent amount
+  ─► materials: release persisted vendor_payout_amount
+  ─► INSERT escrow_ledger release row
+  ─► credit vendor_wallet once
+  ─► INSERT idempotent vendor/platform ledger mirrors
+  ─► signoffs.release_status='released'
+  ─► orders.status='completed'
 ```
 
-Both code paths (canonical `routes/customer.ts` and shared
-`projectService.signoffOrder`) call `releaseEscrow`. Verified by
-`smoke-mobile.ts` step "finalStep" → "vendorPayout 201".
+For material intents, the customer pays only the material subtotal. The
+platform fee is stored in `platform_fee_amount` and deducted from
+`vendor_payout_amount`; it is not added to the Razorpay customer total.
+
+The legacy mobile `/customer/finalStep` endpoint remains a mobile-compatible
+progress update. It does not create an extra signoff step and does not perform
+the protected admin release.
 
 ## Idempotency
 
@@ -181,5 +196,6 @@ AddBankDetails → finalStep → vendorPayout → addReview → vendorlistReview
 ```
 
 It runs against the local backend with `PAYMENT_VERIFY_BYPASS=true`.
-A full pass means the payment pipeline + escrow holds + signoff
-release + wallet credit + payout request all work end-to-end.
+A full pass validates the mobile payment pipeline and escrow holds. The
+v4.5.103 staff-only release must additionally be smoke-tested through
+`/Admin/fund-releases/:orderId/release` with a staff JWT.

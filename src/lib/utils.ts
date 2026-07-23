@@ -77,3 +77,19 @@ export function calculateFees(base: number, platformFeePct = 5, gstPct = 18, tds
   const vendorNet   = roundedBase - tds - platformFee
   return { base: roundedBase, platformFee, gst, tds, total, vendorNet }
 }
+
+/**
+ * Material purchases are charged to the customer at cost. Vayil's 5% fee is
+ * a vendor settlement deduction and must never be added to Razorpay checkout.
+ */
+export function calculateMaterialFees(base: number, platformFeePct = 5) {
+  const roundedBase = Math.round(Number(base || 0))
+  const vendorPlatformFee = Math.round((roundedBase * platformFeePct) / 100)
+  return {
+    base: roundedBase,
+    customerTotal: roundedBase,
+    customerPlatformFee: 0,
+    vendorPlatformFee,
+    vendorNetPayout: Math.max(0, roundedBase - vendorPlatformFee),
+  }
+}

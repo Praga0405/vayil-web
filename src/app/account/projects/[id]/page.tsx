@@ -48,6 +48,9 @@ export default function ProjectDetailPage() {
   const [comment,  setComment]   = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [payingMilestone, setPayingMilestone] = useState<number | null>(null)
+  const [signoff, setSignoff] = useState<any>(null)
+  const [finalStepReady, setFinalStepReady] = useState(false)
+  const [releaseStatus, setReleaseStatus] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -57,13 +60,17 @@ export default function ProjectDetailPage() {
       customerApi.listPayments().catch(() => null),
     ]).then(([pr, mr, payr]: any) => {
       if (!pr) { setError('Project not found'); return }
-      setOrder(pr.data?.project ?? null)
-      setPlan(Array.isArray(pr.data?.plan) ? pr.data.plan : [])
+      const projectBody = pr.data?.data ?? pr.data ?? {}
+      setOrder(projectBody.project ?? null)
+      setPlan(Array.isArray(projectBody.plan) ? projectBody.plan : [])
+      setSignoff(projectBody.signoff ?? null)
+      setFinalStepReady(Boolean(projectBody.final_step_ready))
+      setReleaseStatus(projectBody.release_status ?? projectBody.signoff?.release_status ?? null)
       setMaterials(mr?.data?.materials ?? [])
       const all = payr?.data?.payments ?? []
       setPayments(all.filter((p: any) =>
         Number(p.order_id) === Number(id)
-        || Number(p.enquiry_id) === Number(pr.data?.project?.enquiry_id)))
+        || Number(p.enquiry_id) === Number(projectBody.project?.enquiry_id)))
     }).finally(() => setLoading(false))
   }, [id])
 
@@ -82,14 +89,18 @@ export default function ProjectDetailPage() {
   const materialPaid = payments.filter((p: any) => p.purpose === 'materials').reduce((s: number, p: any) => s + Number(p.base_amount ?? p.amount ?? 0), 0)
   const awaitingMilestones = plan.filter((p: any) => String(p.customer_status).toLowerCase() === 'awaiting_payment')
   const approvedCount = plan.filter(p => ['approved', 'awaiting_payment', 'paid'].includes(String(p.customer_status).toLowerCase())).length
-  const completedCount = plan.filter(p => p.vendor_status === 'completed').length
+  const completedCount = plan.filter(p =>
+    String(p.vendor_status ?? '').toLowerCase() === 'completed' || Number(p.status) === 10,
+  ).length
   const planStatus = plan.length === 0
     ? 'NOT_STARTED'
     : plan.some(p => p.customer_status === 'revision_requested') ? 'REVISION_REQUESTED'
     : plan.every(p => ['approved', 'awaiting_payment', 'paid'].includes(String(p.customer_status).toLowerCase())) ? 'APPROVED'
     : 'SUBMITTED'
   const orderStatus = (order.status || 'active').toString().toUpperCase()
-  const finished = orderStatus === 'COMPLETED'
+  const customerClosed = Boolean(signoff)
+  const fundsReleased = releaseStatus === 'released' || orderStatus === 'COMPLETED'
+  const canRateAndClose = finalStepReady && !customerClosed
 
   const payMilestone = async (milestone: any) => {
     const milestoneId = Number(milestone.plan_id)
@@ -138,11 +149,15 @@ export default function ProjectDetailPage() {
     setSubmitting(true)
     try {
       await demoOrLive(() => customerApi.signoff(id, { rating, comment }))
-      toast.success('Project signed off — funds released to vendor')
+      toast.success('Rating submitted and project closed. Admin release is pending.')
       setRatingOpen(false)
-      // Refresh state.
       const pr: any = await customerApi.getProjectDetail(id)
-      setOrder(pr.data?.project ?? null)
+      const body = pr.data?.data ?? pr.data ?? {}
+      setOrder(body.project ?? null)
+      setPlan(Array.isArray(body.plan) ? body.plan : [])
+      setSignoff(body.signoff ?? null)
+      setFinalStepReady(Boolean(body.final_step_ready))
+      setReleaseStatus(body.release_status ?? body.signoff?.release_status ?? null)
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to sign off')
     } finally { setSubmitting(false) }
@@ -275,7 +290,7 @@ export default function ProjectDetailPage() {
               <div className="flex justify-between border-t border-gray-100 pt-2"><dt className="text-gray-500">Remaining</dt><dd className="font-bold text-orange">{formatCurrency(remaining)}</dd></div>
             </dl>
             <p className="text-xs text-gray-500 mt-3 leading-relaxed">
-              Held funds release to the vendor only when you sign off this project.
+              After you rate and close the final step, Vayil staff review and release held funds to the vendor.
             </p>
           </section>
 
@@ -284,19 +299,27 @@ export default function ProjectDetailPage() {
               <Briefcase className="w-5 h-5 text-orange" />
               <h3 className="text-base font-bold text-navy">Project actions</h3>
             </div>
-            {finished ? (
-              <p className="text-sm text-gray-500">Signed off · funds released.</p>
+            {fundsReleased ? (
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-green-700">Project closed · funds released by Vayil.</p>
+                {signoff?.rating && <p className="text-xs text-gray-500">Your rating: {signoff.rating} / 5</p>}
+              </div>
+            ) : customerClosed ? (
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-orange">Project closed · awaiting admin fund release.</p>
+                {signoff?.rating && <p className="text-xs text-gray-500">Your rating: {signoff.rating} / 5</p>}
+              </div>
             ) : (
               <>
-                <Button full onClick={() => setRatingOpen(true)} disabled={planStatus !== 'APPROVED'}>
-                  <Star className="w-4 h-4" /> Sign off &amp; release funds
+                <Button full onClick={() => setRatingOpen(true)} disabled={!canRateAndClose}>
+                  <Star className="w-4 h-4" /> Rate &amp; close project
                 </Button>
                 <Button variant="outline" full onClick={() => router.push(`/account/projects/${id}/plan`)}>
                   View plan
                 </Button>
-                {planStatus !== 'APPROVED' && (
+                {!finalStepReady && (
                   <p className="text-xs text-gray-500 leading-relaxed">
-                    Approve the implementation plan before you can sign off the project.
+                    This action unlocks after the vendor completes every milestone in the final step.
                   </p>
                 )}
               </>
@@ -305,10 +328,10 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      <Modal open={ratingOpen} onClose={() => setRatingOpen(false)} title="Sign off this project">
+      <Modal open={ratingOpen} onClose={() => setRatingOpen(false)} title="Rate and close this project">
         <p className="text-sm text-gray-600 mb-4">
-          Signing off marks the project complete and releases any escrow funds held with Vayil
-          to the vendor's wallet. If something still needs fixing, choose <strong>Request rework</strong> instead.
+          Your rating closes the customer workflow. Held funds remain with Vayil until an admin reviews
+          the completed project and releases them to the vendor.
         </p>
         <div className="flex justify-center gap-2 mb-4">
           {[1,2,3,4,5].map(n => (
@@ -323,7 +346,7 @@ export default function ProjectDetailPage() {
         <div className="flex gap-3">
           <Button variant="outline" onClick={() => setRatingOpen(false)} full>Cancel</Button>
           <Button onClick={submitSignoff} loading={submitting} full>
-            Sign off &amp; release funds
+            Submit rating &amp; close
           </Button>
         </div>
       </Modal>

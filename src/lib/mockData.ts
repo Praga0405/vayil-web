@@ -47,6 +47,12 @@ export interface MockEnquiry {
   workflow_bucket?: 'REQUEST_QUOTATION' | 'NEW' | 'ONGOING' | 'COMPLETED' | 'REJECTED'
   quote_status?: string | null
   quote_count?: number
+  rejected_quote_count?: number
+  had_rejected_quote?: boolean
+  re_quote_available?: boolean
+  re_quote_sent?: boolean
+  rejection_reason?: string | null
+  latest_rejected_quote?: Record<string, unknown> | null
   quotation_id?: number | null
   order_id?: number | null
   latest_step?: number | null
@@ -68,8 +74,14 @@ export interface MockJob {
     initial_payment: number
     milestone_payments: number
     material_payments: number
+    material_platform_fees?: number
+    material_vendor_payout?: number
     total_paid: number
+    release_status?: string | null
   } | null
+  release_status?: string | null
+  customer_rating?: number | null
+  customer_close_comment?: string | null
   milestones: MockMilestone[]
   materials: MockMaterial[]
   created_at: string
