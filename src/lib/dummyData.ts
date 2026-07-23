@@ -492,11 +492,27 @@ function buildVendor(
   service: ServiceCategory,
   index: number
 ): DummyVendor {
-  const pool = VENDOR_NAME_POOL[service.slug][index]
-  const taglines = TAGLINES[service.slug]
-  const blueprints = SERVICE_BLUEPRINTS[service.slug]
-  const portfolios = PORTFOLIO_IMAGES[service.slug]
-  const reviewTpl = REVIEW_TEMPLATES[service.slug]
+  // Category master entries may be added before bespoke demo fixtures are
+  // authored. Keep static generation total-safe and use the category's own
+  // image/content rather than crashing /search on an undefined fixture map.
+  const pool = VENDOR_NAME_POOL[service.slug]?.[index] ?? {
+    company: `${service.label} Pro ${index + 1}`,
+    owner: `Vayil Partner ${index + 1}`,
+  }
+  const taglines = TAGLINES[service.slug] ?? Array.from(
+    { length: 5 },
+    () => `Trusted ${service.label.toLowerCase()} professionals in Coimbatore`,
+  )
+  const blueprints = SERVICE_BLUEPRINTS[service.slug] ?? [{
+    title: `${service.label} Service`,
+    price: service.starting_price,
+    price_type: 'fixed' as const,
+    description: service.short_desc,
+  }]
+  const portfolios = PORTFOLIO_IMAGES[service.slug] ?? [service.hero_image]
+  const reviewTpl = REVIEW_TEMPLATES[service.slug] ?? [
+    `Reliable ${service.label.toLowerCase()} service with clear communication and quality work.`,
+  ]
 
   const yrs = [4, 7, 11, 15, 22][index]
   const jobs = [120, 340, 580, 920, 1450][index]
