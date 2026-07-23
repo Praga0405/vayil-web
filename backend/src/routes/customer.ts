@@ -374,7 +374,7 @@ customerRouter.get('/projects/:id/materials', async (req: AuthRequest, res, next
   try {
     await assertProjectBelongs(req.params.id, req.user!.id);
     const planApproved = await one<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status = 'approved'`,
+      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment')`,
       { id: req.params.id },
     );
     const locked = !planApproved || Number(planApproved.n) === 0;
