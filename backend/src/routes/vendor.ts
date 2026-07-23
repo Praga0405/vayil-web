@@ -198,7 +198,7 @@ vendorRouter.get('/dashboard', async (req: AuthRequest, res, next) => {
   try {
     const [projects, enquiries, wallet] = await Promise.all([
       query<any>('SELECT * FROM orders WHERE vendor_id = :id ORDER BY order_id DESC LIMIT 10', { id: req.user!.id }),
-      query<any>('SELECT e.*,
+      query<any>(`SELECT e.*,
               CASE WHEN EXISTS (
                 SELECT 1 FROM quotation q
                  WHERE q.enquiry_id = e.enquiry_id
@@ -206,7 +206,7 @@ vendorRouter.get('/dashboard', async (req: AuthRequest, res, next) => {
               ) THEN 'accepted' ELSE e.status END AS workflow_status
          FROM enquiries e
         WHERE e.vendor_id = :id
-        ORDER BY e.enquiry_id DESC LIMIT 10', { id: req.user!.id }),
+        ORDER BY e.enquiry_id DESC LIMIT 10`, { id: req.user!.id }),
       one<any>('SELECT * FROM vendor_wallet WHERE vendor_id = :id', { id: req.user!.id }),
     ]);
     ok(res, { projects, enquiries, wallet });
