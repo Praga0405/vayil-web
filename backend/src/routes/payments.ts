@@ -24,7 +24,7 @@ import { requireAuth } from '../middleware/auth';
 import { idempotent } from '../middleware/idempotency';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
-import { calculateMaterialSettlement, calculateTax } from '../services/tax';
+import { calculateTax } from '../services/tax';
 import { createRazorpayOrder, verifyRazorpaySignature, verifyWebhookSignature } from '../utils/razorpay';
 import {
   isAcceptedQuoteStatus,
@@ -181,18 +181,15 @@ async function resolveExpectedAmount(
       }
     }
     const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const settlement = calculateMaterialSettlement(
-      subtotal,
-      Number(settings?.platform_fee_percentage ?? 5),
-    );
+    const tax = taxFor(subtotal);
     return {
-      expected: settlement.customerTotal,
+      expected: tax.customerTotal,
       baseAmount: subtotal,
       orderId: args.order_id,
       vendorId: order.vendor_id ?? null,
       quotationId: null,
-      platformFeeAmount: settlement.vendorPlatformFee,
-      vendorPayoutAmount: settlement.vendorNetPayout,
+      platformFeeAmount: tax.platformFee,
+      vendorPayoutAmount: subtotal,
     };
   }
 
@@ -319,7 +316,7 @@ paymentsRouter.post('/create-order',
         base_amount:       baseAmount,
         quotation_id:      quotationId,
         payment_option:    body.purpose === 'quote' ? (body.payment_option ?? 'full') : null,
-        customer_platform_fee: body.purpose === 'materials' ? 0 : platformFeeAmount,
+        customer_platform_fee: platformFeeAmount,
         currency:          body.currency,
         status:            'initiated',
       }, 201);

@@ -67,7 +67,7 @@ export interface MockJob {
   total: number
   paid: number
   pending: number
-  plan_status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REVISION_REQUESTED'
+  plan_status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REVISION_REQUESTED' | 'AWAITING_CUSTOMER_CLOSE' | 'AWAITING_RELEASE' | 'COMPLETED'
   revision_reason?: string | null
   payment_summary?: {
     total_quote_amount: number

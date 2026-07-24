@@ -113,6 +113,32 @@ backend lands them, remove the offline branch in each spot.
 - [ ] Confirm `/customer/enquiryList` remains `Ongoing` after plan/final-step
   acceptance until the actual project completion status is reached.
 
+## v4.5.105 material checkout + completion status gate
+
+- [ ] Verify `/account/projects/510001/materials` and
+  `/account/projects/510001/materials/pay` show the same material subtotal,
+  platform fee, GST, and total payable.
+- [ ] Create a material payment for subtotal `30`; the backend should accept
+  the fee-inclusive total (`32` with 5% platform fee and 18% GST rounded as
+  currently configured).
+- [ ] Confirm `payment_intents.base_amount` remains the material subtotal and
+  `payment_intents.amount` stores the customer-paid total.
+- [ ] Confirm the customer project detail and project list show
+  `awaiting_customer_close` once every milestone is completed and no customer
+  signoff exists.
+- [ ] Confirm the vendor project detail/list no longer collapse completed
+  milestone plans back to `APPROVED`; expected status is
+  `AWAITING_CUSTOMER_CLOSE`, `AWAITING_RELEASE`, or `COMPLETED` depending on
+  signoff/admin release state.
+- [ ] Test the Vendor Studio `Mark Project Completed` action on an order with
+  multiple unfinished milestones. It should update all milestones, write/update
+  order step 4, set order status `awaiting_customer_close`, and unlock the
+  customer `Rate & close project` action.
+- [ ] v4.5.103 originally expected material purchases to charge the customer
+  subtotal only. That expectation is superseded for the current web checkout:
+  if the customer materials page displays platform fee/GST, the pay page and
+  backend payment intent must carry forward the same fee-inclusive total.
+
 ## Observability
 
 - [ ] Wire Sentry on web (DSN as env var) — capture page errors + failed

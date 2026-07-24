@@ -360,6 +360,8 @@ export const vendorApi = {
                           vendorClient.post(`/milestones/${milestoneId}/payment-request`, {}),
   completeMilestone:    (milestoneId: string | number) =>
                           vendorClient.post(`/milestones/${milestoneId}/complete`, {}),
+  completeProject:      (id: string | number) =>
+                          vendorClient.post(`/projects/${id}/complete`, {}),
 
   // KYC
   postKYC:          (data: Record<string, unknown>) => vendorClient.post('/kyc', data),

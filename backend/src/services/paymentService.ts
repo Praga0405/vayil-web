@@ -16,7 +16,7 @@
  */
 import { exec, one, query, transaction } from '../db';
 import { ApiError } from '../utils/http';
-import { calculateMaterialSettlement, calculateTax } from './tax';
+import { calculateTax } from './tax';
 import { createRazorpayOrder, verifyRazorpaySignature } from '../utils/razorpay';
 import { isAcceptedQuoteStatus, resolveQuotePaymentBase, type QuotePaymentOption } from './quotePayment';
 import { holdVerifiedPayment } from './paymentWorkflow';
@@ -123,15 +123,12 @@ export async function resolveExpectedAmount(opts: {
       }
     }
     const subtotal = rows.reduce((s, r) => s + Number(r.total), 0);
-    const settlement = calculateMaterialSettlement(
-      subtotal,
-      Number(settings?.platform_fee_percentage ?? 5),
-    );
+    const tax = taxFor(subtotal);
     return {
-      expected: settlement.customerTotal, baseAmount: subtotal, orderId: opts.order_id,
+      expected: tax.customerTotal, baseAmount: subtotal, orderId: opts.order_id,
       vendorId: order.vendor_id ?? null, quotationId: null,
-      platformFeeAmount: settlement.vendorPlatformFee,
-      vendorPayoutAmount: settlement.vendorNetPayout,
+      platformFeeAmount: tax.platformFee,
+      vendorPayoutAmount: subtotal,
     };
   }
   // milestone
@@ -221,7 +218,7 @@ export async function createPaymentIntent(b: CreateIntentInput) {
     base_amount: baseAmount,
     quotation_id: quotationId,
     payment_option: b.purpose === 'quote' ? (b.payment_option ?? 'full') : null,
-    customer_platform_fee: b.purpose === 'materials' ? 0 : platformFeeAmount,
+    customer_platform_fee: platformFeeAmount,
     currency: b.currency ?? 'INR',
     status: 'initiated' as const,
   };

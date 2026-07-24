@@ -7,6 +7,7 @@ import { ApiError, ok } from '../utils/http';
 import * as vendorSvc from '../services/vendorService';
 import * as notifSvc from '../services/notificationService';
 import * as materialSvc from '../services/materialService';
+import * as projectSvc from '../services/projectService';
 import { isAcceptedQuoteStatus } from '../services/quotePayment';
 import { calculateTax } from '../services/tax';
 
@@ -37,6 +38,18 @@ function finalStepState(step: any): 'COMPLETED' | 'REJECTED' | null {
   if (['1', 'accepted', 'accept', 'completed', 'complete'].includes(value)) return 'COMPLETED';
   if (['2', 'rejected', 'reject'].includes(value)) return 'REJECTED';
   return null;
+}
+
+function vendorProjectPlanStatus(rawStatus: unknown, releaseStatus: unknown, totalCount: unknown, pendingMilestones: unknown, hasRevision: unknown, pendingCustomer: unknown) {
+  const raw = lowerStatus(rawStatus);
+  const release = lowerStatus(releaseStatus);
+  if (raw === 'completed' || release === 'released') return 'COMPLETED';
+  if (release === 'awaiting_release' || raw === 'awaiting_release') return 'AWAITING_RELEASE';
+  if (Number(totalCount ?? 0) > 0 && Number(pendingMilestones ?? 0) === 0) return 'AWAITING_CUSTOMER_CLOSE';
+  if (Number(hasRevision ?? 0) > 0) return 'REVISION_REQUESTED';
+  if (Number(pendingCustomer ?? 0) > 0) return 'SUBMITTED';
+  if (Number(totalCount ?? 0) > 0) return 'APPROVED';
+  return 'NOT_STARTED';
 }
 
 /**
@@ -388,9 +401,12 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
               COALESCE(esc.escrow_total, 0) AS escrow_total,
               COALESCE(esc.escrow_held,   0) AS escrow_held,
               COALESCE(esc.escrow_released, 0) AS escrow_released,
+              s.release_status,
               CASE
+                WHEN LOWER(COALESCE(o.status, '')) = 'completed' OR LOWER(COALESCE(s.release_status, '')) = 'released' THEN 'COMPLETED'
+                WHEN LOWER(COALESCE(o.status, '')) = 'awaiting_release' OR LOWER(COALESCE(s.release_status, '')) = 'awaiting_release' THEN 'AWAITING_RELEASE'
+                WHEN plan.total_count > 0 AND plan.pending_milestone_count = 0 THEN 'AWAITING_CUSTOMER_CLOSE'
                 WHEN plan.has_revision    > 0 THEN 'REVISION_REQUESTED'
-                WHEN plan.all_approved    > 0 AND plan.pending_count = 0 THEN 'APPROVED'
                 WHEN plan.pending_count   > 0 THEN 'SUBMITTED'
                 WHEN plan.total_count     > 0 THEN 'APPROVED'
                 ELSE 'NOT_STARTED'
@@ -409,12 +425,14 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
          LEFT JOIN (
            SELECT order_id,
                   COUNT(*) AS total_count,
+                  SUM(CASE WHEN vendor_status = 'completed' OR status = 10 THEN 0 ELSE 1 END) AS pending_milestone_count,
                   SUM(CASE WHEN customer_status = 'pending'             THEN 1 ELSE 0 END) AS pending_count,
                   SUM(CASE WHEN customer_status IN ('approved', 'awaiting_payment', 'paid') THEN 1 ELSE 0 END) AS all_approved,
                   SUM(CASE WHEN customer_status = 'revision_requested'  THEN 1 ELSE 0 END) AS has_revision
              FROM order_plan
             GROUP BY order_id
          ) plan ON plan.order_id = o.order_id
+         LEFT JOIN signoffs s ON s.order_id = o.order_id
         WHERE o.vendor_id = :id
         ORDER BY o.order_id DESC`,
       { id: req.user!.id },
@@ -460,8 +478,19 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
       total_paid: intents.reduce((sum: number, intent: any) => sum + Number(intent.base_amount ?? intent.amount), 0),
       release_status: project?.release_status ?? null,
     };
+    const pendingMilestones = plan.filter((milestone: any) =>
+      !(String(milestone.vendor_status ?? '').toLowerCase() === 'completed' || Number(milestone.status) === 10),
+    ).length;
+    const planStatusRollup = vendorProjectPlanStatus(
+      project?.status,
+      project?.release_status,
+      plan.length,
+      pendingMilestones,
+      plan.filter((milestone: any) => lowerStatus(milestone.customer_status) === 'revision_requested').length,
+      plan.filter((milestone: any) => lowerStatus(milestone.customer_status) === 'pending').length,
+    );
     ok(res, {
-      project, plan, payment_summary,
+      project: { ...project, plan_status_rollup: planStatusRollup }, plan, payment_summary,
       escrow: { held: escrow_held, released: escrow_released, total: escrow_held + escrow_released },
     });
   } catch (err) { next(err); }
@@ -688,6 +717,13 @@ vendorRouter.post('/projects/:id/plan/submit', async (req: AuthRequest, res, nex
       }
     });
     ok(res, { order_id: Number(orderId), status: 'submitted' });
+  } catch (err) { next(err); }
+});
+
+vendorRouter.post('/projects/:id/complete', async (req: AuthRequest, res, next) => {
+  try {
+    const result = await projectSvc.completeProjectMilestones(req.params.id, req.user!.id);
+    ok(res, result);
   } catch (err) { next(err); }
 });
 

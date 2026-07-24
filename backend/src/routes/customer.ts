@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { idempotent } from '../middleware/idempotency';
 import { AuthRequest } from '../types';
 import { ApiError, ok } from '../utils/http';
-import { calculateMaterialSettlement, calculateTax } from '../services/tax';
+import { calculateTax } from '../services/tax';
 import * as projectSvc from '../services/projectService';
 import * as customerSvc from '../services/customerService';
 import * as enquirySvc from '../services/enquiryService';
@@ -17,6 +17,29 @@ function blankToNull(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   return text ? text : null;
+}
+
+function projectMilestoneDone(milestone: any): boolean {
+  return String(milestone?.vendor_status ?? '').toLowerCase() === 'completed'
+    || Number(milestone?.status) === 10;
+}
+
+function effectiveProjectStatus(project: any, plan: any[] = [], signoff?: any | null): string {
+  const raw = String(project?.status ?? '').toLowerCase();
+  if (raw === 'completed' || String(signoff?.release_status ?? '').toLowerCase() === 'released') return 'completed';
+  if (signoff) return 'awaiting_release';
+  if (plan.length > 0 && plan.every(projectMilestoneDone)) return 'awaiting_customer_close';
+  return raw || 'active';
+}
+
+function effectiveProjectStatusFromRollup(project: any): string {
+  const raw = String(project?.status ?? '').toLowerCase();
+  if (raw === 'completed' || String(project?.release_status ?? '').toLowerCase() === 'released') return 'completed';
+  if (project?.signoff_order_id) return 'awaiting_release';
+  if (Number(project?.milestone_count ?? 0) > 0 && Number(project?.pending_milestone_count ?? 0) === 0) {
+    return 'awaiting_customer_close';
+  }
+  return raw || 'active';
 }
 
 customerRouter.get('/me', async (req: AuthRequest, res, next) => {
@@ -228,7 +251,11 @@ customerRouter.get('/projects', async (req: AuthRequest, res, next) => {
               COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
                        NULLIF(e.category, ''), 'Home Service') AS service_title,
               e.category,
-              COALESCE(pay.paid_base_amount, 0) AS paid_base_amount
+              COALESCE(pay.paid_base_amount, 0) AS paid_base_amount,
+              plan.milestone_count,
+              plan.pending_milestone_count,
+              s.order_id AS signoff_order_id,
+              s.release_status
          FROM orders o
          LEFT JOIN enquiries e ON e.enquiry_id = o.enquiry_id
          LEFT JOIN vendors v ON v.vendor_id = o.vendor_id
@@ -239,11 +266,24 @@ customerRouter.get('/projects', async (req: AuthRequest, res, next) => {
             WHERE status IN ('escrow_held', 'released')
             GROUP BY order_id
          ) pay ON pay.order_id = o.order_id
+         LEFT JOIN (
+           SELECT order_id,
+                  COUNT(*) AS milestone_count,
+                  SUM(CASE WHEN vendor_status = 'completed' OR status = 10 THEN 0 ELSE 1 END) AS pending_milestone_count
+             FROM order_plan
+            GROUP BY order_id
+         ) plan ON plan.order_id = o.order_id
+         LEFT JOIN signoffs s ON s.order_id = o.order_id
         WHERE o.customer_id = :id
         ORDER BY o.order_id DESC`,
       { id: req.user!.id },
     );
-    ok(res, { projects });
+    ok(res, {
+      projects: projects.map((project: any) => {
+        const status = effectiveProjectStatusFromRollup(project);
+        return { ...project, status, effective_status: status };
+      }),
+    });
   } catch (err) { next(err); }
 });
 
@@ -265,11 +305,11 @@ customerRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
       ),
     ]);
     const finalStepReady = plan.length > 0 && plan.every((milestone: any) =>
-      String(milestone.vendor_status ?? '').toLowerCase() === 'completed'
-        || Number(milestone.status) === 10,
+      projectMilestoneDone(milestone),
     );
+    const status = effectiveProjectStatus(project, plan, signoff);
     ok(res, {
-      project,
+      project: { ...project, status, effective_status: status },
       plan,
       signoff,
       final_step: finalStep,
@@ -476,7 +516,7 @@ customerRouter.get('/projects/:id/materials', async (req: AuthRequest, res, next
   try {
     await assertProjectBelongs(req.params.id, req.user!.id);
     const planApproved = await one<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment')`,
+      `SELECT COUNT(*) AS n FROM order_plan WHERE order_id = :id AND customer_status IN ('approved', 'awaiting_payment', 'paid')`,
       { id: req.params.id },
     );
     const locked = !planApproved || Number(planApproved.n) === 0;
@@ -502,16 +542,25 @@ customerRouter.post('/projects/:id/materials/payment-order',
     );
     if (rows.length !== material_ids.length) throw new ApiError(400, 'One or more materials not found');
     const subtotal = rows.reduce((sum, row) => sum + Number(row.total), 0);
-    const settlement = calculateMaterialSettlement(subtotal);
+    const settings = await one<any>(
+      `SELECT platform_fee_percentage, gst_percentage FROM settings ORDER BY id ASC LIMIT 1`,
+    );
+    const tax = calculateTax({
+      baseAmount: subtotal,
+      platformFeePct: Number(settings?.platform_fee_percentage ?? 5),
+      gstPct: Number(settings?.gst_percentage ?? 18),
+    });
     // Mark items awaiting_payment optimistically — payment verification flips to PAID.
     await exec(
       `UPDATE materials SET status = 'AWAITING_PAYMENT' WHERE material_id IN (:ids)`,
       { ids: material_ids } as any,
     );
     ok(res, {
-      subtotal: settlement.baseAmount,
-      total: settlement.customerTotal,
-      customer_platform_fee: settlement.customerPlatformFee,
+      subtotal: tax.baseAmount,
+      total: tax.customerTotal,
+      customer_platform_fee: tax.platformFee,
+      platform_fee: tax.platformFee,
+      gst: tax.gstOnPlatformFee,
       material_ids,
     });
   } catch (err) { next(err); }
