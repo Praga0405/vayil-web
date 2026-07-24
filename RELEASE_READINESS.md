@@ -139,6 +139,34 @@ backend lands them, remove the offline branch in each spot.
   if the customer materials page displays platform fee/GST, the pay page and
   backend payment intent must carry forward the same fee-inclusive total.
 
+## v4.5.106 explicit completion + list identity gate
+
+- [ ] On an order with incomplete milestones, confirm Vendor Studio does not
+  display `Mark Project Completed` and the API returns `409` if called directly.
+- [ ] Complete every milestone while leaving part of the quote/milestone amount
+  unpaid. Confirm both APIs return `awaiting_payment` and the completion API
+  returns `409`.
+- [ ] Complete all quote/milestone payments. Confirm customer and vendor reads
+  return `ready_to_complete` / `READY_TO_COMPLETE`.
+- [ ] Confirm Vendor Studio displays `Mark Project Completed` only at this
+  stage.
+- [ ] Confirm the completion endpoint does not update any unfinished
+  `order_plan` row and does not count material payment intents toward the quote
+  balance.
+- [ ] After vendor confirmation, confirm `orders.status` is
+  `awaiting_customer_close`, both list/detail screens display `Completed`, and
+  customer `Rate & close project` is enabled.
+- [ ] Confirm customer rating creates/updates the signoff with
+  `release_status = awaiting_release` and does not release funds.
+- [ ] Confirm only the authenticated admin release flow changes
+  `release_status` to `released`.
+- [ ] Confirm `/account/enquiries` and `/account/projects` display vendor
+  company, selected service name, and selected service image.
+- [ ] Confirm `/vendor-studio/enquiries` displays the enquiry ID on every card.
+- [ ] v4.5.105's expectation that the project completion action bulk-completes
+  milestones is superseded. v4.5.106 requires milestones to be completed
+  independently before overall completion confirmation.
+
 ## Observability
 
 - [ ] Wire Sentry on web (DSN as env var) — capture page errors + failed

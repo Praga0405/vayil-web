@@ -4,7 +4,7 @@ This file is the single checklist for moving from dev/demo to
 production. Every flag below is a deliberate dev-mode convenience —
 **leaving any of them on in production is a bug**.
 
-Last updated: 2026-07-24 · v4.5.105.
+Last updated: 2026-07-24 · v4.5.106.
 
 ## ⚠ Critical — must be flipped
 
@@ -63,6 +63,26 @@ Before promoting the July 24 payment/status fix:
 - [ ] Treat the v4.5.103 material-subtotal-only customer checkout note as
   superseded for web: the pay page must carry forward any fee/GST already
   displayed on the material summary screen.
+
+### v4.5.106 explicit project completion and list identity gate
+
+Before promoting the corrective July 24 completion/list release:
+
+- [ ] Confirm unfinished milestones cannot be bulk-completed by
+  `POST /vendors/projects/:id/complete`.
+- [ ] Confirm all milestones complete plus an unpaid quote balance returns
+  `AWAITING_PAYMENT`, not `READY_TO_COMPLETE`.
+- [ ] Confirm successful quote/advance plus milestone payment base totals
+  satisfy the quote total without counting material payments.
+- [ ] Confirm Vendor Studio shows `Mark Project Completed` only when all
+  milestones and quote payments are complete.
+- [ ] After vendor confirmation, confirm both customer and vendor list/detail
+  screens display `Completed` while the internal order status is
+  `awaiting_customer_close`.
+- [ ] Confirm customer rating/close remains available and admin release remains
+  independently protected.
+- [ ] Confirm customer enquiry/project cards include company, service name, and
+  service image; confirm vendor enquiry cards include enquiry ID.
 
 
 | Env var | Where | Demo value | Production value | What it does |

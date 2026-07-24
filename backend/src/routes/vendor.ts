@@ -40,12 +40,26 @@ function finalStepState(step: any): 'COMPLETED' | 'REJECTED' | null {
   return null;
 }
 
-function vendorProjectPlanStatus(rawStatus: unknown, releaseStatus: unknown, totalCount: unknown, pendingMilestones: unknown, hasRevision: unknown, pendingCustomer: unknown) {
+function vendorProjectPlanStatus(
+  rawStatus: unknown,
+  releaseStatus: unknown,
+  totalCount: unknown,
+  pendingMilestones: unknown,
+  hasRevision: unknown,
+  pendingCustomer: unknown,
+  quoteTotal: unknown,
+  quotePaid: unknown,
+) {
   const raw = lowerStatus(rawStatus);
   const release = lowerStatus(releaseStatus);
   if (raw === 'completed' || release === 'released') return 'COMPLETED';
   if (release === 'awaiting_release' || raw === 'awaiting_release') return 'AWAITING_RELEASE';
-  if (Number(totalCount ?? 0) > 0 && Number(pendingMilestones ?? 0) === 0) return 'AWAITING_CUSTOMER_CLOSE';
+  if (raw === 'awaiting_customer_close') return 'COMPLETED';
+  if (Number(totalCount ?? 0) > 0 && Number(pendingMilestones ?? 0) === 0) {
+    const total = Number(quoteTotal ?? 0);
+    const paid = Number(quotePaid ?? 0);
+    return total > 0 && paid + 0.01 >= total ? 'READY_TO_COMPLETE' : 'AWAITING_PAYMENT';
+  }
   if (Number(hasRevision ?? 0) > 0) return 'REVISION_REQUESTED';
   if (Number(pendingCustomer ?? 0) > 0) return 'SUBMITTED';
   if (Number(totalCount ?? 0) > 0) return 'APPROVED';
@@ -401,11 +415,16 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
               COALESCE(esc.escrow_total, 0) AS escrow_total,
               COALESCE(esc.escrow_held,   0) AS escrow_held,
               COALESCE(esc.escrow_released, 0) AS escrow_released,
+              COALESCE(esc.quote_paid, 0) AS quote_paid,
               s.release_status,
               CASE
                 WHEN LOWER(COALESCE(o.status, '')) = 'completed' OR LOWER(COALESCE(s.release_status, '')) = 'released' THEN 'COMPLETED'
                 WHEN LOWER(COALESCE(o.status, '')) = 'awaiting_release' OR LOWER(COALESCE(s.release_status, '')) = 'awaiting_release' THEN 'AWAITING_RELEASE'
-                WHEN plan.total_count > 0 AND plan.pending_milestone_count = 0 THEN 'AWAITING_CUSTOMER_CLOSE'
+                WHEN LOWER(COALESCE(o.status, '')) = 'awaiting_customer_close' THEN 'COMPLETED'
+                WHEN plan.total_count > 0 AND plan.pending_milestone_count = 0
+                     AND COALESCE(esc.quote_paid, 0) + 0.01 >= COALESCE(o.amount, o.order_amount, 0)
+                  THEN 'READY_TO_COMPLETE'
+                WHEN plan.total_count > 0 AND plan.pending_milestone_count = 0 THEN 'AWAITING_PAYMENT'
                 WHEN plan.has_revision    > 0 THEN 'REVISION_REQUESTED'
                 WHEN plan.pending_count   > 0 THEN 'SUBMITTED'
                 WHEN plan.total_count     > 0 THEN 'APPROVED'
@@ -417,7 +436,12 @@ vendorRouter.get('/projects', async (req: AuthRequest, res, next) => {
            SELECT order_id,
                   SUM(COALESCE(base_amount, amount)) AS escrow_total,
                   SUM(CASE WHEN status = 'escrow_held'   THEN COALESCE(base_amount, amount) ELSE 0 END) AS escrow_held,
-                  SUM(CASE WHEN status = 'released'      THEN COALESCE(base_amount, amount) ELSE 0 END) AS escrow_released
+                  SUM(CASE WHEN status = 'released'      THEN COALESCE(base_amount, amount) ELSE 0 END) AS escrow_released,
+                  SUM(CASE
+                        WHEN LOWER(COALESCE(purpose, 'quote')) <> 'materials'
+                        THEN COALESCE(base_amount, amount)
+                        ELSE 0
+                      END) AS quote_paid
              FROM payment_intents
             WHERE status IN ('escrow_held','released')
             GROUP BY order_id
@@ -488,9 +512,17 @@ vendorRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
       pendingMilestones,
       plan.filter((milestone: any) => lowerStatus(milestone.customer_status) === 'revision_requested').length,
       plan.filter((milestone: any) => lowerStatus(milestone.customer_status) === 'pending').length,
+      project?.amount ?? project?.order_amount,
+      payment_summary.initial_payment + payment_summary.milestone_payments,
     );
     ok(res, {
-      project: { ...project, plan_status_rollup: planStatusRollup }, plan, payment_summary,
+      project: {
+        ...project,
+        plan_status_rollup: planStatusRollup,
+        workflow_status: lowerStatus(project?.status) || 'active',
+      },
+      plan,
+      payment_summary,
       escrow: { held: escrow_held, released: escrow_released, total: escrow_held + escrow_released },
     });
   } catch (err) { next(err); }
@@ -722,7 +754,7 @@ vendorRouter.post('/projects/:id/plan/submit', async (req: AuthRequest, res, nex
 
 vendorRouter.post('/projects/:id/complete', async (req: AuthRequest, res, next) => {
   try {
-    const result = await projectSvc.completeProjectMilestones(req.params.id, req.user!.id);
+    const result = await projectSvc.completeProjectMilestones(String(req.params.id), req.user!.id);
     ok(res, result);
   } catch (err) { next(err); }
 });

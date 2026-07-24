@@ -50,6 +50,7 @@ export default function ProjectDetailPage() {
   const [payingMilestone, setPayingMilestone] = useState<number | null>(null)
   const [signoff, setSignoff] = useState<any>(null)
   const [finalStepReady, setFinalStepReady] = useState(false)
+  const [canRateAndCloseApi, setCanRateAndCloseApi] = useState(false)
   const [releaseStatus, setReleaseStatus] = useState<string | null>(null)
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export default function ProjectDetailPage() {
       setPlan(Array.isArray(projectBody.plan) ? projectBody.plan : [])
       setSignoff(projectBody.signoff ?? null)
       setFinalStepReady(Boolean(projectBody.final_step_ready))
+      setCanRateAndCloseApi(Boolean(projectBody.can_rate_and_close))
       setReleaseStatus(projectBody.release_status ?? projectBody.signoff?.release_status ?? null)
       setMaterials(mr?.data?.materials ?? [])
       const all = payr?.data?.payments ?? []
@@ -99,8 +101,8 @@ export default function ProjectDetailPage() {
     : 'SUBMITTED'
   const orderStatus = (order.status || 'active').toString().toUpperCase()
   const customerClosed = Boolean(signoff)
-  const fundsReleased = releaseStatus === 'released' || orderStatus === 'COMPLETED'
-  const canRateAndClose = finalStepReady && !customerClosed
+  const fundsReleased = releaseStatus === 'released'
+  const canRateAndClose = finalStepReady && canRateAndCloseApi && !customerClosed
 
   const payMilestone = async (milestone: any) => {
     const milestoneId = Number(milestone.plan_id)
@@ -157,6 +159,7 @@ export default function ProjectDetailPage() {
       setPlan(Array.isArray(body.plan) ? body.plan : [])
       setSignoff(body.signoff ?? null)
       setFinalStepReady(Boolean(body.final_step_ready))
+      setCanRateAndCloseApi(Boolean(body.can_rate_and_close))
       setReleaseStatus(body.release_status ?? body.signoff?.release_status ?? null)
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to sign off')

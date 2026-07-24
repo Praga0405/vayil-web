@@ -283,25 +283,55 @@ export async function completeMilestone(planId: number | string, vendorId: numbe
 export async function completeProjectMilestones(orderId: number | string, vendorId: number | string) {
   await assertOrderBelongsToVendor(orderId, vendorId);
   const milestoneState = await one<any>(
-    `SELECT COUNT(*) AS total_count
-       FROM order_plan
-      WHERE order_id = :id`,
+    `SELECT o.status,
+            COALESCE(o.amount, o.order_amount, 0) AS quote_total,
+            COUNT(p.plan_id) AS total_count,
+            SUM(CASE
+                  WHEN p.vendor_status = 'completed' OR p.status = 10 THEN 0
+                  ELSE 1
+                END) AS pending_count,
+            COALESCE(pay.quote_paid, 0) AS quote_paid
+       FROM orders o
+       LEFT JOIN order_plan p ON p.order_id = o.order_id
+       LEFT JOIN (
+         SELECT order_id,
+                SUM(CASE
+                      WHEN LOWER(COALESCE(purpose, 'quote')) <> 'materials'
+                      THEN COALESCE(base_amount, amount)
+                      ELSE 0
+                    END) AS quote_paid
+           FROM payment_intents
+          WHERE status IN ('escrow_held', 'released')
+          GROUP BY order_id
+       ) pay ON pay.order_id = o.order_id
+      WHERE o.order_id = :id
+      GROUP BY o.order_id, o.status, o.amount, o.order_amount, pay.quote_paid`,
     { id: orderId },
   );
   if (Number(milestoneState?.total_count ?? 0) === 0) {
     throw new ApiError(409, 'The implementation plan has no milestones to complete');
   }
+  if (Number(milestoneState?.pending_count ?? 0) > 0) {
+    throw new ApiError(409, 'Complete every milestone before marking the project complete');
+  }
+  const quoteTotal = Number(milestoneState?.quote_total ?? 0);
+  const quotePaid = Number(milestoneState?.quote_paid ?? 0);
+  if (quoteTotal <= 0 || quotePaid + 0.01 < quoteTotal) {
+    throw new ApiError(409, 'All quote and milestone payments must be completed first');
+  }
+  if (['awaiting_customer_close', 'awaiting_release', 'completed'].includes(
+    String(milestoneState?.status ?? '').toLowerCase(),
+  )) {
+    return {
+      order_id: Number(orderId),
+      status: 'completed',
+      workflow_status: String(milestoneState.status).toLowerCase(),
+      final_step_ready: true,
+      reused: true,
+    };
+  }
 
   await transaction(async (conn) => {
-    await conn.query(
-      `UPDATE order_plan
-          SET vendor_status = 'completed',
-              status = 10,
-              balance_cost = 0,
-              updated_at = NOW()
-        WHERE order_id = ?`,
-      [orderId],
-    );
     const [stepRows]: any = await conn.query(
       `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 4 LIMIT 1`,
       [orderId],
@@ -330,8 +360,10 @@ export async function completeProjectMilestones(orderId: number | string, vendor
 
   return {
     order_id: Number(orderId),
-    status: 'awaiting_customer_close',
+    status: 'completed',
+    workflow_status: 'awaiting_customer_close',
     final_step_ready: true,
+    reused: false,
   };
 }
 

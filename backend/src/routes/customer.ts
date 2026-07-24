@@ -24,20 +24,30 @@ function projectMilestoneDone(milestone: any): boolean {
     || Number(milestone?.status) === 10;
 }
 
+function projectQuotePaid(project: any): boolean {
+  const total = Number(project?.amount ?? project?.order_amount ?? 0);
+  const paid = Number(project?.paid_quote_amount ?? 0);
+  return total > 0 && paid + 0.01 >= total;
+}
+
 function effectiveProjectStatus(project: any, plan: any[] = [], signoff?: any | null): string {
   const raw = String(project?.status ?? '').toLowerCase();
   if (raw === 'completed' || String(signoff?.release_status ?? '').toLowerCase() === 'released') return 'completed';
-  if (signoff) return 'awaiting_release';
-  if (plan.length > 0 && plan.every(projectMilestoneDone)) return 'awaiting_customer_close';
+  if (signoff || raw === 'awaiting_release') return 'completed';
+  if (raw === 'awaiting_customer_close') return 'completed';
+  if (plan.length > 0 && plan.every(projectMilestoneDone)) {
+    return projectQuotePaid(project) ? 'ready_to_complete' : 'awaiting_payment';
+  }
   return raw || 'active';
 }
 
 function effectiveProjectStatusFromRollup(project: any): string {
   const raw = String(project?.status ?? '').toLowerCase();
   if (raw === 'completed' || String(project?.release_status ?? '').toLowerCase() === 'released') return 'completed';
-  if (project?.signoff_order_id) return 'awaiting_release';
+  if (project?.signoff_order_id || raw === 'awaiting_release') return 'completed';
+  if (raw === 'awaiting_customer_close') return 'completed';
   if (Number(project?.milestone_count ?? 0) > 0 && Number(project?.pending_milestone_count ?? 0) === 0) {
-    return 'awaiting_customer_close';
+    return projectQuotePaid(project) ? 'ready_to_complete' : 'awaiting_payment';
   }
   return raw || 'active';
 }
@@ -108,6 +118,11 @@ customerRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
   try {
     const enquiries = await query<any>(
       `SELECT e.*,
+              COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), 'Vendor') AS company_name,
+              COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
+                       NULLIF(vsl.service_title, ''), NULLIF(vsl.title, ''),
+                       NULLIF(e.category, ''), 'Home Service') AS service_title,
+              COALESCE(NULLIF(vs.service_image, ''), NULLIF(vsl.service_image, ''), '') AS service_image,
               COALESCE(qs.quote_count, 0) AS quote_count,
               COALESCE(qs.rejected_quote_count, 0) AS rejected_quote_count,
               COALESCE(qs.active_quote_count, 0) AS active_quote_count,
@@ -124,6 +139,9 @@ customerRouter.get('/enquiries', async (req: AuthRequest, res, next) => {
               END AS workflow_status,
               CASE WHEN COALESCE(qs.rejected_quote_count, 0) > 0 THEN 1 ELSE 0 END AS had_rejected_quote
          FROM enquiries e
+         LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
+         LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id
+         LEFT JOIN vendor_services vsl ON vsl.id = e.service_id AND vs.vendor_service_id IS NULL
          LEFT JOIN (
            SELECT enquiry_id,
                   COUNT(*) AS quote_count,
@@ -202,7 +220,8 @@ customerRouter.get('/enquiries/:id', async (req: AuthRequest, res, next) => {
               COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), 'Vendor') AS company_name,
               COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
                        NULLIF(vsl.service_title, ''), NULLIF(vsl.title, ''),
-                       NULLIF(e.category, ''), 'Home Service') AS service_title
+                       NULLIF(e.category, ''), 'Home Service') AS service_title,
+              COALESCE(NULLIF(vs.service_image, ''), NULLIF(vsl.service_image, ''), '') AS service_image
          FROM enquiries e
          LEFT JOIN vendors v ON v.vendor_id = e.vendor_id
          LEFT JOIN vendor_services vs ON vs.vendor_service_id = e.service_id
@@ -249,9 +268,12 @@ customerRouter.get('/projects', async (req: AuthRequest, res, next) => {
       `SELECT o.*,
               COALESCE(NULLIF(v.company_name, ''), NULLIF(v.name, ''), 'Vendor') AS company_name,
               COALESCE(NULLIF(vs.service_title, ''), NULLIF(vs.title, ''),
+                       NULLIF(vsl.service_title, ''), NULLIF(vsl.title, ''),
                        NULLIF(e.category, ''), 'Home Service') AS service_title,
+              COALESCE(NULLIF(vs.service_image, ''), NULLIF(vsl.service_image, ''), '') AS service_image,
               e.category,
               COALESCE(pay.paid_base_amount, 0) AS paid_base_amount,
+              COALESCE(pay.paid_quote_amount, 0) AS paid_quote_amount,
               plan.milestone_count,
               plan.pending_milestone_count,
               s.order_id AS signoff_order_id,
@@ -260,8 +282,17 @@ customerRouter.get('/projects', async (req: AuthRequest, res, next) => {
          LEFT JOIN enquiries e ON e.enquiry_id = o.enquiry_id
          LEFT JOIN vendors v ON v.vendor_id = o.vendor_id
          LEFT JOIN vendor_services vs ON vs.vendor_service_id = COALESCE(o.service_id, e.service_id)
+         LEFT JOIN vendor_services vsl
+           ON vsl.id = COALESCE(o.service_id, e.service_id)
+          AND vs.vendor_service_id IS NULL
          LEFT JOIN (
-           SELECT order_id, SUM(COALESCE(base_amount, amount)) AS paid_base_amount
+           SELECT order_id,
+                  SUM(COALESCE(base_amount, amount)) AS paid_base_amount,
+                  SUM(CASE
+                        WHEN LOWER(COALESCE(purpose, 'quote')) <> 'materials'
+                        THEN COALESCE(base_amount, amount)
+                        ELSE 0
+                      END) AS paid_quote_amount
              FROM payment_intents
             WHERE status IN ('escrow_held', 'released')
             GROUP BY order_id
@@ -294,7 +325,7 @@ customerRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
       { id: req.params.id, customerId: req.user!.id },
     );
     if (!project) throw new ApiError(404, 'Project not found');
-    const [plan, signoff, finalStep] = await Promise.all([
+    const [plan, signoff, finalStep, paymentRollup] = await Promise.all([
       query<any>('SELECT * FROM order_plan WHERE order_id = :id ORDER BY plan_id ASC', { id: req.params.id }),
       one<any>('SELECT * FROM signoffs WHERE order_id = :id LIMIT 1', { id: req.params.id }),
       one<any>(
@@ -303,18 +334,43 @@ customerRouter.get('/projects/:id', async (req: AuthRequest, res, next) => {
           ORDER BY id DESC LIMIT 1`,
         { id: req.params.id },
       ),
+      one<any>(
+        `SELECT COALESCE(SUM(CASE
+                  WHEN LOWER(COALESCE(purpose, 'quote')) <> 'materials'
+                  THEN COALESCE(base_amount, amount)
+                  ELSE 0
+                END), 0) AS paid_quote_amount
+           FROM payment_intents
+          WHERE order_id = :id AND status IN ('escrow_held', 'released')`,
+        { id: req.params.id },
+      ),
     ]);
+    const projectWithPayments = {
+      ...project,
+      paid_quote_amount: Number(paymentRollup?.paid_quote_amount ?? 0),
+    };
     const finalStepReady = plan.length > 0 && plan.every((milestone: any) =>
       projectMilestoneDone(milestone),
     );
-    const status = effectiveProjectStatus(project, plan, signoff);
+    const workflowStatus = String(project.status ?? 'active').toLowerCase();
+    const status = effectiveProjectStatus(projectWithPayments, plan, signoff);
+    const vendorConfirmedCompletion = [
+      'awaiting_customer_close',
+      'awaiting_release',
+      'completed',
+    ].includes(workflowStatus);
     ok(res, {
-      project: { ...project, status, effective_status: status },
+      project: {
+        ...projectWithPayments,
+        status,
+        effective_status: status,
+        workflow_status: workflowStatus,
+      },
       plan,
       signoff,
       final_step: finalStep,
       final_step_ready: finalStepReady,
-      can_rate_and_close: finalStepReady && !signoff,
+      can_rate_and_close: finalStepReady && vendorConfirmedCompletion && !signoff,
       release_status: signoff?.release_status ?? null,
     });
   } catch (err) { next(err); }
@@ -574,7 +630,7 @@ customerRouter.post('/projects/:id/signoff', async (req: AuthRequest, res, next)
       comment: z.string().max(2000).optional(),
     }).parse(req.body);
     const result = await projectSvc.closeProjectByCustomer(
-      req.params.id,
+      String(req.params.id),
       req.user!.id,
       rating,
       comment,

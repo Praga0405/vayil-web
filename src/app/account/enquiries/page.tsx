@@ -7,6 +7,7 @@ import { formatRelative } from '@/lib/utils'
 import { ClipboardList, ChevronRight, Search } from 'lucide-react'
 import { PageHero } from '@/components/shared/PageLayout'
 import { normalizeCustomerEnquiry } from '@/lib/adapters/customer-enquiry'
+import { serviceImageUrls } from '@/lib/api/compat'
 
 export default function EnquiriesPage() {
   const [enquiries, setEnquiries] = useState<any[]>([])
@@ -62,18 +63,22 @@ export default function EnquiriesPage() {
         <div className="space-y-3">
           {filtered.map((e: any) => {
             const eid = e.id || e.enquiry_id
+            const serviceImage = serviceImageUrls(e)[0]
             return (
               <Link key={eid} href={`/account/enquiries/${eid}`}
                 className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-4 hover:shadow-sm hover:border-orange/30 transition">
-                <div className="w-12 h-12 rounded-2xl bg-orange/10 flex items-center justify-center shrink-0">
-                  <ClipboardList className="w-6 h-6 text-orange" />
+                <div className="w-14 h-14 rounded-xl bg-orange/10 overflow-hidden flex items-center justify-center shrink-0">
+                  {serviceImage
+                    ? <img src={serviceImage} alt={e.service_title || 'Selected service'} className="w-full h-full object-cover" />
+                    : <ClipboardList className="w-6 h-6 text-orange" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-navy text-sm truncate">
-                    {e.company_name || e.vendor_name || e.service_title || `Enquiry #${eid}`}
+                    {e.company_name || e.vendor_name || 'Vendor'}
                   </p>
+                  <p className="text-sm text-navy/80 truncate">{e.service_title || 'Home Service'}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {e.category_name || e.service_category || 'Home Service'} · {formatRelative(e.created_at)}
+                    Enquiry #{eid} · {formatRelative(e.created_at)}
                   </p>
                   {e.had_rejected_quote && (
                     <p className="text-xs font-medium text-red-600 mt-1">
