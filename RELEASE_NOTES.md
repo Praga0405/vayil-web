@@ -1,5 +1,134 @@
 # Release Notes
 
+## v4.5.105 - Material checkout total and project completion status parity (2026-07-24)
+
+### Scope
+
+This release addresses the July 24 customer/vendor project-payment feedback for order/project `510001`:
+
+1. Customer material checkout showed `Subtotal + Platform Fee + GST` on the material selection screen, but the next payment page and backend payment intent still used material subtotal only.
+2. Fully paid projects with all milestones completed still displayed raw order statuses such as `active` or `APPROVED`.
+3. Vendor Studio did not provide a project-level action to mark all milestones complete and move the project into the customer close/rating step.
+
+### Material payment total carry-forward
+
+#### Issue
+
+`/account/projects/:id/materials` used the standard `calculateFees(...)` helper, so a ₹30 material subtotal displayed:
+
+- Subtotal: `₹30`
+- Platform Fee (5%): `₹2`
+- GST (18%): `₹0`
+- Total Payable: `₹32`
+
+However `/account/projects/:id/materials/pay` still used the older `calculateMaterialFees(...)` helper from the previous demo-feedback release. That helper intentionally charged the customer only the material subtotal. The frontend therefore started Razorpay for `₹30`, and the backend material expected-amount logic also validated `₹30`.
+
+#### Implementation
+
+- Updated `src/app/account/projects/[id]/materials/pay/page.tsx` to use the same `calculateFees(...)` plus `paymentFeeSettings(...)` flow as the material selection screen.
+- The payment page now displays:
+  - Materials subtotal
+  - Platform Fee
+  - GST
+  - Total Payable
+- The Razorpay create-order request now sends the same total shown to the customer.
+- Updated both backend payment paths that validate material payment amounts:
+  - `backend/src/routes/payments.ts`
+  - `backend/src/services/paymentService.ts`
+- Material payment expected amount is now recomputed with `calculateTax(...)`, matching quote and milestone payments.
+- `customer_platform_fee` is returned for material payment intents as well, so the response reflects the customer-visible fee instead of always returning `0`.
+- Updated the customer material payment-order shortcut in `backend/src/routes/customer.ts` to return the same subtotal/platform/GST/total structure.
+
+#### Expected behavior
+
+For the example raised by the team:
+
+- Material subtotal: `₹30`
+- Platform fee: `₹2`
+- GST: `₹0`
+- Razorpay/payment page total: `₹32`
+- Backend accepted payment-intent amount: `₹32`
+
+The amount shown on the selection page, payment page, Razorpay order, and backend validation now stays consistent.
+
+### Project status rollup
+
+#### Issue
+
+Project detail/list pages were reading the raw `orders.status` value. For older/demo rows, the raw value can remain `active` even when:
+
+- all milestone rows are completed,
+- the payment summary shows `100% paid`,
+- remaining balance is `₹0`,
+- or a customer signoff exists.
+
+That caused completed or ready-to-close projects to remain under Active on both customer and vendor screens.
+
+#### Implementation
+
+- Added customer-side project status projection in `backend/src/routes/customer.ts`.
+- `GET /customers/projects` now joins milestone rollups and signoff status, then returns `status` plus `effective_status`.
+- `GET /customers/projects/:id` now derives `project.status` from the current plan/signoff state.
+- Status precedence:
+  - released signoff or raw completed status -> `completed`
+  - existing signoff awaiting admin release -> `awaiting_release`
+  - all milestones completed and no signoff -> `awaiting_customer_close`
+  - otherwise preserve raw order status or default `active`
+- Material listing lock logic now treats `customer_status = 'paid'` as an approved plan state, so paid/completed plan rows do not accidentally lock material payment flows.
+
+### Vendor project completion
+
+#### Issue
+
+Vendor Studio only had per-milestone completion. If the vendor had completed the work but needed to move the overall project into the customer close/rating step, there was no single project-level action.
+
+#### Implementation
+
+- Added `projectService.completeProjectMilestones(orderId, vendorId)`.
+- Added `POST /vendors/projects/:id/complete`.
+- The endpoint:
+  - verifies the order belongs to the vendor,
+  - requires at least one milestone,
+  - marks all `order_plan` rows as completed,
+  - sets `status = 10` and `balance_cost = 0`,
+  - updates or inserts the canonical `order_step_logs` step `4`,
+  - sets the order status to `awaiting_customer_close`.
+- Added `vendorApi.completeProject(...)`.
+- Added a Vendor Studio job detail button, `Mark Project Completed`, shown only when the job has milestones that are not all completed.
+- After success, the page refreshes and the customer can use `Rate & close project`.
+
+### Vendor status display
+
+#### Issue
+
+Vendor project list/detail status rollups collapsed completed work back to `APPROVED`, because they only checked customer plan approval and ignored completed milestone/signoff state.
+
+#### Implementation
+
+- Updated vendor project list SQL rollup to return:
+  - `COMPLETED`
+  - `AWAITING_RELEASE`
+  - `AWAITING_CUSTOMER_CLOSE`
+  - `REVISION_REQUESTED`
+  - `SUBMITTED`
+  - `APPROVED`
+  - `NOT_STARTED`
+- Updated vendor project detail to compute the same lifecycle status from the loaded plan rows.
+- Expanded the shared `MockJob.plan_status` type so the existing `StatusBadge` can render the new lifecycle states without type drift.
+
+### Impact
+
+- Customer material payment amount mismatch is fixed end to end.
+- Backend no longer rejects the fee-inclusive material amount as an amount mismatch.
+- Fully completed milestone plans no longer appear as plain `active`/`APPROVED`.
+- Vendor can move a project into customer close/rating without manually completing each milestone one-by-one.
+- The previous v4.5.103 material-fee readiness expectation is superseded for the customer web material checkout by this release: the web now carries forward the customer-visible platform fee and GST when the summary displays those charges.
+
+### Verification notes
+
+- Local backend build could not be completed in this checkout because the `node_modules` symlink points to the older `work/vayil-web/node_modules` path and no local `tsc` binary is available.
+- Use the Vercel/Git deployment build as the authoritative compile check for this release, or reinstall dependencies locally before running `npm run build`.
+
 ## v4.5.104 - Firebase notifications and milestone-balance calculation parity (2026-07-23)
 
 ### Scope

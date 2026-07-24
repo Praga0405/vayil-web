@@ -4,7 +4,7 @@ This file is the single checklist for moving from dev/demo to
 production. Every flag below is a deliberate dev-mode convenience —
 **leaving any of them on in production is a bug**.
 
-Last updated: 2026-07-23 · v4.5.104.
+Last updated: 2026-07-24 · v4.5.105.
 
 ## ⚠ Critical — must be flipped
 
@@ -44,6 +44,25 @@ Before promoting the July 23 notification/milestone fix:
   scenario.
 - [ ] Confirm `/customer/enquiryList` stays `Ongoing` after plan/final-step
   acceptance until the actual completion status is reached.
+
+### v4.5.105 material checkout and project-completion gate
+
+Before promoting the July 24 payment/status fix:
+
+- [ ] Verify customer material selection and material payment pages show the
+  same subtotal, platform fee, GST, and total payable.
+- [ ] Confirm material payment create-order accepts the fee-inclusive customer
+  total and stores the material subtotal as `base_amount`.
+- [ ] Confirm customer project detail/list derive `awaiting_customer_close`
+  once all milestones are completed and before customer rating/signoff.
+- [ ] Confirm vendor project detail/list derive `AWAITING_CUSTOMER_CLOSE`,
+  `AWAITING_RELEASE`, or `COMPLETED` instead of falling back to `APPROVED`.
+- [ ] Use Vendor Studio `Mark Project Completed` on a multi-milestone order and
+  confirm it marks all milestones complete, writes order step 4, and unlocks
+  customer `Rate & close project`.
+- [ ] Treat the v4.5.103 material-subtotal-only customer checkout note as
+  superseded for web: the pay page must carry forward any fee/GST already
+  displayed on the material summary screen.
 
 
 | Env var | Where | Demo value | Production value | What it does |

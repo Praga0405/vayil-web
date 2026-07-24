@@ -1,5 +1,5 @@
 'use client'
-import React from 'react'
+import React, { useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useLiveJob } from '@/hooks/useVendorStudio'
@@ -7,12 +7,15 @@ import { Button, StatusBadge, PageLoader } from '@/components/ui'
 import { PageHero, PageSection, TwoColumn, StatGrid } from '@/components/shared/PageLayout'
 import { formatCurrency } from '@/lib/utils'
 import { FileText, Package, Wallet, ChevronRight, Briefcase, CheckCircle2, Clock, IndianRupee } from 'lucide-react'
+import { vendorApi } from '@/lib/api/client'
+import toast from 'react-hot-toast'
 
 export default function VendorJobDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id ?? ""
   const router = useRouter()
   const { data: job, loading } = useLiveJob(id)
+  const [completingProject, setCompletingProject] = useState(false)
 
   if (loading) return <PageLoader />
   if (!job)    return <div className="text-center py-20 text-gray-500">Job not found</div>
@@ -21,6 +24,21 @@ export default function VendorJobDetailPage() {
   const unpaidMilestones = job.milestones.filter(m => m.status === 'PENDING' || m.status === 'IN_PROGRESS')
   const unpaidMaterials  = job.materials.filter(m => m.status !== 'PAID')
   const doneMilestones   = job.milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID').length
+  const canMarkProjectComplete = job.milestones.length > 0 && doneMilestones < job.milestones.length
+
+  const markProjectComplete = async () => {
+    setCompletingProject(true)
+    try {
+      await vendorApi.completeProject(id)
+      toast.success('Project marked complete. Customer can now rate and close it.')
+      router.refresh()
+      window.location.reload()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to mark project complete')
+    } finally {
+      setCompletingProject(false)
+    }
+  }
 
   return (
     <div className="space-y-6 pb-10">
@@ -32,6 +50,11 @@ export default function VendorJobDetailPage() {
         actions={
           <>
             <StatusBadge status={job.plan_status} />
+            {canMarkProjectComplete && (
+              <Button variant="outline" loading={completingProject} onClick={markProjectComplete}>
+                <CheckCircle2 className="w-4 h-4" /> Mark Project Completed
+              </Button>
+            )}
             {job.paid < job.total && unpaidMilestones.length + unpaidMaterials.length > 0 && (
               <Button onClick={() => router.push(`/vendor-studio/jobs/${id}/ask-payment`)}>
                 <Wallet className="w-4 h-4" /> Request Payment

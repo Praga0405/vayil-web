@@ -280,6 +280,61 @@ export async function completeMilestone(planId: number | string, vendorId: numbe
   };
 }
 
+export async function completeProjectMilestones(orderId: number | string, vendorId: number | string) {
+  await assertOrderBelongsToVendor(orderId, vendorId);
+  const milestoneState = await one<any>(
+    `SELECT COUNT(*) AS total_count
+       FROM order_plan
+      WHERE order_id = :id`,
+    { id: orderId },
+  );
+  if (Number(milestoneState?.total_count ?? 0) === 0) {
+    throw new ApiError(409, 'The implementation plan has no milestones to complete');
+  }
+
+  await transaction(async (conn) => {
+    await conn.query(
+      `UPDATE order_plan
+          SET vendor_status = 'completed',
+              status = 10,
+              balance_cost = 0,
+              updated_at = NOW()
+        WHERE order_id = ?`,
+      [orderId],
+    );
+    const [stepRows]: any = await conn.query(
+      `SELECT id FROM order_step_logs WHERE order_id = ? AND step = 4 LIMIT 1`,
+      [orderId],
+    );
+    if (Array.isArray(stepRows) && stepRows.length) {
+      await conn.query(
+        `UPDATE order_step_logs
+            SET step_status = '1', performed_by = 'VENDOR',
+                performed_by_id = ?, remarks = 'All milestones completed'
+          WHERE id = ?`,
+        [vendorId, stepRows[0].id],
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO order_step_logs
+           (order_id, step, step_status, performed_by, performed_by_id, remarks)
+         VALUES (?, 4, '1', 'VENDOR', ?, 'All milestones completed')`,
+        [orderId, vendorId],
+      );
+    }
+    await conn.query(
+      `UPDATE orders SET status = 'awaiting_customer_close' WHERE order_id = ?`,
+      [orderId],
+    );
+  });
+
+  return {
+    order_id: Number(orderId),
+    status: 'awaiting_customer_close',
+    final_step_ready: true,
+  };
+}
+
 export async function requestMilestonePayment(planId: number | string, vendorId: number | string) {
   const owner = await one<any>(
     `SELECT o.vendor_id, p.amount FROM order_plan p JOIN orders o ON o.order_id = p.order_id
