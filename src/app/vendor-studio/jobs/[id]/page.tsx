@@ -24,7 +24,11 @@ export default function VendorJobDetailPage() {
   const unpaidMilestones = job.milestones.filter(m => m.status === 'PENDING' || m.status === 'IN_PROGRESS')
   const unpaidMaterials  = job.materials.filter(m => m.status !== 'PAID')
   const doneMilestones   = job.milestones.filter(m => m.status === 'COMPLETED' || m.status === 'PAID').length
-  const canMarkProjectComplete = job.milestones.length > 0 && doneMilestones < job.milestones.length
+  const canMarkProjectComplete =
+    job.milestones.length > 0
+    && doneMilestones === job.milestones.length
+    && job.pending <= 0.01
+    && !['COMPLETED', 'AWAITING_RELEASE'].includes(job.plan_status)
 
   const markProjectComplete = async () => {
     setCompletingProject(true)
@@ -51,7 +55,7 @@ export default function VendorJobDetailPage() {
           <>
             <StatusBadge status={job.plan_status} />
             {canMarkProjectComplete && (
-              <Button variant="outline" loading={completingProject} onClick={markProjectComplete}>
+              <Button loading={completingProject} onClick={markProjectComplete}>
                 <CheckCircle2 className="w-4 h-4" /> Mark Project Completed
               </Button>
             )}

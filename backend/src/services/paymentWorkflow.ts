@@ -8,6 +8,7 @@ interface PaymentIntentRow {
   order_id?: number | null;
   enquiry_id?: number | null;
   quotation_id?: number | null;
+  milestone_id?: number | null;
   base_amount?: number | string | null;
   amount: number | string;
   purpose: 'quote' | 'milestone' | 'materials';

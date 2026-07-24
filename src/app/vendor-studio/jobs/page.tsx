@@ -12,12 +12,12 @@ export default function VendorJobsListPage() {
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-10">
       <PageHero
-        title="Ongoing Jobs"
-        subtitle={`${jobs.length} active project${jobs.length !== 1 ? 's' : ''} — plans, materials, and payment requests.`}
+        title="Jobs"
+        subtitle={`${jobs.length} project${jobs.length !== 1 ? 's' : ''} — active work, completed jobs, materials, and payments.`}
       />
 
       {loading ? <PageLoader /> : jobs.length === 0 ? (
-        <EmptyState icon={Briefcase} title="No ongoing jobs"
+        <EmptyState icon={Briefcase} title="No jobs"
           description="Accepted enquiries with paid advance show up here." />
       ) : (
         <div className="space-y-3">

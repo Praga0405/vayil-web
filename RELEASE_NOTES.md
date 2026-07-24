@@ -1,5 +1,203 @@
 # Release Notes
 
+## v4.5.106 - Explicit project completion and enquiry/project list identity parity (2026-07-24)
+
+### Scope
+
+This corrective release addresses two gaps reported after v4.5.105:
+
+1. A fully paid project with all milestones completed could still appear as
+   `Active`/`APPROVED`, and Vendor Studio did not show the project completion
+   action at the point where the vendor actually needed it.
+2. Customer enquiry/project cards did not consistently identify the vendor and
+   selected service, while Vendor Studio enquiry cards omitted the enquiry ID.
+
+### Root cause of the missed completion flow
+
+The v4.5.105 UI condition for `Mark Project Completed` was inverted. It showed
+the button only while `doneMilestones < totalMilestones`. Once every milestone
+was completed, the condition became false and the button disappeared.
+
+The v4.5.105 backend completion endpoint also marked every milestone completed
+itself. That combined two separate business events:
+
+- completing individual milestone work;
+- confirming that the overall project is complete.
+
+Finally, project status projection looked at milestone completion but did not
+require the quote/milestone payment balance to be fully paid. This made the
+state ambiguous and allowed an old raw `orders.status = active` value to remain
+visible in some list/detail paths.
+
+### Corrected project state flow
+
+The web workflow now uses the following sequence:
+
+1. Vendor completes every milestone.
+2. Customer completes the quote/advance and milestone payments. Material
+   payments remain separately accounted for and do not inflate the quote-paid
+   check.
+3. Both customer and vendor APIs project the project as
+   `READY_TO_COMPLETE`.
+4. Vendor Studio displays `Mark Project Completed`.
+5. The vendor confirms completion through
+   `POST /vendors/projects/:id/complete`.
+6. The order's internal workflow status becomes
+   `awaiting_customer_close`, while customer/vendor list and detail screens
+   display `Completed`.
+7. The customer can rate and close the project.
+8. Fund release remains a separate protected admin action. A displayed
+   `Completed` project is not treated as funds released unless
+   `signoffs.release_status = released`.
+
+### Completion endpoint hardening
+
+- `projectService.completeProjectMilestones(...)` no longer bulk-completes
+  unfinished milestone rows.
+- The endpoint now verifies:
+  - the order belongs to the authenticated vendor;
+  - at least one milestone exists;
+  - every milestone is already completed;
+  - successful quote/advance plus milestone payment base amounts cover the
+    order quote total;
+  - material payment values are excluded from the quote-paid calculation.
+- Existing `awaiting_customer_close`, `awaiting_release`, and `completed`
+  orders return an idempotent reused response instead of writing duplicate
+  workflow state.
+- The canonical order step `4` is updated/inserted only after all validations
+  pass.
+
+### Customer status and close-action behavior
+
+- `GET /customers/projects` now derives completion readiness from:
+  - milestone count;
+  - incomplete milestone count;
+  - successful non-material payment base total;
+  - raw workflow status;
+  - signoff/release state.
+- `GET /customers/projects/:id` returns:
+  - the display `status`;
+  - `effective_status`;
+  - the unchanged internal `workflow_status`;
+  - `paid_quote_amount`;
+  - `can_rate_and_close`.
+- Before vendor confirmation, a fully paid/all-milestones-complete project is
+  `ready_to_complete`.
+- After vendor confirmation, both customer project detail and list display
+  `completed`.
+- `Rate & close project` unlocks only after vendor completion confirmation.
+- Customer UI no longer treats a display status of `completed` as proof that
+  escrow funds were released. Only `release_status = released` produces the
+  released-funds state.
+
+### Vendor status and action behavior
+
+- Vendor project list/detail status rollups now distinguish:
+  - `AWAITING_PAYMENT`: milestones are complete but quote payments are not;
+  - `READY_TO_COMPLETE`: milestones and quote payments are complete;
+  - `COMPLETED`: vendor completion confirmed/customer close pending;
+  - `AWAITING_RELEASE`: customer closed and admin release is pending;
+  - terminal `COMPLETED`: admin has released funds.
+- The `Mark Project Completed` button is shown only when all milestones are
+  completed, the payment balance is zero, and the project has not already
+  advanced to completion/release.
+- Vendor Studio's list title now covers both active and completed jobs rather
+  than incorrectly labelling every returned row as active.
+
+### Customer enquiry and project cards
+
+`GET /customers/enquiries` and `GET /customers/projects` now join the vendor
+and selected vendor-service rows and return:
+
+- `company_name`;
+- `service_title`;
+- `service_image`.
+
+Both legacy service keys are supported:
+
+- `vendor_services.vendor_service_id`;
+- the mobile-compatible `vendor_services.id` mirror.
+
+The customer enquiry and project list cards now display:
+
+- selected service image, with the existing icon fallback when no valid image
+  URL exists;
+- vendor company name;
+- selected service name;
+- enquiry/project ID;
+- created/relative date and existing status.
+
+### Vendor enquiry ID
+
+Vendor Studio enquiry cards now display `Enquiry #<id>` beside the customer
+name. No extra request is made because the canonical vendor enquiry response
+already includes `enquiry_id`; this was a presentation omission only.
+
+### Impact and compatibility
+
+- Existing order/payment/milestone rows are not bulk-updated by deployment.
+- Existing fully paid/completed-milestone projects automatically appear
+  `Ready to complete` from the read model; the vendor can confirm them without
+  a database backfill.
+- Material purchases do not falsely satisfy the quote payment requirement.
+- Customer rating and admin fund release remain separate, auditable steps.
+- No OTP/authentication behavior changed.
+- No mobile API request fields were changed.
+- v4.5.105's project-completion button condition and bulk milestone-completion
+  behavior are superseded by this release.
+
+### Build validation fixes
+
+Restoring the local dependency toolchain exposed four TypeScript errors that
+the earlier checkout could not report:
+
+- customer signoff and vendor completion route parameters use the Express 5
+  `string | string[]` type and needed explicit string normalization before
+  calling the project service;
+- the canonical `PaymentIntentRow` interface omitted `milestone_id` even
+  though the verified-payment workflow reads it to mark a paid milestone.
+
+The route values are now normalized with `String(req.params.id)`, and
+`milestone_id?: number | null` is part of the payment-intent interface. These
+are type-contract corrections only; they do not change request or response
+payloads.
+
+### Verification requirements
+
+- Use a project with all milestones complete and successful quote/milestone
+  payments equal to or above the quote total.
+- Confirm both list APIs return `ready_to_complete` before vendor confirmation.
+- Confirm Vendor Studio displays `Mark Project Completed`.
+- Confirm the completion request changes the internal workflow to
+  `awaiting_customer_close` and both customer/vendor screens display
+  `Completed`.
+- Confirm customer `Rate & close project` becomes enabled.
+- Confirm rating/close changes release state to `awaiting_release` without
+  releasing escrow.
+- Confirm customer enquiry/project cards show company, service name, and
+  service image, and vendor enquiry cards show the enquiry ID.
+
+### Verification completed before publish
+
+- `git diff --check` passed.
+- `npm run build --workspace backend` passed with TypeScript compilation
+  enabled.
+- `npm run build` passed and generated the production Next.js route bundle,
+  including:
+  - `/account/enquiries`;
+  - `/account/projects`;
+  - `/account/projects/[id]`;
+  - `/vendor-studio/enquiries`;
+  - `/vendor-studio/jobs`;
+  - `/vendor-studio/jobs/[id]`.
+- The first frontend build attempt failed only because the sandbox could not
+  resolve `fonts.googleapis.com`; rerunning with network access completed
+  successfully.
+- Production TiDB row-level verification was not available from the local
+  checkout because `DB_HOST`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` are not
+  present locally. The release-readiness checks above remain required against
+  the deployed environment/order `510001`.
+
 ## v4.5.105 - Material checkout total and project completion status parity (2026-07-24)
 
 ### Scope

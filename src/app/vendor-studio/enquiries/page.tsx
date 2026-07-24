@@ -53,7 +53,10 @@ export default function VendorEnquiriesListPage() {
                 <ClipboardList className="w-6 h-6 text-orange" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-navy text-sm truncate">{e.customer_name}</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <p className="font-semibold text-navy text-sm truncate">{e.customer_name}</p>
+                  <span className="text-xs font-medium text-gray-400">Enquiry #{e.id}</span>
+                </div>
                 <p className="text-xs text-gray-500 truncate">
                   {e.service_title} · {e.location} · {formatRelative(e.created_at)}
                 </p>
